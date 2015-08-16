@@ -29,10 +29,7 @@
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="sar.hpp">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="sardefs.h">
+    <ClInclude Include="sar.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
