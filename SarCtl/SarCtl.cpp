@@ -1,7 +1,7 @@
 #include <iostream>
 #include <windows.h>
 
-#include "sar.h"
+#include <sar.h>
 
 BOOL createEndpoint(
     HANDLE device, DWORD endpointType, DWORD index, DWORD channelCount,
