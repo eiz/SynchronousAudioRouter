@@ -1,0 +1,43 @@
+;
+; SynchronousAudioRouter.inf
+;
+
+[Version]
+Signature="$WINDOWS NT$"
+Class=Media
+ClassGuid={4d36e96c-e325-11ce-bfc1-08002be10318}
+Provider=%Provider%
+DriverVer=0.1
+CatalogFile=SynchronousAudioRouter.cat
+
+[DestinationDirs]
+DefaultDestDir = 12
+
+[DefaultInstall.NTamd64]
+CopyFiles=SAR.CopyFiles
+
+[DefaultInstall.NTamd64.Services]
+AddService=%ServiceName%,,SAR.Service
+
+[SAR.Service]
+DisplayName=%ServiceName%
+Description=%ServiceDesc%
+ServiceBinary=%12%\SynchronousAudioRouter.sys
+ServiceType=1
+StartType=3
+ErrorControl=1
+
+[SAR.CopyFiles]
+SynchronousAudioRouter.sys
+
+[SourceDisksNames]
+1 = %DiskName%,,,""
+
+[SourceDisksFiles]
+SynchronousAudioRouter.sys=1
+
+[Strings]
+ServiceName="SynchronousAudioRouter"
+ServiceDesc="Routes audio between applications."
+Provider="Many Worlds"
+DiskName="SynchronousAudioRouter Source Disk"
