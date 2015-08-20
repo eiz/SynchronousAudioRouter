@@ -211,7 +211,6 @@ NTSTATUS SarIrpDeviceControl(PDEVICE_OBJECT deviceObject, PIRP irp)
     return ntStatus;
 }
 
-
 VOID SarUnload(PDRIVER_OBJECT driverObject)
 {
     UNREFERENCED_PARAMETER(driverObject);
@@ -246,26 +245,20 @@ extern "C" NTSTATUS DriverEntry(
     IN PDRIVER_OBJECT driverObject,
     IN PUNICODE_STRING registryPath)
 {
-    UNREFERENCED_PARAMETER(registryPath);
-
     SarDriverExtension *extension;
-    NTSTATUS status = STATUS_SUCCESS;
+    NTSTATUS status;
 
-    SAR_LOG("SAR is loading 2.");
+    SAR_LOG("SAR is loading.");
+
+    status = IoAllocateDriverObjectExtension(
+        driverObject, DriverEntry, sizeof(SarDriverExtension),
+        (PVOID *)&extension);
 
     if (!NT_SUCCESS(status)) {
         return status;
     }
 
     status = KsInitializeDriver(driverObject, registryPath, &gDeviceDescriptor);
-
-    if (!NT_SUCCESS(status)) {
-        return status;
-    }
-
-    status = IoAllocateDriverObjectExtension(
-        driverObject, DriverEntry, sizeof(SarDriverExtension),
-        (PVOID *)&extension);
 
     if (!NT_SUCCESS(status)) {
         return status;
