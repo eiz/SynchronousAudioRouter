@@ -91,8 +91,8 @@ int main(int argc, char *argv[])
         GENERIC_ALL, 0, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
 
     if (device == INVALID_HANDLE_VALUE) {
-        std::cerr << "Couldn't open SAR device. Error "
-            << std::hex << GetLastError() << std::dec << std::endl;
+        std::cerr << "Couldn't open SAR device: "
+            << GetLastError() << std::endl;
         return 1;
     }
 
@@ -100,8 +100,8 @@ int main(int argc, char *argv[])
 
     if (!createEndpoint(
         device, SAR_ENDPOINT_TYPE_PLAYBACK, 0, 2, L"Music Out (Stereo)")) {
-        std::cerr << "Couldn't create endpoint. Error "
-            << std::hex << GetLastError() << std::dec << std::endl;
+        std::cerr << "Couldn't create endpoint: "
+            << GetLastError() << std::endl;
         return 1;
     }
 

@@ -93,10 +93,22 @@ typedef struct SarMapAudioBufferRequest
 } SarMapAudioBuffersRequest;
 
 #if defined(KERNEL)
-typedef struct SarDeviceExtension
+typedef struct SarDriverExtension
 {
-    PKSDEVICE ksDevice;
+    PDRIVER_DISPATCH ksDispatchCreate;
+    PDRIVER_DISPATCH ksDispatchClose;
+    PDRIVER_DISPATCH ksDispatchCleanup;
+    PDRIVER_DISPATCH ksDispatchDeviceControl;
+    FAST_MUTEX fileContextLock;
+    RTL_GENERIC_TABLE fileContextTable;
 } SarDriverExtension;
+
+typedef struct SarFileContext
+{
+    PFILE_OBJECT fileObject;
+    FAST_MUTEX filterListLock;
+    LIST_ENTRY firstFilter;
+} SarFileContext;
 #endif
 
 #ifdef __cplusplus

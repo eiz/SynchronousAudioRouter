@@ -19,14 +19,17 @@
 
 extern "C" DRIVER_INITIALIZE DriverEntry;
 
+DRIVER_DISPATCH SarIrpCreate;
 DRIVER_DISPATCH SarIrpDeviceControl;
 DRIVER_UNLOAD SarUnload;
 
+#define SAR_TAG '1RAS'
 #define SAR_LOG(...) \
     DbgPrintEx(DPFLTR_DEFAULT_ID, DPFLTR_WARNING_LEVEL, __VA_ARGS__)
 
 #define DEVICE_NT_NAME L"\\Device\\SynchronousAudioRouter"
 #define DEVICE_WIN32_NAME L"\\DosDevices\\SynchronousAudioRouter"
+#define DEVICE_REFERENCE_STRING L"\\{0EB287D4-6C04-4926-AE19-3C066A4C3F3A}"
 
 static NTSTATUS SarKsDeviceAdd(IN PKSDEVICE device);
 
@@ -57,9 +60,12 @@ static NTSTATUS SarKsDeviceAdd(IN PKSDEVICE device)
 {
     NTSTATUS status;
     UNICODE_STRING symLinkName;
+    UNICODE_STRING referenceString;
+
+    RtlInitUnicodeString(&referenceString, DEVICE_REFERENCE_STRING + 1);
 
     status = IoRegisterDeviceInterface(device->PhysicalDeviceObject,
-        &GUID_DEVINTERFACE_SYNCHRONOUSAUDIOROUTER, nullptr, &symLinkName);
+        &GUID_DEVINTERFACE_SYNCHRONOUSAUDIOROUTER, &referenceString, &symLinkName);
 
     if (!NT_SUCCESS(status)) {
         SAR_LOG("Failed to create device interface.");
@@ -109,17 +115,71 @@ static NTSTATUS createEndpoint(SarCreateEndpointRequest *request)
     return STATUS_NOT_IMPLEMENTED;
 }
 
+NTSTATUS SarIrpCreate(PDEVICE_OBJECT deviceObject, PIRP irp)
+{
+    UNICODE_STRING referencePath;
+    PIO_STACK_LOCATION irpStack = IoGetCurrentIrpStackLocation(irp);
+    SarDriverExtension *extension =
+        (SarDriverExtension *)IoGetDriverObjectExtension(
+            deviceObject->DriverObject, DriverEntry);
+    SarFileContext fileContextTemplate;
+    SarFileContext *fileContext;
+    BOOLEAN isNew;
+
+    SAR_LOG("Intercepted KS IRP_MJ_CREATE handler: %wZ",
+        &irpStack->FileObject->FileName);
+    RtlInitUnicodeString(&referencePath, DEVICE_REFERENCE_STRING);
+
+    if (RtlCompareUnicodeString(
+        &irpStack->FileObject->FileName, &referencePath, TRUE) != 0) {
+        return extension->ksDispatchCreate(deviceObject, irp);
+    }
+
+    fileContextTemplate.fileObject = irpStack->FileObject;
+    ExAcquireFastMutex(&extension->fileContextLock);
+    fileContext = (SarFileContext *)RtlInsertElementGenericTable(
+        &extension->fileContextTable, (PVOID)&fileContextTemplate,
+        sizeof(SarFileContext), &isNew);
+    ExReleaseFastMutex(&extension->fileContextLock);
+
+    ASSERT(!isNew);
+
+    if (!fileContext) {
+        return STATUS_INSUFFICIENT_RESOURCES;
+    }
+
+    InitializeListHead(&fileContext->firstFilter);
+    ExInitializeFastMutex(&fileContext->filterListLock);
+    irpStack->FileObject->FsContext2 = fileContext;
+    return STATUS_SUCCESS;
+}
+
 NTSTATUS SarIrpDeviceControl(PDEVICE_OBJECT deviceObject, PIRP irp)
 {
-    UNREFERENCED_PARAMETER(deviceObject);
     PIO_STACK_LOCATION irpStack;
     ULONG ioControlCode;
     NTSTATUS ntStatus = STATUS_NOT_IMPLEMENTED;
+    SarDriverExtension *extension =
+        (SarDriverExtension *)IoGetDriverObjectExtension(
+            deviceObject->DriverObject, DriverEntry);
+    SarFileContext *fileContext;
+    SarFileContext fileContextTemplate;
 
     irpStack = IoGetCurrentIrpStackLocation(irp);
     ioControlCode = irpStack->Parameters.DeviceIoControl.IoControlCode;
+    fileContextTemplate.fileObject = irpStack->FileObject;
 
-    SAR_LOG("(SAR) DeviceIoControl IRP: %d", ioControlCode);
+    ExAcquireFastMutex(&extension->fileContextLock);
+    fileContext = (SarFileContext *)RtlLookupElementGenericTable(
+        &extension->fileContextTable, (PVOID)&fileContextTemplate);
+    ExReleaseFastMutex(&extension->fileContextLock);
+
+    if (!fileContext) {
+        return extension->ksDispatchDeviceControl(deviceObject, irp);
+    }
+
+    SAR_LOG("(SAR) DeviceIoControl IRP: %d context %p",
+        ioControlCode, fileContext);
 
     switch (ioControlCode) {
         case SAR_REQUEST_CREATE_AUDIO_BUFFERS:
@@ -158,12 +218,37 @@ VOID SarUnload(PDRIVER_OBJECT driverObject)
     SAR_LOG("SAR is unloading");
 }
 
+static RTL_GENERIC_COMPARE_RESULTS NTAPI fileContextCompare(
+    PRTL_GENERIC_TABLE table, PVOID lhs, PVOID rhs)
+{
+    UNREFERENCED_PARAMETER(table);
+    SarFileContext *slhs = (SarFileContext *)lhs;
+    SarFileContext *srhs = (SarFileContext *)rhs;
+
+    return slhs->fileObject < srhs->fileObject ? GenericLessThan :
+        slhs->fileObject == srhs->fileObject ? GenericEqual :
+        GenericGreaterThan;
+}
+
+static PVOID NTAPI fileContextAllocate(PRTL_GENERIC_TABLE table, CLONG byteSize)
+{
+    UNREFERENCED_PARAMETER(table);
+    return ExAllocatePoolWithTag(PagedPool, byteSize, SAR_TAG);
+}
+
+static VOID NTAPI fileContextFree(PRTL_GENERIC_TABLE table, PVOID buffer)
+{
+    UNREFERENCED_PARAMETER(table);
+    ExFreePoolWithTag(buffer, SAR_TAG);
+}
+
 extern "C" NTSTATUS DriverEntry(
     IN PDRIVER_OBJECT driverObject,
     IN PUNICODE_STRING registryPath)
 {
     UNREFERENCED_PARAMETER(registryPath);
 
+    SarDriverExtension *extension;
     NTSTATUS status = STATUS_SUCCESS;
 
     SAR_LOG("SAR is loading 2.");
@@ -172,7 +257,36 @@ extern "C" NTSTATUS DriverEntry(
         return status;
     }
 
-    KsInitializeDriver(driverObject, registryPath, &gDeviceDescriptor);
+    status = KsInitializeDriver(driverObject, registryPath, &gDeviceDescriptor);
+
+    if (!NT_SUCCESS(status)) {
+        return status;
+    }
+
+    status = IoAllocateDriverObjectExtension(
+        driverObject, DriverEntry, sizeof(SarDriverExtension),
+        (PVOID *)&extension);
+
+    if (!NT_SUCCESS(status)) {
+        return status;
+    }
+
+    ExInitializeFastMutex(&extension->fileContextLock);
+    RtlInitializeGenericTable(&extension->fileContextTable,
+        fileContextCompare, fileContextAllocate, fileContextFree, nullptr);
+
+    for (int i = 0; i <= IRP_MJ_MAXIMUM_FUNCTION; ++i) {
+        SAR_LOG("KS IRP MajorFunction[%d] = %p",
+            i, driverObject->MajorFunction[i]);
+    }
+
+    extension->ksDispatchCreate = driverObject->MajorFunction[IRP_MJ_CREATE];
+    extension->ksDispatchClose = driverObject->MajorFunction[IRP_MJ_CLOSE];
+    extension->ksDispatchCleanup = driverObject->MajorFunction[IRP_MJ_CLEANUP];
+    extension->ksDispatchDeviceControl =
+        driverObject->MajorFunction[IRP_MJ_DEVICE_CONTROL];
+
+    driverObject->MajorFunction[IRP_MJ_CREATE] = SarIrpCreate;
     driverObject->MajorFunction[IRP_MJ_DEVICE_CONTROL] = SarIrpDeviceControl;
     return STATUS_SUCCESS;
 }
