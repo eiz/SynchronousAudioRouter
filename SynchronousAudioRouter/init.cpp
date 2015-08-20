@@ -1,3 +1,19 @@
+// SynchronousAudioRouter
+// Copyright (C) 2015 Mackenzie Straight
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with SynchronousAudioRouter.  If not, see <http://www.gnu.org/licenses/>.
+
 #define SAR_INIT_GUID
 #include "sar.h"
 
@@ -51,8 +67,14 @@ static NTSTATUS SarKsDeviceAdd(IN PKSDEVICE device)
     }
 
     SAR_LOG("KSDevice was created, dev interface: %wZ", &symLinkName);
+    status = IoSetDeviceInterfaceState(&symLinkName, TRUE);
+
+    if (!NT_SUCCESS(status)) {
+        SAR_LOG("Failed to enable device interface.");
+    }
+
     RtlFreeUnicodeString(&symLinkName);
-    return STATUS_SUCCESS;
+    return status;
 }
 
 static BOOL checkIoctlInput(
