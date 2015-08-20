@@ -10,14 +10,31 @@ Provider=%Provider%
 DriverVer=0.1
 CatalogFile=SynchronousAudioRouter.cat
 
+[ControlFlags]
+ExcludeFromSelect=*
+
 [DestinationDirs]
 DefaultDestDir = 12
 
-[DefaultInstall.NTamd64]
+[Manufacturer]
+%Provider%=Standard,NTamd64
+
+[DeviceInstall32]
+AddDevice=ROOT\SW\{0BCFFA5C-E754-48CF-A783-A64C0DC0BB2C},,SAR.RootEnumInstall
+
+[SAR.RootEnumInstall]
+HardwareIds=SW\{0BCFFA5C-E754-48CF-A783-A64C0DC0BB2C}
+
+[Standard.NTamd64]
+%DeviceName%=SAR.Install,SW\{0BCFFA5C-E754-48CF-A783-A64C0DC0BB2C}
+
+[SAR.Install.NTamd64]
+Include=ks.inf,kscaptur.inf
+Needs=KS.Registration,KSCAPTUR.Registration.NT
 CopyFiles=SAR.CopyFiles
 
-[DefaultInstall.NTamd64.Services]
-AddService=%ServiceName%,,SAR.Service
+[SAR.Install.NTamd64.Services]
+AddService=%ServiceName%,0x00000002,SAR.Service
 
 [SAR.Service]
 DisplayName=%ServiceName%
@@ -40,4 +57,5 @@ SynchronousAudioRouter.sys=1
 ServiceName="SynchronousAudioRouter"
 ServiceDesc="Routes audio between applications."
 Provider="Many Worlds"
+DeviceName="Synchronous Audio Router"
 DiskName="SynchronousAudioRouter Source Disk"

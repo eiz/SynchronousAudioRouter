@@ -1,12 +1,9 @@
+#define SAR_INIT_GUID
 #include "sar.h"
 
 extern "C" DRIVER_INITIALIZE DriverEntry;
 
-DRIVER_DISPATCH SarIrpUnsupported;
-DRIVER_DISPATCH SarIrpCreate;
 DRIVER_DISPATCH SarIrpDeviceControl;
-DRIVER_DISPATCH SarIrpClose;
-
 DRIVER_UNLOAD SarUnload;
 
 #define SAR_LOG(...) \
@@ -15,25 +12,46 @@ DRIVER_UNLOAD SarUnload;
 #define DEVICE_NT_NAME L"\\Device\\SynchronousAudioRouter"
 #define DEVICE_WIN32_NAME L"\\DosDevices\\SynchronousAudioRouter"
 
-NTSTATUS SarIrpUnsupported(PDEVICE_OBJECT deviceObject, PIRP irp)
+static NTSTATUS SarKsDeviceAdd(IN PKSDEVICE device);
+
+static KSDEVICE_DISPATCH gDeviceDispatch = {
+    SarKsDeviceAdd, // Add
+    nullptr, // Start
+    nullptr, // PostStart
+    nullptr, // QueryStop
+    nullptr, // CancelStop
+    nullptr, // Stop
+    nullptr, // QueryRemove
+    nullptr, // CancelRemove
+    nullptr, // Remove
+    nullptr, // QueryCapabilities
+    nullptr, // SurpriseRemoval
+    nullptr, // QueryPower
+    nullptr, // SetPower
+    nullptr  // QueryInterface
+};
+
+static KSDEVICE_DESCRIPTOR gDeviceDescriptor = {
+    &gDeviceDispatch,
+    0, nullptr,
+    KSDEVICE_DESCRIPTOR_VERSION
+};
+
+static NTSTATUS SarKsDeviceAdd(IN PKSDEVICE device)
 {
-    UNREFERENCED_PARAMETER(deviceObject);
-    PIO_STACK_LOCATION irpStack;
+    NTSTATUS status;
+    UNICODE_STRING symLinkName;
 
-    irpStack = IoGetCurrentIrpStackLocation(irp);
-    SAR_LOG("(SAR) IRP %d not implemented", irpStack->MajorFunction);
-    irp->IoStatus.Status = STATUS_NOT_IMPLEMENTED;
-    IoCompleteRequest(irp, IO_NO_INCREMENT);
-    return STATUS_NOT_IMPLEMENTED;
-}
+    status = IoRegisterDeviceInterface(device->PhysicalDeviceObject,
+        &GUID_DEVINTERFACE_SYNCHRONOUSAUDIOROUTER, nullptr, &symLinkName);
 
-NTSTATUS SarIrpCreate(PDEVICE_OBJECT deviceObject, PIRP irp)
-{
-    UNREFERENCED_PARAMETER(deviceObject);
+    if (!NT_SUCCESS(status)) {
+        SAR_LOG("Failed to create device interface.");
+        return status;
+    }
 
-    SAR_LOG("(SAR) Device opened");
-    irp->IoStatus.Status = STATUS_SUCCESS;
-    IoCompleteRequest(irp, IO_NO_INCREMENT);
+    SAR_LOG("KSDevice was created, dev interface: %wZ", &symLinkName);
+    RtlFreeUnicodeString(&symLinkName);
     return STATUS_SUCCESS;
 }
 
@@ -111,24 +129,11 @@ NTSTATUS SarIrpDeviceControl(PDEVICE_OBJECT deviceObject, PIRP irp)
     return ntStatus;
 }
 
-NTSTATUS SarIrpClose(PDEVICE_OBJECT deviceObject, PIRP irp)
-{
-    UNREFERENCED_PARAMETER(deviceObject);
-
-    SAR_LOG("(SAR) Device closed");
-    irp->IoStatus.Status = STATUS_SUCCESS;
-    IoCompleteRequest(irp, IO_NO_INCREMENT);
-    return STATUS_SUCCESS;
-}
 
 VOID SarUnload(PDRIVER_OBJECT driverObject)
 {
-    UNICODE_STRING win32DeviceName;
-
+    UNREFERENCED_PARAMETER(driverObject);
     SAR_LOG("SAR is unloading");
-    RtlInitUnicodeString(&win32DeviceName, DEVICE_WIN32_NAME);
-    IoDeleteSymbolicLink(&win32DeviceName);
-    IoDeleteDevice(driverObject->DeviceObject);
 }
 
 extern "C" NTSTATUS DriverEntry(
@@ -138,41 +143,14 @@ extern "C" NTSTATUS DriverEntry(
     UNREFERENCED_PARAMETER(registryPath);
 
     NTSTATUS status = STATUS_SUCCESS;
-    UNICODE_STRING ntDeviceName, win32DeviceName;
-    PDEVICE_OBJECT deviceObject;
 
-    SAR_LOG("Hello, Kernel 3!");
-    RtlInitUnicodeString(&ntDeviceName, DEVICE_NT_NAME);
-    RtlInitUnicodeString(&win32DeviceName, DEVICE_WIN32_NAME);
-    status = IoCreateDevice(
-        driverObject,
-        0,
-        &ntDeviceName,
-        FILE_DEVICE_SOUND,
-        FILE_DEVICE_SECURE_OPEN,
-        FALSE,
-        &deviceObject);
+    SAR_LOG("SAR is loading 2.");
 
     if (!NT_SUCCESS(status)) {
         return status;
     }
 
-    status = IoCreateSymbolicLink(&win32DeviceName, &ntDeviceName);
-
-    if (!NT_SUCCESS(status)) {
-        IoDeleteDevice(deviceObject);
-        return status;
-    }
-
-    for (int i = 0; i < IRP_MJ_MAXIMUM_FUNCTION; ++i) {
-        driverObject->MajorFunction[i] = SarIrpUnsupported;
-    }
-
-    driverObject->MajorFunction[IRP_MJ_CREATE] = SarIrpCreate;
+    KsInitializeDriver(driverObject, registryPath, &gDeviceDescriptor);
     driverObject->MajorFunction[IRP_MJ_DEVICE_CONTROL] = SarIrpDeviceControl;
-    driverObject->MajorFunction[IRP_MJ_CLOSE] = SarIrpClose;
-    driverObject->DriverUnload = SarUnload;
-    deviceObject->Flags |= DO_BUFFERED_IO;
-    deviceObject->Flags &= ~DO_DEVICE_INITIALIZING;
     return STATUS_SUCCESS;
 }
