@@ -16,11 +16,15 @@
 
 #define SAR_INIT_GUID
 #include "sar.h"
+#include <initguid.h>
+#include <devpkey.h>
 
 extern "C" DRIVER_INITIALIZE DriverEntry;
 
 DRIVER_DISPATCH SarIrpCreate;
 DRIVER_DISPATCH SarIrpDeviceControl;
+DRIVER_DISPATCH SarIrpClose;
+DRIVER_DISPATCH SarIrpCleanup;
 DRIVER_UNLOAD SarUnload;
 
 #define SAR_TAG '1RAS'
@@ -50,10 +54,49 @@ static KSDEVICE_DISPATCH gDeviceDispatch = {
     nullptr  // QueryInterface
 };
 
-static KSDEVICE_DESCRIPTOR gDeviceDescriptor = {
+static const KSDEVICE_DESCRIPTOR gDeviceDescriptor = {
     &gDeviceDispatch,
     0, nullptr,
     KSDEVICE_DESCRIPTOR_VERSION
+};
+
+static const KSPIN_DESCRIPTOR_EX gPinDescriptorTemplate = {
+    nullptr, // Dispatch
+    nullptr, // AutomationTable
+    {}, // PinDescriptor
+    KSPIN_FLAG_DO_NOT_INITIATE_PROCESSING |
+    KSPIN_FLAG_FRAMES_NOT_REQUIRED_FOR_PROCESSING |
+    KSPIN_FLAG_PROCESS_IF_ANY_IN_RUN_STATE |
+    KSPIN_FLAG_FIXED_FORMAT,
+    1, // InstancesPossible
+    1, // InstancesNecessary
+    nullptr, // TODO: allocator framing
+    nullptr, // TODO: intersection handler
+};
+
+static const GUID gCategoriesTableCapture[] = {
+    STATICGUIDOF(KSCATEGORY_AUDIO),
+    STATICGUIDOF(KSCATEGORY_CAPTURE),
+};
+
+static const GUID gCategoriesTableRender[] = {
+    STATICGUIDOF(KSCATEGORY_AUDIO),
+    STATICGUIDOF(KSCATEGORY_RENDER),
+};
+
+static KSFILTER_DESCRIPTOR gFilterDescriptor = {
+    nullptr, // Dispatch
+    nullptr, // AutomationTable
+    KSFILTER_DESCRIPTOR_VERSION, // Version
+    0, // Flags
+    nullptr, // ReferenceGuid
+    0, // PinDescriptorsCount
+    0, // PinDescriptorSize
+    nullptr,
+    DEFINE_KSFILTER_CATEGORIES_NULL,
+    DEFINE_KSFILTER_NODE_DESCRIPTORS_NULL,
+    DEFINE_KSFILTER_DEFAULT_CONNECTIONS,
+    nullptr, // ComponentId
 };
 
 static NTSTATUS SarKsDeviceAdd(IN PKSDEVICE device)
@@ -72,7 +115,8 @@ static NTSTATUS SarKsDeviceAdd(IN PKSDEVICE device)
         return status;
     }
 
-    SAR_LOG("KSDevice was created, dev interface: %wZ", &symLinkName);
+    SAR_LOG("KSDevice was created for %p, dev interface: %wZ",
+        device, &symLinkName);
     status = IoSetDeviceInterfaceState(&symLinkName, TRUE);
 
     if (!NT_SUCCESS(status)) {
@@ -99,6 +143,24 @@ static BOOL checkIoctlInput(
     return TRUE;
 }
 
+static bool ioctlInput(
+    NTSTATUS *status, PIRP irp, PIO_STACK_LOCATION irpStack, PVOID *buffer,
+    ULONG size)
+{
+    UNREFERENCED_PARAMETER(buffer);
+
+    if (!status) {
+        return FALSE;
+    }
+
+    if (!checkIoctlInput(status, irpStack, size)) {
+        return FALSE;
+    }
+
+    RtlCopyMemory(buffer, irp->AssociatedIrp.SystemBuffer, size);
+    return NT_SUCCESS(*status);
+}
+
 // on driver entry: create ks device object
 // on create endpoint: create ks filter & ks pin
 //  - audio category
@@ -109,10 +171,85 @@ static BOOL checkIoctlInput(
 //  - pin supports a single KSDATARANGE
 //  - pin flags: KSPIN_FLAG_DO_NOT_INITIATE_PROCESSING KSPIN_FLAG_PROCESS_IN_RUN_STATE_ONLY KSPIN_FLAG_FIXED_FORMAT KSPIN_FLAG_FRAMES_NOT_REQUIRED_FOR_PROCESSING
 
-static NTSTATUS createEndpoint(SarCreateEndpointRequest *request)
+static NTSTATUS createEndpoint(
+    PDEVICE_OBJECT device,
+    SarDriverExtension *extension,
+    SarFileContext *fileContext,
+    SarCreateEndpointRequest *request)
 {
-    UNREFERENCED_PARAMETER(request);
-    return STATUS_NOT_IMPLEMENTED;
+    UNREFERENCED_PARAMETER(fileContext);
+    WCHAR buf[20] = {};
+    UNICODE_STRING referenceString = { 0, sizeof(buf), buf };
+    NTSTATUS status;
+    PKSDEVICE ksDevice = KsGetDeviceForDeviceObject(device);
+    KSFILTER_DESCRIPTOR *filterDesc;
+    KSPIN_DESCRIPTOR_EX *pinDesc;
+    PKSFILTERFACTORY filterFactory;
+
+    if (request->type != SAR_ENDPOINT_TYPE_CAPTURE &&
+        request->type != SAR_ENDPOINT_TYPE_PLAYBACK) {
+        return STATUS_UNSUCCESSFUL;
+    }
+
+    LONG filterId = InterlockedIncrement(&extension->nextFilterId);
+
+    filterDesc = (PKSFILTER_DESCRIPTOR)
+        ExAllocatePoolWithTag(PagedPool, sizeof(KSFILTER_DESCRIPTOR), SAR_TAG);
+
+    if (!filterDesc) {
+        return STATUS_INSUFFICIENT_RESOURCES;
+    }
+
+    pinDesc = (PKSPIN_DESCRIPTOR_EX)
+        ExAllocatePoolWithTag(PagedPool, sizeof(KSPIN_DESCRIPTOR_EX), SAR_TAG);
+
+    if (!pinDesc) {
+        ExFreePoolWithTag(filterDesc, SAR_TAG);
+        return STATUS_INSUFFICIENT_RESOURCES;
+    }
+
+    *filterDesc = gFilterDescriptor;
+    *pinDesc = gPinDescriptorTemplate;
+    filterDesc->CategoriesCount = 2;
+    filterDesc->Categories = request->type == SAR_ENDPOINT_TYPE_CAPTURE ?
+        gCategoriesTableCapture : gCategoriesTableRender;
+    filterDesc->PinDescriptors = pinDesc;
+    filterDesc->PinDescriptorsCount = 1;
+    filterDesc->PinDescriptorSize = sizeof(KSPIN_DESCRIPTOR_EX);
+    RtlIntegerToUnicodeString(filterId, 10, &referenceString);
+    KsAcquireDevice(ksDevice);
+    status = KsCreateFilterFactory(
+        device, filterDesc, buf, nullptr, KSCREATE_ITEM_FREEONSTOP,
+        nullptr, nullptr, &filterFactory);
+    KsReleaseDevice(ksDevice);
+
+    if (NT_SUCCESS(status)) {
+        PUNICODE_STRING symlink = KsFilterFactoryGetSymbolicLink(filterFactory);
+        UNICODE_STRING dummyName;
+
+        RtlInitUnicodeString(&dummyName, L"Hello");
+
+        SAR_LOG("Success %p %wZ", filterFactory, symlink);
+        status = IoSetDeviceInterfacePropertyData(symlink,
+            &DEVPKEY_DeviceInterface_FriendlyName, LOCALE_NEUTRAL, 0,
+            DEVPROP_TYPE_STRING, dummyName.MaximumLength, dummyName.Buffer);
+
+        if (!NT_SUCCESS(status)) {
+            SAR_LOG("Couldn't set friendly name: %08X", status);
+            return status;
+        }
+
+        status = KsFilterFactorySetDeviceClassesState(filterFactory, TRUE);
+
+        if (!NT_SUCCESS(status)) {
+            SAR_LOG("Couldn't enable KS filter factory");
+        }
+    } else {
+        ExFreePoolWithTag(filterDesc, SAR_TAG);
+        ExFreePoolWithTag(pinDesc, SAR_TAG);
+    }
+
+    return status;
 }
 
 NTSTATUS SarIrpCreate(PDEVICE_OBJECT deviceObject, PIRP irp)
@@ -132,6 +269,7 @@ NTSTATUS SarIrpCreate(PDEVICE_OBJECT deviceObject, PIRP irp)
 
     if (RtlCompareUnicodeString(
         &irpStack->FileObject->FileName, &referencePath, TRUE) != 0) {
+        SAR_LOG("Passthrough IRP_MJ_CREATE");
         return extension->ksDispatchCreate(deviceObject, irp);
     }
 
@@ -140,25 +278,88 @@ NTSTATUS SarIrpCreate(PDEVICE_OBJECT deviceObject, PIRP irp)
     fileContext = (SarFileContext *)RtlInsertElementGenericTable(
         &extension->fileContextTable, (PVOID)&fileContextTemplate,
         sizeof(SarFileContext), &isNew);
-    ExReleaseFastMutex(&extension->fileContextLock);
 
     ASSERT(!isNew);
 
     if (!fileContext) {
+        ExReleaseFastMutex(&extension->fileContextLock);
         return STATUS_INSUFFICIENT_RESOURCES;
     }
 
     InitializeListHead(&fileContext->firstFilter);
     ExInitializeFastMutex(&fileContext->filterListLock);
+    ExReleaseFastMutex(&extension->fileContextLock);
     irpStack->FileObject->FsContext2 = fileContext;
+
+    irp->IoStatus.Status = STATUS_SUCCESS;
+    IoCompleteRequest(irp, IO_NO_INCREMENT);
     return STATUS_SUCCESS;
+}
+
+NTSTATUS SarIrpClose(PDEVICE_OBJECT deviceObject, PIRP irp)
+{
+    NTSTATUS status;
+    PIO_STACK_LOCATION irpStack;
+    SarDriverExtension *extension =
+        (SarDriverExtension *)IoGetDriverObjectExtension(
+            deviceObject->DriverObject, DriverEntry);
+    SarFileContext fileContextTemplate;
+    BOOLEAN deleted;
+
+    irpStack = IoGetCurrentIrpStackLocation(irp);
+    fileContextTemplate.fileObject = irpStack->FileObject;
+    ExAcquireFastMutex(&extension->fileContextLock);
+    deleted = RtlDeleteElementGenericTable(
+        &extension->fileContextTable, &fileContextTemplate);
+    ExReleaseFastMutex(&extension->fileContextLock);
+
+    if (!deleted) {
+        SAR_LOG("SarIrpClose Passthrough");
+        return extension->ksDispatchClose(deviceObject, irp);
+    }
+
+    SAR_LOG("SarIrpClose");
+    status = STATUS_SUCCESS;
+    irp->IoStatus.Status = status;
+    IoCompleteRequest(irp, IO_NO_INCREMENT);
+    return status;
+}
+
+NTSTATUS SarIrpCleanup(PDEVICE_OBJECT deviceObject, PIRP irp)
+{
+    UNREFERENCED_PARAMETER(deviceObject);
+    NTSTATUS status;
+    PIO_STACK_LOCATION irpStack;
+    SarDriverExtension *extension =
+        (SarDriverExtension *)IoGetDriverObjectExtension(
+            deviceObject->DriverObject, DriverEntry);
+    SarFileContext fileContextTemplate;
+    BOOLEAN deleted;
+
+    irpStack = IoGetCurrentIrpStackLocation(irp);
+    fileContextTemplate.fileObject = irpStack->FileObject;
+    ExAcquireFastMutex(&extension->fileContextLock);
+    deleted = RtlDeleteElementGenericTable(
+        &extension->fileContextTable, &fileContextTemplate);
+    ExReleaseFastMutex(&extension->fileContextLock);
+
+    if (!deleted) {
+        SAR_LOG("SarIrpCleanup Passthrough");
+        return extension->ksDispatchCleanup(deviceObject, irp);
+    }
+
+    SAR_LOG("SarIrpCleanup");
+    status = STATUS_SUCCESS;
+    irp->IoStatus.Status = status;
+    IoCompleteRequest(irp, IO_NO_INCREMENT);
+    return status;
 }
 
 NTSTATUS SarIrpDeviceControl(PDEVICE_OBJECT deviceObject, PIRP irp)
 {
     PIO_STACK_LOCATION irpStack;
     ULONG ioControlCode;
-    NTSTATUS ntStatus = STATUS_NOT_IMPLEMENTED;
+    NTSTATUS ntStatus = STATUS_SUCCESS;
     SarDriverExtension *extension =
         (SarDriverExtension *)IoGetDriverObjectExtension(
             deviceObject->DriverObject, DriverEntry);
@@ -167,6 +368,9 @@ NTSTATUS SarIrpDeviceControl(PDEVICE_OBJECT deviceObject, PIRP irp)
 
     irpStack = IoGetCurrentIrpStackLocation(irp);
     ioControlCode = irpStack->Parameters.DeviceIoControl.IoControlCode;
+
+    SAR_LOG("(SAR) Before: DeviceIoControl IRP: %d", ioControlCode);
+
     fileContextTemplate.fileObject = irpStack->FileObject;
 
     ExAcquireFastMutex(&extension->fileContextLock);
@@ -175,6 +379,7 @@ NTSTATUS SarIrpDeviceControl(PDEVICE_OBJECT deviceObject, PIRP irp)
     ExReleaseFastMutex(&extension->fileContextLock);
 
     if (!fileContext) {
+        SAR_LOG("Passthrough");
         return extension->ksDispatchDeviceControl(deviceObject, irp);
     }
 
@@ -186,17 +391,18 @@ NTSTATUS SarIrpDeviceControl(PDEVICE_OBJECT deviceObject, PIRP irp)
         case SAR_REQUEST_CREATE_ENDPOINT: {
             SAR_LOG("(SAR) Create endpoint");
 
-            if (!checkIoctlInput(
-                &ntStatus, irpStack, sizeof(SarCreateEndpointRequest))) {
+            SarCreateEndpointRequest request;
+
+            if (!ioctlInput(
+                &ntStatus, irp, irpStack, (PVOID *)&request, sizeof(request))) {
+
                 break;
             }
 
-            SarCreateEndpointRequest *request =
-                (SarCreateEndpointRequest *)irp->AssociatedIrp.SystemBuffer;
-
             SAR_LOG("(SAR) Create endpoint request: %d, %d, %d",
-                request->type, request->index, request->channelCount);
-            ntStatus = createEndpoint(request);
+                request.type, request.index, request.channelCount);
+            ntStatus = createEndpoint(
+                deviceObject, extension, fileContext, &request);
             break;
         }
         case SAR_REQUEST_MAP_AUDIO_BUFFER:
@@ -268,18 +474,16 @@ extern "C" NTSTATUS DriverEntry(
     RtlInitializeGenericTable(&extension->fileContextTable,
         fileContextCompare, fileContextAllocate, fileContextFree, nullptr);
 
-    for (int i = 0; i <= IRP_MJ_MAXIMUM_FUNCTION; ++i) {
-        SAR_LOG("KS IRP MajorFunction[%d] = %p",
-            i, driverObject->MajorFunction[i]);
-    }
-
     extension->ksDispatchCreate = driverObject->MajorFunction[IRP_MJ_CREATE];
     extension->ksDispatchClose = driverObject->MajorFunction[IRP_MJ_CLOSE];
     extension->ksDispatchCleanup = driverObject->MajorFunction[IRP_MJ_CLEANUP];
     extension->ksDispatchDeviceControl =
         driverObject->MajorFunction[IRP_MJ_DEVICE_CONTROL];
+    extension->nextFilterId = 0;
 
     driverObject->MajorFunction[IRP_MJ_CREATE] = SarIrpCreate;
     driverObject->MajorFunction[IRP_MJ_DEVICE_CONTROL] = SarIrpDeviceControl;
+    driverObject->MajorFunction[IRP_MJ_CLOSE] = SarIrpClose;
+    driverObject->MajorFunction[IRP_MJ_CLEANUP] = SarIrpCleanup;
     return STATUS_SUCCESS;
 }

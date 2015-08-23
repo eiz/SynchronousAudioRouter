@@ -25,6 +25,7 @@ extern "C" {
 #include <ntddk.h>
 #include <windef.h>
 #include <ks.h>
+#include <ksmedia.h>
 #else
 #include <windows.h>
 #endif
@@ -45,15 +46,15 @@ DEFINE_GUID(GUID_DEVINTERFACE_SYNCHRONOUSAUDIOROUTER,
 // - perform processing tick
 
 // for the sake of keeping things simple let's define an order of operations:
-// - all state is scoped to a handle to \\.\SynchronousAudioRouter
+// - all state is scoped to a handle to the device interface (kind of)
 // - SarCreateAudioBuffers should be called before any endpoints are created
 //   it must be called exactly once
 // - SarCreateEndpoint should be called to create all endpoints
 // - SarMapAudioBuffer should be called after the buffers and endpoints are set up
 // - SarAudioTick should be called finally
 // Any configuration changes require the device to be closed and reopened.
-// Device is exclusive access.
 // Closing the SynchronousAudioRouter device automatically destroys all endpoints.
+// Endpoint names are global.
 
 #define MAX_ENDPOINT_NAME_LENGTH 63
 
@@ -101,6 +102,7 @@ typedef struct SarDriverExtension
     PDRIVER_DISPATCH ksDispatchDeviceControl;
     FAST_MUTEX fileContextLock;
     RTL_GENERIC_TABLE fileContextTable;
+    LONG nextFilterId;
 } SarDriverExtension;
 
 typedef struct SarFileContext
@@ -108,6 +110,9 @@ typedef struct SarFileContext
     PFILE_OBJECT fileObject;
     FAST_MUTEX filterListLock;
     LIST_ENTRY firstFilter;
+    DWORD sampleRate;
+    DWORD bufferCount;
+    DWORD bufferSize;
 } SarFileContext;
 #endif
 

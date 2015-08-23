@@ -105,5 +105,6 @@ int main(int argc, char *argv[])
         return 1;
     }
 
+    CloseHandle(device);
     return 0;
 }
