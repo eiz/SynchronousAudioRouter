@@ -204,6 +204,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="init.cpp" />
+    <ClCompile Include="initguid.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="sar.h" />

@@ -18,7 +18,7 @@
 #include <windows.h>
 #include <SetupAPI.h>
 
-#define SAR_INIT_GUID
+#include <initguid.h>
 #include <sar.h>
 
 BOOL createEndpoint(

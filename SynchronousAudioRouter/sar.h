@@ -23,16 +23,24 @@ extern "C" {
 
 #if defined(KERNEL)
 #include <ntddk.h>
+#include <ntstrsafe.h>
 #include <windef.h>
 #include <ks.h>
 #include <ksmedia.h>
+#include <devpkey.h>
+#include <ksproxy.h>
+#define NOBITMAP
+#include <mmreg.h>
 #else
 #include <windows.h>
 #endif
 
 #ifdef SAR_INIT_GUID
-#include <initguid.h>
+//#include <initguid.h>
 #endif
+
+#pragma warning(push)
+#pragma warning(disable:4200)
 
 // {C16E8D6C-C4CC-4C76-B11C-79B8414EA968}
 DEFINE_GUID(GUID_DEVINTERFACE_SYNCHRONOUSAUDIOROUTER,
@@ -70,6 +78,8 @@ DEFINE_GUID(GUID_DEVINTERFACE_SYNCHRONOUSAUDIOROUTER,
 #define SAR_REQUEST_AUDIO_TICK CTL_CODE( \
     FILE_DEVICE_UNKNOWN, 4, METHOD_IN_DIRECT, FILE_READ_DATA | FILE_WRITE_DATA)
 
+#define SAR_MAX_CHANNEL_COUNT 256
+
 typedef struct SarCreateEndpointRequest
 {
     DWORD type;
@@ -83,6 +93,7 @@ typedef struct SarCreateAudioBuffersRequest
     DWORD bufferCount;
     DWORD bufferSize;
     DWORD sampleRate;
+    DWORD sampleDepth;
 } SarSetAudioBuffersRequest;
 
 typedef struct SarMapAudioBufferRequest
@@ -94,6 +105,7 @@ typedef struct SarMapAudioBufferRequest
 } SarMapAudioBuffersRequest;
 
 #if defined(KERNEL)
+
 typedef struct SarDriverExtension
 {
     PDRIVER_DISPATCH ksDispatchCreate;
@@ -105,16 +117,48 @@ typedef struct SarDriverExtension
     LONG nextFilterId;
 } SarDriverExtension;
 
+#define SarEndpointSize(channelCount) \
+    (sizeof(SarEndpoint) + sizeof(DWORD) * (channelCount))
+
+typedef struct SarEndpoint
+{
+    LIST_ENTRY listEntry;
+    PKSFILTERFACTORY filterFactory;
+    PKSFILTER_DESCRIPTOR filterDesc;
+    PKSPIN_DESCRIPTOR_EX pinDesc;
+    PKSDATARANGE_AUDIO dataRange;
+    PKSALLOCATOR_FRAMING_EX allocatorFraming;
+    DWORD channelCount;
+    DWORD channelMappings[0];
+} SarFilterInfo;
+
 typedef struct SarFileContext
 {
     PFILE_OBJECT fileObject;
-    FAST_MUTEX filterListLock;
-    LIST_ENTRY firstFilter;
+    FAST_MUTEX mutex;
+    LIST_ENTRY endpointList;
     DWORD sampleRate;
+    DWORD sampleDepth;
     DWORD bufferCount;
     DWORD bufferSize;
 } SarFileContext;
-#endif
+
+NTSTATUS SarCreateEndpoint(
+    PDEVICE_OBJECT device,
+    SarDriverExtension *extension,
+    SarFileContext *fileContext,
+    SarCreateEndpointRequest *request);
+
+VOID SarInitializeFileContext(SarFileContext *fileContext);
+VOID SarCleanupFileContext(SarFileContext *fileContext);
+RTL_GENERIC_COMPARE_RESULTS NTAPI SarCompareFileContext(
+    PRTL_GENERIC_TABLE table, PVOID lhs, PVOID rhs);
+PVOID NTAPI SarAllocateFileContext(PRTL_GENERIC_TABLE table, CLONG byteSize);
+VOID NTAPI SarFreeFileContext(PRTL_GENERIC_TABLE table, PVOID buffer);
+
+#endif // KERNEL
+
+#pragma warning(pop)
 
 #ifdef __cplusplus
 } // extern "C"
