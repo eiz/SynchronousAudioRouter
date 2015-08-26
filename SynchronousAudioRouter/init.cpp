@@ -25,19 +25,26 @@ DRIVER_DISPATCH SarIrpCleanup;
 DRIVER_UNLOAD SarUnload;
 
 #define SAR_TAG '1RAS'
+//#define NO_LOGGING
+
+#ifdef NO_LOGGING
+#define SAR_LOG(...)
+#else
 #define SAR_LOG(...) \
     DbgPrintEx(DPFLTR_DEFAULT_ID, DPFLTR_WARNING_LEVEL, __VA_ARGS__)
+#endif
 
 #define DEVICE_NT_NAME L"\\Device\\SynchronousAudioRouter"
 #define DEVICE_WIN32_NAME L"\\DosDevices\\SynchronousAudioRouter"
 #define DEVICE_REFERENCE_STRING L"\\{0EB287D4-6C04-4926-AE19-3C066A4C3F3A}"
 
 static NTSTATUS SarKsDeviceAdd(IN PKSDEVICE device);
+static NTSTATUS SarKsDevicePostStart(IN PKSDEVICE device);
 
 static KSDEVICE_DISPATCH gDeviceDispatch = {
     SarKsDeviceAdd, // Add
     nullptr, // Start
-    nullptr, // PostStart
+    SarKsDevicePostStart, // PostStart
     nullptr, // QueryStop
     nullptr, // CancelStop
     nullptr, // Stop
@@ -67,7 +74,7 @@ static const KSPIN_DESCRIPTOR_EX gPinDescriptorTemplate = {
     KSPIN_FLAG_FIXED_FORMAT,
     1, // InstancesPossible
     1, // InstancesNecessary
-    nullptr, // TODO: allocator framing
+    nullptr, // AllocatorFraming
     nullptr, // TODO: intersection handler
 };
 
@@ -81,7 +88,7 @@ static const GUID gCategoriesTableRender[] = {
     STATICGUIDOF(KSCATEGORY_RENDER),
 };
 
-static KSFILTER_DESCRIPTOR gFilterDescriptor = {
+static KSFILTER_DESCRIPTOR gFilterDescriptorTemplate = {
     nullptr, // Dispatch
     nullptr, // AutomationTable
     KSFILTER_DESCRIPTOR_VERSION, // Version
@@ -96,16 +103,18 @@ static KSFILTER_DESCRIPTOR gFilterDescriptor = {
     nullptr, // ComponentId
 };
 
-static NTSTATUS SarKsDeviceAdd(IN PKSDEVICE device)
+NTSTATUS SarKsDeviceAdd(IN PKSDEVICE device)
 {
     NTSTATUS status;
-    UNICODE_STRING symLinkName;
     UNICODE_STRING referenceString;
+    SarDriverExtension *extension =
+        (SarDriverExtension *)IoGetDriverObjectExtension(
+            device->FunctionalDeviceObject->DriverObject, DriverEntry);
 
     RtlUnicodeStringInit(&referenceString, DEVICE_REFERENCE_STRING + 1);
-
     status = IoRegisterDeviceInterface(device->PhysicalDeviceObject,
-        &GUID_DEVINTERFACE_SYNCHRONOUSAUDIOROUTER, &referenceString, &symLinkName);
+        &GUID_DEVINTERFACE_SYNCHRONOUSAUDIOROUTER, &referenceString,
+        &extension->sarInterfaceName);
 
     if (!NT_SUCCESS(status)) {
         SAR_LOG("Failed to create device interface.");
@@ -113,14 +122,23 @@ static NTSTATUS SarKsDeviceAdd(IN PKSDEVICE device)
     }
 
     SAR_LOG("KSDevice was created for %p, dev interface: %wZ",
-        device, &symLinkName);
-    status = IoSetDeviceInterfaceState(&symLinkName, TRUE);
+        device, &extension->sarInterfaceName);
+    return status;
+}
+
+NTSTATUS SarKsDevicePostStart(IN PKSDEVICE device)
+{
+    NTSTATUS status;
+    SarDriverExtension *extension =
+        (SarDriverExtension *)IoGetDriverObjectExtension(
+            device->FunctionalDeviceObject->DriverObject, DriverEntry);
+
+    status = IoSetDeviceInterfaceState(&extension->sarInterfaceName, TRUE);
 
     if (!NT_SUCCESS(status)) {
         SAR_LOG("Failed to enable device interface.");
     }
 
-    RtlFreeUnicodeString(&symLinkName);
     return status;
 }
 
@@ -158,6 +176,28 @@ static bool ioctlInput(
     return NT_SUCCESS(*status);
 }
 
+NTSTATUS SarSetBufferLayout(
+    SarFileContext *fileContext,
+    SarSetBufferLayoutRequest *request)
+{
+    if (request->bufferCount > SAR_MAX_BUFFER_COUNT ||
+        request->bufferSize > SAR_MAX_BUFFER_SIZE ||
+        request->sampleDepth < SAR_MIN_SAMPLE_DEPTH ||
+        request->sampleDepth > SAR_MAX_SAMPLE_DEPTH ||
+        request->sampleRate < SAR_MIN_SAMPLE_RATE ||
+        request->sampleRate > SAR_MAX_SAMPLE_RATE) {
+        return STATUS_INVALID_PARAMETER;
+    }
+
+    ExAcquireFastMutex(&fileContext->mutex);
+    fileContext->bufferCount = request->bufferCount;
+    fileContext->bufferSize = request->bufferSize;
+    fileContext->sampleDepth = request->sampleDepth;
+    fileContext->sampleRate = request->sampleRate;
+    ExReleaseFastMutex(&fileContext->mutex);
+    return STATUS_SUCCESS;
+}
+
 // on driver entry: create ks device object
 // on create endpoint: create ks filter & ks pin
 //  - audio category
@@ -168,8 +208,67 @@ static bool ioctlInput(
 //  - pin supports a single KSDATARANGE
 //  - pin flags: KSPIN_FLAG_DO_NOT_INITIATE_PROCESSING KSPIN_FLAG_PROCESS_IN_RUN_STATE_ONLY KSPIN_FLAG_FIXED_FORMAT KSPIN_FLAG_FRAMES_NOT_REQUIRED_FOR_PROCESSING
 
+VOID SarProcessPendingEndpoints(PDEVICE_OBJECT deviceObject, PVOID context)
+{
+    UNREFERENCED_PARAMETER(deviceObject);
+    NTSTATUS status = STATUS_UNSUCCESSFUL;
+    SarFileContext *fileContext = (SarFileContext *)context;
+
+    SAR_LOG("Processing pending endpoints");
+
+    ExAcquireFastMutex(&fileContext->mutex);
+
+    PLIST_ENTRY entry = fileContext->pendingEndpointList.Flink;
+
+    while (entry != &fileContext->pendingEndpointList) {
+        SarEndpoint *endpoint = CONTAINING_RECORD(entry, SarEndpoint, listEntry);
+        PUNICODE_STRING symlink =
+            KsFilterFactoryGetSymbolicLink(endpoint->filterFactory);
+
+        SAR_LOG("Processing a pending endpoint");
+        entry = endpoint->listEntry.Flink;
+        status = IoSetDeviceInterfacePropertyData(symlink,
+            &DEVPKEY_DeviceInterface_FriendlyName, LOCALE_NEUTRAL, 0,
+            DEVPROP_TYPE_STRING,
+            endpoint->pendingDeviceName.Length + sizeof(WCHAR),
+            endpoint->pendingDeviceName.Buffer);
+
+        if (!NT_SUCCESS(status)) {
+            SAR_LOG("Couldn't set friendly name: %08X", status);
+            goto err_out;
+        }
+
+        status = IoSetDeviceInterfacePropertyData(symlink,
+            &DEVPKEY_DeviceInterface_ClassGuid, LOCALE_NEUTRAL, 0,
+            DEVPROP_TYPE_GUID, sizeof(GUID), (PVOID)&CLSID_Proxy);
+
+        if (!NT_SUCCESS(status)) {
+            SAR_LOG("Couldn't set clsid: %08X", status);
+            goto err_out;
+        }
+
+        status = KsFilterFactorySetDeviceClassesState(
+            endpoint->filterFactory, TRUE);
+
+        if (!NT_SUCCESS(status)) {
+            SAR_LOG("Couldn't enable KS filter factory");
+            goto err_out;
+        }
+
+        RemoveEntryList(entry);
+        InsertTailList(&fileContext->endpointList, &endpoint->listEntry);
+
+err_out:
+        endpoint->pendingIrp->IoStatus.Status = status;
+        IoCompleteRequest(endpoint->pendingIrp, IO_NO_INCREMENT);
+    }
+
+    ExReleaseFastMutex(&fileContext->mutex);
+}
+
 NTSTATUS SarCreateEndpoint(
     PDEVICE_OBJECT device,
+    PIRP irp,
     SarDriverExtension *extension,
     SarFileContext *fileContext,
     SarCreateEndpointRequest *request)
@@ -177,78 +276,73 @@ NTSTATUS SarCreateEndpoint(
     UNREFERENCED_PARAMETER(fileContext);
     WCHAR buf[20] = {};
     UNICODE_STRING referenceString = { 0, sizeof(buf), buf };
-    UNICODE_STRING deviceName;
     NTSTATUS status = STATUS_INSUFFICIENT_RESOURCES;
     PKSDEVICE ksDevice = KsGetDeviceForDeviceObject(device);
-    SarEndpoint* filterInfo;
+    SarEndpoint *endpoint;
 
     if (request->type != SAR_ENDPOINT_TYPE_CAPTURE &&
         request->type != SAR_ENDPOINT_TYPE_PLAYBACK) {
-        return STATUS_UNSUCCESSFUL;
+        return STATUS_INVALID_PARAMETER;
     }
 
     if (request->channelCount > SAR_MAX_CHANNEL_COUNT) {
-        return STATUS_UNSUCCESSFUL;
+        return STATUS_INVALID_PARAMETER;
     }
 
-    request->name[MAX_ENDPOINT_NAME_LENGTH] = '\0';
-    RtlInitUnicodeString(&deviceName, request->name);
-
-    LONG filterId = InterlockedIncrement(&extension->nextFilterId);
-
-    filterInfo = (SarEndpoint *)
+    endpoint = (SarEndpoint *)
         ExAllocatePoolWithTag(PagedPool,
             SarEndpointSize(request->channelCount), SAR_TAG);
 
-    if (!filterInfo) {
+    if (!endpoint) {
         return STATUS_INSUFFICIENT_RESOURCES;
     }
 
-    RtlZeroMemory(filterInfo, SarEndpointSize(request->channelCount));
+    RtlZeroMemory(endpoint, SarEndpointSize(request->channelCount));
 
-    filterInfo->channelCount = request->channelCount;
-    filterInfo->filterDesc = (PKSFILTER_DESCRIPTOR)
+    endpoint->pendingIrp = irp;
+    endpoint->channelCount = request->channelCount;
+    endpoint->filterDesc = (PKSFILTER_DESCRIPTOR)
         ExAllocatePoolWithTag(PagedPool, sizeof(KSFILTER_DESCRIPTOR), SAR_TAG);
 
-    if (!filterInfo->filterDesc) {
+    if (!endpoint->filterDesc) {
         goto err_out;
     }
 
-    filterInfo->pinDesc = (PKSPIN_DESCRIPTOR_EX)
+    endpoint->pinDesc = (PKSPIN_DESCRIPTOR_EX)
         ExAllocatePoolWithTag(PagedPool, sizeof(KSPIN_DESCRIPTOR_EX), SAR_TAG);
 
-    if (!filterInfo->pinDesc) {
+    if (!endpoint->pinDesc) {
         goto err_out;
     }
 
-    filterInfo->dataRange = (PKSDATARANGE_AUDIO)
+    endpoint->dataRange = (PKSDATARANGE_AUDIO)
         ExAllocatePoolWithTag(PagedPool, sizeof(KSDATARANGE_AUDIO), SAR_TAG);
 
-    if (!filterInfo->dataRange) {
+    if (!endpoint->dataRange) {
         goto err_out;
     }
 
-    filterInfo->allocatorFraming = (PKSALLOCATOR_FRAMING_EX)
+    endpoint->allocatorFraming = (PKSALLOCATOR_FRAMING_EX)
         ExAllocatePoolWithTag(PagedPool, sizeof(KSALLOCATOR_FRAMING_EX), SAR_TAG);
 
-    if (!filterInfo->allocatorFraming) {
+    if (!endpoint->allocatorFraming) {
         goto err_out;
     }
 
-    *filterInfo->filterDesc = gFilterDescriptor;
-    *filterInfo->pinDesc = gPinDescriptorTemplate;
-    filterInfo->filterDesc->CategoriesCount = 2;
-    filterInfo->filterDesc->Categories =
+    *endpoint->filterDesc = gFilterDescriptorTemplate;
+    *endpoint->pinDesc = gPinDescriptorTemplate;
+    endpoint->filterDesc->CategoriesCount = 2;
+    endpoint->filterDesc->Categories =
         request->type == SAR_ENDPOINT_TYPE_CAPTURE ?
         gCategoriesTableCapture : gCategoriesTableRender;
-    filterInfo->filterDesc->PinDescriptors = filterInfo->pinDesc;
-    filterInfo->filterDesc->PinDescriptorsCount = 1;
-    filterInfo->filterDesc->PinDescriptorSize = sizeof(KSPIN_DESCRIPTOR_EX);
+    endpoint->filterDesc->PinDescriptors = endpoint->pinDesc;
+    endpoint->filterDesc->PinDescriptorsCount = 1;
+    endpoint->filterDesc->PinDescriptorSize = sizeof(KSPIN_DESCRIPTOR_EX);
 
-    PKSPIN_DESCRIPTOR pinDesc = &filterInfo->pinDesc->PinDescriptor;
+    PKSPIN_DESCRIPTOR pinDesc = &endpoint->pinDesc->PinDescriptor;
 
     pinDesc->DataRangesCount = 1;
-    pinDesc->DataRanges = (PKSDATARANGE *)&filterInfo->dataRange;
+    pinDesc->DataRanges = (PKSDATARANGE *)&endpoint->dataRange;
     pinDesc->Communication =
         request->type == SAR_ENDPOINT_TYPE_CAPTURE ?
         KSPIN_COMMUNICATION_SOURCE : KSPIN_COMMUNICATION_SINK;
@@ -256,84 +350,81 @@ NTSTATUS SarCreateEndpoint(
         request->type == SAR_ENDPOINT_TYPE_CAPTURE ?
         KSPIN_DATAFLOW_OUT : KSPIN_DATAFLOW_IN;
 
-    filterInfo->dataRange->DataRange.FormatSize = sizeof(KSDATARANGE_AUDIO);
-    filterInfo->dataRange->DataRange.Flags = 0;
-    filterInfo->dataRange->DataRange.SampleSize = 0;
-    filterInfo->dataRange->DataRange.Reserved = 0;
-    filterInfo->dataRange->DataRange.MajorFormat = KSDATAFORMAT_TYPE_AUDIO;
-    filterInfo->dataRange->DataRange.SubFormat = KSDATAFORMAT_SUBTYPE_PCM;
-    filterInfo->dataRange->DataRange.Specifier =
+    endpoint->dataRange->DataRange.FormatSize = sizeof(KSDATARANGE_AUDIO);
+    endpoint->dataRange->DataRange.Flags = 0;
+    endpoint->dataRange->DataRange.SampleSize = 0;
+    endpoint->dataRange->DataRange.Reserved = 0;
+    endpoint->dataRange->DataRange.MajorFormat = KSDATAFORMAT_TYPE_AUDIO;
+    endpoint->dataRange->DataRange.SubFormat = KSDATAFORMAT_SUBTYPE_PCM;
+    endpoint->dataRange->DataRange.Specifier =
         KSDATAFORMAT_SPECIFIER_WAVEFORMATEX;
-    filterInfo->dataRange->MaximumBitsPerSample = fileContext->sampleDepth * 3;
-    filterInfo->dataRange->MinimumBitsPerSample = fileContext->sampleDepth * 3;
-    filterInfo->dataRange->MaximumSampleFrequency = fileContext->sampleRate;
-    filterInfo->dataRange->MinimumSampleFrequency = fileContext->sampleRate;
-    filterInfo->dataRange->MaximumChannels = request->channelCount;
+    endpoint->dataRange->MaximumBitsPerSample = fileContext->sampleDepth * 3;
+    endpoint->dataRange->MinimumBitsPerSample = fileContext->sampleDepth * 3;
+    endpoint->dataRange->MaximumSampleFrequency = fileContext->sampleRate;
+    endpoint->dataRange->MinimumSampleFrequency = fileContext->sampleRate;
+    endpoint->dataRange->MaximumChannels = request->channelCount;
+
+    request->name[MAX_ENDPOINT_NAME_LENGTH] = '\0';
+    RtlInitUnicodeString(&endpoint->pendingDeviceName, request->name);
+
+    LONG filterId = InterlockedIncrement(&extension->nextFilterId);
 
     RtlIntegerToUnicodeString(filterId, 10, &referenceString);
     KsAcquireDevice(ksDevice);
     status = KsCreateFilterFactory(
-        device, filterInfo->filterDesc, buf, nullptr, KSCREATE_ITEM_FREEONSTOP,
-        nullptr, nullptr, &filterInfo->filterFactory);
+        device, endpoint->filterDesc, buf, nullptr, KSCREATE_ITEM_FREEONSTOP,
+        nullptr, nullptr, &endpoint->filterFactory);
     KsReleaseDevice(ksDevice);
 
     if (!NT_SUCCESS(status)) {
         goto err_out;
     }
 
-    PUNICODE_STRING symlink =
-        KsFilterFactoryGetSymbolicLink(filterInfo->filterFactory);
-
-    status = IoSetDeviceInterfacePropertyData(symlink,
-        &DEVPKEY_DeviceInterface_FriendlyName, LOCALE_NEUTRAL, 0,
-        DEVPROP_TYPE_STRING, deviceName.Length + sizeof(WCHAR), deviceName.Buffer);
-
-    if (!NT_SUCCESS(status)) {
-        SAR_LOG("Couldn't set friendly name: %08X", status);
-        goto err_out;
-    }
-
-    status = KsFilterFactorySetDeviceClassesState(filterInfo->filterFactory, TRUE);
-
-    if (!NT_SUCCESS(status)) {
-        SAR_LOG("Couldn't enable KS filter factory");
-        goto err_out;
-    }
-
     ExAcquireFastMutex(&fileContext->mutex);
-    InsertTailList(&fileContext->endpointList, &filterInfo->listEntry);
+
+    BOOLEAN runWorkItem = IsListEmpty(&fileContext->pendingEndpointList);
+
+    InsertTailList(&fileContext->pendingEndpointList, &endpoint->listEntry);
+
+    if (runWorkItem) {
+        IoQueueWorkItem(
+            fileContext->workItem, SarProcessPendingEndpoints, DelayedWorkQueue,
+            fileContext);
+    }
+
     ExReleaseFastMutex(&fileContext->mutex);
-    return status;
+    return STATUS_PENDING;
 
 err_out:
-    if (filterInfo->filterFactory) {
+    if (endpoint->filterFactory) {
         KsAcquireDevice(ksDevice);
-        KsDeleteFilterFactory(filterInfo->filterFactory);
+        KsDeleteFilterFactory(endpoint->filterFactory);
         KsReleaseDevice(ksDevice);
     }
 
-    if (filterInfo->allocatorFraming) {
-        ExFreePoolWithTag(filterInfo->allocatorFraming, SAR_TAG);
+    if (endpoint->allocatorFraming) {
+        ExFreePoolWithTag(endpoint->allocatorFraming, SAR_TAG);
     }
 
-    if (filterInfo->dataRange) {
-        ExFreePoolWithTag(filterInfo->dataRange, SAR_TAG);
+    if (endpoint->dataRange) {
+        ExFreePoolWithTag(endpoint->dataRange, SAR_TAG);
     }
 
-    if (filterInfo->pinDesc) {
-        ExFreePoolWithTag(filterInfo->pinDesc, SAR_TAG);
+    if (endpoint->pinDesc) {
+        ExFreePoolWithTag(endpoint->pinDesc, SAR_TAG);
     }
 
-    if (filterInfo->filterDesc) {
-        ExFreePoolWithTag(filterInfo->filterDesc, SAR_TAG);
+    if (endpoint->filterDesc) {
+        ExFreePoolWithTag(endpoint->filterDesc, SAR_TAG);
     }
 
-    ExFreePoolWithTag(filterInfo, SAR_TAG);
+    ExFreePoolWithTag(endpoint, SAR_TAG);
     return status;
 }
 
 NTSTATUS SarIrpCreate(PDEVICE_OBJECT deviceObject, PIRP irp)
 {
+    NTSTATUS status = STATUS_SUCCESS;
     UNICODE_STRING referencePath;
     PIO_STACK_LOCATION irpStack = IoGetCurrentIrpStackLocation(irp);
     SarDriverExtension *extension =
@@ -362,32 +453,31 @@ NTSTATUS SarIrpCreate(PDEVICE_OBJECT deviceObject, PIRP irp)
     ASSERT(isNew);
 
     if (!fileContext) {
-        return STATUS_INSUFFICIENT_RESOURCES;
+        status = STATUS_INSUFFICIENT_RESOURCES;
+        goto out;
     }
 
-    SarInitializeFileContext(fileContext);
+    if (!NT_SUCCESS(SarInitializeFileContext(fileContext))) {
+        SarDeleteFileContext(extension, irp);
+        status = STATUS_INSUFFICIENT_RESOURCES;
+        goto out;
+    }
+
     irpStack->FileObject->FsContext2 = fileContext;
-    irp->IoStatus.Status = STATUS_SUCCESS;
+
+out:
+    irp->IoStatus.Status = status;
     IoCompleteRequest(irp, IO_NO_INCREMENT);
-    return STATUS_SUCCESS;
+    return status;
 }
 
 NTSTATUS SarIrpClose(PDEVICE_OBJECT deviceObject, PIRP irp)
 {
     NTSTATUS status;
-    PIO_STACK_LOCATION irpStack;
     SarDriverExtension *extension =
         (SarDriverExtension *)IoGetDriverObjectExtension(
             deviceObject->DriverObject, DriverEntry);
-    SarFileContext fileContextTemplate;
-    BOOLEAN deleted;
-
-    irpStack = IoGetCurrentIrpStackLocation(irp);
-    fileContextTemplate.fileObject = irpStack->FileObject;
-    ExAcquireFastMutex(&extension->fileContextLock);
-    deleted = RtlDeleteElementGenericTable(
-        &extension->fileContextTable, &fileContextTemplate);
-    ExReleaseFastMutex(&extension->fileContextLock);
+    BOOLEAN deleted = SarDeleteFileContext(extension, irp);
 
     if (!deleted) {
         SAR_LOG("SarIrpClose Passthrough");
@@ -401,23 +491,53 @@ NTSTATUS SarIrpClose(PDEVICE_OBJECT deviceObject, PIRP irp)
     return status;
 }
 
-NTSTATUS SarIrpCleanup(PDEVICE_OBJECT deviceObject, PIRP irp)
+BOOLEAN SarDeleteFileContext(SarDriverExtension *extension, PIRP irp)
 {
-    UNREFERENCED_PARAMETER(deviceObject);
-    NTSTATUS status;
     PIO_STACK_LOCATION irpStack;
-    SarDriverExtension *extension =
-        (SarDriverExtension *)IoGetDriverObjectExtension(
-            deviceObject->DriverObject, DriverEntry);
+    SarFileContext *fileContext;
     SarFileContext fileContextTemplate;
     BOOLEAN deleted;
 
     irpStack = IoGetCurrentIrpStackLocation(irp);
     fileContextTemplate.fileObject = irpStack->FileObject;
     ExAcquireFastMutex(&extension->fileContextLock);
+    fileContext = (SarFileContext *)RtlLookupElementGenericTable(
+        &extension->fileContextTable, (PVOID)&fileContextTemplate);
+
+    if (fileContext) {
+        ExAcquireFastMutex(&fileContext->mutex);
+
+        PLIST_ENTRY entry = fileContext->endpointList.Flink;
+
+        while (entry != &fileContext->endpointList) {
+            //SarEndpoint *endpoint =
+            //    CONTAINING_RECORD(entry, SarEndpoint, listEntry);
+
+            entry = entry->Flink;
+            SAR_LOG("This should delete filters but the locking is tricky");
+        }
+
+        if (fileContext->workItem) {
+            IoFreeWorkItem(fileContext->workItem);
+        }
+
+        ExReleaseFastMutex(&fileContext->mutex);
+    }
+
     deleted = RtlDeleteElementGenericTable(
         &extension->fileContextTable, &fileContextTemplate);
     ExReleaseFastMutex(&extension->fileContextLock);
+    return deleted;
+}
+
+NTSTATUS SarIrpCleanup(PDEVICE_OBJECT deviceObject, PIRP irp)
+{
+    UNREFERENCED_PARAMETER(deviceObject);
+    NTSTATUS status;
+    SarDriverExtension *extension =
+        (SarDriverExtension *)IoGetDriverObjectExtension(
+            deviceObject->DriverObject, DriverEntry);
+    BOOLEAN deleted = SarDeleteFileContext(extension, irp);
 
     if (!deleted) {
         SAR_LOG("SarIrpCleanup Passthrough");
@@ -462,7 +582,20 @@ NTSTATUS SarIrpDeviceControl(PDEVICE_OBJECT deviceObject, PIRP irp)
         ioControlCode, fileContext);
 
     switch (ioControlCode) {
-        case SAR_REQUEST_CREATE_AUDIO_BUFFERS:
+        case SAR_REQUEST_SET_BUFFER_LAYOUT: {
+            SAR_LOG("(SAR) create audio buffers");
+
+            SarSetBufferLayoutRequest request;
+
+            if (!ioctlInput(
+                &ntStatus, irp, irpStack, (PVOID *)&request, sizeof(request))) {
+
+                break;
+            }
+
+            ntStatus = SarSetBufferLayout(fileContext, &request);
+            break;
+        }
         case SAR_REQUEST_CREATE_ENDPOINT: {
             SAR_LOG("(SAR) Create endpoint");
 
@@ -476,8 +609,10 @@ NTSTATUS SarIrpDeviceControl(PDEVICE_OBJECT deviceObject, PIRP irp)
 
             SAR_LOG("(SAR) Create endpoint request: %d, %d, %d",
                 request.type, request.index, request.channelCount);
+
+            IoMarkIrpPending(irp);
             ntStatus = SarCreateEndpoint(
-                deviceObject, extension, fileContext, &request);
+                deviceObject, irp, extension, fileContext, &request);
             break;
         }
         case SAR_REQUEST_MAP_AUDIO_BUFFER:
@@ -487,25 +622,43 @@ NTSTATUS SarIrpDeviceControl(PDEVICE_OBJECT deviceObject, PIRP irp)
             break;
     }
 
-    irp->IoStatus.Status = ntStatus;
-    IoCompleteRequest(irp, IO_NO_INCREMENT);
+    if (ntStatus != STATUS_PENDING) {
+        irp->IoStatus.Status = ntStatus;
+        IoCompleteRequest(irp, IO_NO_INCREMENT);
+    }
+
     return ntStatus;
 }
 
 VOID SarUnload(PDRIVER_OBJECT driverObject)
 {
-    UNREFERENCED_PARAMETER(driverObject);
     SAR_LOG("SAR is unloading");
+
+    SarDriverExtension *extension =
+        (SarDriverExtension *)IoGetDriverObjectExtension(
+            driverObject, DriverEntry);
+
+    RtlFreeUnicodeString(&extension->sarInterfaceName);
 }
 
-void SarInitializeFileContext(SarFileContext *fileContext)
+NTSTATUS SarInitializeFileContext(SarFileContext *fileContext)
 {
-    InitializeListHead(&fileContext->endpointList);
     ExInitializeFastMutex(&fileContext->mutex);
+    InitializeListHead(&fileContext->endpointList);
+    InitializeListHead(&fileContext->pendingEndpointList);
     fileContext->sampleRate = 0;
     fileContext->sampleDepth = 0;
     fileContext->bufferCount = 0;
     fileContext->bufferSize = 0;
+
+    fileContext->workItem = IoAllocateWorkItem(
+        fileContext->fileObject->DeviceObject);
+
+    if (!fileContext->workItem) {
+        return STATUS_INSUFFICIENT_RESOURCES;
+    }
+
+    return STATUS_SUCCESS;
 }
 
 RTL_GENERIC_COMPARE_RESULTS NTAPI SarCompareFileContext(
@@ -567,6 +720,7 @@ extern "C" NTSTATUS DriverEntry(
     extension->ksDispatchDeviceControl =
         driverObject->MajorFunction[IRP_MJ_DEVICE_CONTROL];
     extension->nextFilterId = 0;
+    extension->sarInterfaceName = {};
     driverObject->MajorFunction[IRP_MJ_CREATE] = SarIrpCreate;
     driverObject->MajorFunction[IRP_MJ_DEVICE_CONTROL] = SarIrpDeviceControl;
     driverObject->MajorFunction[IRP_MJ_CLOSE] = SarIrpClose;

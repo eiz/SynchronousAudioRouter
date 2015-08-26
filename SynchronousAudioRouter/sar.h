@@ -69,7 +69,7 @@ DEFINE_GUID(GUID_DEVINTERFACE_SYNCHRONOUSAUDIOROUTER,
 #define SAR_ENDPOINT_TYPE_CAPTURE 1
 #define SAR_ENDPOINT_TYPE_PLAYBACK 2
 
-#define SAR_REQUEST_CREATE_AUDIO_BUFFERS CTL_CODE( \
+#define SAR_REQUEST_SET_BUFFER_LAYOUT CTL_CODE( \
     FILE_DEVICE_UNKNOWN, 1, METHOD_IN_DIRECT, FILE_READ_DATA | FILE_WRITE_DATA)
 #define SAR_REQUEST_CREATE_ENDPOINT CTL_CODE( \
     FILE_DEVICE_UNKNOWN, 2, METHOD_IN_DIRECT, FILE_READ_DATA | FILE_WRITE_DATA)
@@ -79,6 +79,12 @@ DEFINE_GUID(GUID_DEVINTERFACE_SYNCHRONOUSAUDIOROUTER,
     FILE_DEVICE_UNKNOWN, 4, METHOD_IN_DIRECT, FILE_READ_DATA | FILE_WRITE_DATA)
 
 #define SAR_MAX_CHANNEL_COUNT 256
+#define SAR_MAX_BUFFER_COUNT 1024
+#define SAR_MAX_BUFFER_SIZE 65536
+#define SAR_MIN_SAMPLE_DEPTH 1
+#define SAR_MAX_SAMPLE_DEPTH 3
+#define SAR_MIN_SAMPLE_RATE 1000
+#define SAR_MAX_SAMPLE_RATE 192000
 
 typedef struct SarCreateEndpointRequest
 {
@@ -88,7 +94,7 @@ typedef struct SarCreateEndpointRequest
     WCHAR name[MAX_ENDPOINT_NAME_LENGTH+1];
 } SarCreateEndpointRequest;
 
-typedef struct SarCreateAudioBuffersRequest
+typedef struct SarSetBufferLayoutRequest
 {
     DWORD bufferCount;
     DWORD bufferSize;
@@ -112,6 +118,7 @@ typedef struct SarDriverExtension
     PDRIVER_DISPATCH ksDispatchClose;
     PDRIVER_DISPATCH ksDispatchCleanup;
     PDRIVER_DISPATCH ksDispatchDeviceControl;
+    UNICODE_STRING sarInterfaceName;
     FAST_MUTEX fileContextLock;
     RTL_GENERIC_TABLE fileContextTable;
     LONG nextFilterId;
@@ -123,6 +130,8 @@ typedef struct SarDriverExtension
 typedef struct SarEndpoint
 {
     LIST_ENTRY listEntry;
+    PIRP pendingIrp;
+    UNICODE_STRING pendingDeviceName;
     PKSFILTERFACTORY filterFactory;
     PKSFILTER_DESCRIPTOR filterDesc;
     PKSPIN_DESCRIPTOR_EX pinDesc;
@@ -136,7 +145,9 @@ typedef struct SarFileContext
 {
     PFILE_OBJECT fileObject;
     FAST_MUTEX mutex;
+    PIO_WORKITEM workItem;
     LIST_ENTRY endpointList;
+    LIST_ENTRY pendingEndpointList;
     DWORD sampleRate;
     DWORD sampleDepth;
     DWORD bufferCount;
@@ -145,12 +156,13 @@ typedef struct SarFileContext
 
 NTSTATUS SarCreateEndpoint(
     PDEVICE_OBJECT device,
+    PIRP irp,
     SarDriverExtension *extension,
     SarFileContext *fileContext,
     SarCreateEndpointRequest *request);
 
-VOID SarInitializeFileContext(SarFileContext *fileContext);
-VOID SarCleanupFileContext(SarFileContext *fileContext);
+NTSTATUS SarInitializeFileContext(SarFileContext *fileContext);
+BOOLEAN SarDeleteFileContext(SarDriverExtension *extension, PIRP irp);
 RTL_GENERIC_COMPARE_RESULTS NTAPI SarCompareFileContext(
     PRTL_GENERIC_TABLE table, PVOID lhs, PVOID rhs);
 PVOID NTAPI SarAllocateFileContext(PRTL_GENERIC_TABLE table, CLONG byteSize);
