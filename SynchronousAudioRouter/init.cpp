@@ -25,7 +25,7 @@ DRIVER_DISPATCH SarIrpCleanup;
 DRIVER_UNLOAD SarUnload;
 
 #define SAR_TAG '1RAS'
-//#define NO_LOGGING
+#define NO_LOGGING
 
 #ifdef NO_LOGGING
 #define SAR_LOG(...)
@@ -79,13 +79,18 @@ static const KSPIN_DESCRIPTOR_EX gPinDescriptorTemplate = {
 };
 
 static const GUID gCategoriesTableCapture[] = {
-    STATICGUIDOF(KSCATEGORY_AUDIO),
     STATICGUIDOF(KSCATEGORY_CAPTURE),
+    STATICGUIDOF(KSCATEGORY_AUDIO),
 };
 
 static const GUID gCategoriesTableRender[] = {
-    STATICGUIDOF(KSCATEGORY_AUDIO),
     STATICGUIDOF(KSCATEGORY_RENDER),
+    STATICGUIDOF(KSCATEGORY_AUDIO),
+};
+
+static const KSTOPOLOGY_CONNECTION gFilterConnections[] = {
+    { KSFILTER_NODE, 0, 0, 1 },
+    { 0, 0, KSFILTER_NODE, 1 }
 };
 
 static KSFILTER_DESCRIPTOR gFilterDescriptorTemplate = {
@@ -99,7 +104,7 @@ static KSFILTER_DESCRIPTOR gFilterDescriptorTemplate = {
     nullptr,
     DEFINE_KSFILTER_CATEGORIES_NULL,
     DEFINE_KSFILTER_NODE_DESCRIPTORS_NULL,
-    DEFINE_KSFILTER_DEFAULT_CONNECTIONS,
+    DEFINE_KSFILTER_CONNECTIONS(gFilterConnections),
     nullptr, // ComponentId
 };
 
@@ -208,6 +213,77 @@ NTSTATUS SarSetBufferLayout(
 //  - pin supports a single KSDATARANGE
 //  - pin flags: KSPIN_FLAG_DO_NOT_INITIATE_PROCESSING KSPIN_FLAG_PROCESS_IN_RUN_STATE_ONLY KSPIN_FLAG_FIXED_FORMAT KSPIN_FLAG_FRAMES_NOT_REQUIRED_FOR_PROCESSING
 
+NTSTATUS SarSetDeviceInterfaceProperties(
+    SarEndpoint *endpoint,
+    PUNICODE_STRING symbolicLinkName,
+    const GUID *aliasInterfaceClassGuid)
+{
+    NTSTATUS status;
+    HANDLE deviceInterfaceKey = nullptr;
+    UNICODE_STRING clsidValue, clsidData = {}, aliasLink = {};
+
+    status = IoGetDeviceInterfaceAlias(
+        symbolicLinkName, aliasInterfaceClassGuid, &aliasLink);
+
+    if (!NT_SUCCESS(status)) {
+        SAR_LOG("Couldn't get device alias: %08X", status);
+        goto out;
+    }
+
+    SAR_LOG("Setting interface properties for %wZ", &aliasLink);
+
+    status = IoSetDeviceInterfacePropertyData(&aliasLink,
+        &DEVPKEY_DeviceInterface_FriendlyName, LOCALE_NEUTRAL, 0,
+        DEVPROP_TYPE_STRING,
+        endpoint->pendingDeviceName.Length + sizeof(WCHAR),
+        endpoint->pendingDeviceName.Buffer);
+
+    if (!NT_SUCCESS(status)) {
+        SAR_LOG("Couldn't set friendly name: %08X", status);
+        goto out;
+    }
+
+    status = IoOpenDeviceInterfaceRegistryKey(
+        &aliasLink, KEY_ALL_ACCESS, &deviceInterfaceKey);
+
+    if (!NT_SUCCESS(status)) {
+        SAR_LOG("Couldn't open registry key: %08X", status);
+        goto out;
+    }
+
+    RtlUnicodeStringInit(&clsidValue, L"CLSID");
+    status = RtlStringFromGUID(CLSID_Proxy, &clsidData);
+
+    if (!NT_SUCCESS(status)) {
+        SAR_LOG("Couldn't convert GUID to string: %08X", status);
+        goto out;
+    }
+
+    status = ZwSetValueKey(
+        deviceInterfaceKey, &clsidValue, 0, REG_SZ, clsidData.Buffer,
+        clsidData.Length + sizeof(UNICODE_NULL));
+
+    if (!NT_SUCCESS(status)) {
+        SAR_LOG("Couldn't set CLSID: %08X", status);
+        goto out;
+    }
+
+out:
+    if (clsidData.Buffer) {
+        RtlFreeUnicodeString(&clsidData);
+    }
+
+    if (deviceInterfaceKey) {
+        ZwClose(deviceInterfaceKey);
+    }
+
+    if (aliasLink.Buffer) {
+        RtlFreeUnicodeString(&aliasLink);
+    }
+
+    return status;
+}
+
 VOID SarProcessPendingEndpoints(PDEVICE_OBJECT deviceObject, PVOID context)
 {
     UNREFERENCED_PARAMETER(deviceObject);
@@ -218,49 +294,60 @@ VOID SarProcessPendingEndpoints(PDEVICE_OBJECT deviceObject, PVOID context)
 
     ExAcquireFastMutex(&fileContext->mutex);
 
+retry:
     PLIST_ENTRY entry = fileContext->pendingEndpointList.Flink;
 
     while (entry != &fileContext->pendingEndpointList) {
         SarEndpoint *endpoint = CONTAINING_RECORD(entry, SarEndpoint, listEntry);
         PUNICODE_STRING symlink =
             KsFilterFactoryGetSymbolicLink(endpoint->filterFactory);
+        PLIST_ENTRY current = entry;
 
         SAR_LOG("Processing a pending endpoint");
         entry = endpoint->listEntry.Flink;
-        status = IoSetDeviceInterfacePropertyData(symlink,
-            &DEVPKEY_DeviceInterface_FriendlyName, LOCALE_NEUTRAL, 0,
-            DEVPROP_TYPE_STRING,
-            endpoint->pendingDeviceName.Length + sizeof(WCHAR),
-            endpoint->pendingDeviceName.Buffer);
-
-        if (!NT_SUCCESS(status)) {
-            SAR_LOG("Couldn't set friendly name: %08X", status);
-            goto err_out;
-        }
-
-        status = IoSetDeviceInterfacePropertyData(symlink,
-            &DEVPKEY_DeviceInterface_ClassGuid, LOCALE_NEUTRAL, 0,
-            DEVPROP_TYPE_GUID, sizeof(GUID), (PVOID)&CLSID_Proxy);
-
-        if (!NT_SUCCESS(status)) {
-            SAR_LOG("Couldn't set clsid: %08X", status);
-            goto err_out;
-        }
+        RemoveEntryList(current);
+        ExReleaseFastMutex(&fileContext->mutex);
 
         status = KsFilterFactorySetDeviceClassesState(
             endpoint->filterFactory, TRUE);
 
         if (!NT_SUCCESS(status)) {
             SAR_LOG("Couldn't enable KS filter factory");
-            goto err_out;
+            goto out;
         }
 
-        RemoveEntryList(entry);
-        InsertTailList(&fileContext->endpointList, &endpoint->listEntry);
+        status = SarSetDeviceInterfaceProperties(
+            endpoint, symlink, &KSCATEGORY_AUDIO);
 
-err_out:
+        if (!NT_SUCCESS(status)) {
+            goto out;
+        }
+
+        status = SarSetDeviceInterfaceProperties(
+            endpoint, symlink, endpoint->type == SAR_ENDPOINT_TYPE_PLAYBACK ?
+            &KSCATEGORY_RENDER : &KSCATEGORY_CAPTURE);
+
+        if (!NT_SUCCESS(status)) {
+            goto out;
+        }
+
+out:
+        ExAcquireFastMutex(&fileContext->mutex);
+
+        if (NT_SUCCESS(status)) {
+            InsertTailList(&fileContext->endpointList, &endpoint->listEntry);
+        } else {
+            // TODO: delete failed endpoint
+        }
+
         endpoint->pendingIrp->IoStatus.Status = status;
         IoCompleteRequest(endpoint->pendingIrp, IO_NO_INCREMENT);
+    }
+
+    // Someone added a new endpoint request while we were working with locks
+    // dropped. Try again.
+    if (!IsListEmpty(&fileContext->pendingEndpointList)) {
+        goto retry;
     }
 
     ExReleaseFastMutex(&fileContext->mutex);
@@ -280,7 +367,7 @@ NTSTATUS SarCreateEndpoint(
     PKSDEVICE ksDevice = KsGetDeviceForDeviceObject(device);
     SarEndpoint *endpoint;
 
-    if (request->type != SAR_ENDPOINT_TYPE_CAPTURE &&
+    if (request->type != SAR_ENDPOINT_TYPE_RECORDING &&
         request->type != SAR_ENDPOINT_TYPE_PLAYBACK) {
         return STATUS_INVALID_PARAMETER;
     }
@@ -301,6 +388,12 @@ NTSTATUS SarCreateEndpoint(
 
     endpoint->pendingIrp = irp;
     endpoint->channelCount = request->channelCount;
+    endpoint->type = request->type;
+
+    for (DWORD i = 0; i < endpoint->channelCount; ++i) {
+        endpoint->channelMappings[i] = SAR_INVALID_BUFFER;
+    }
+
     endpoint->filterDesc = (PKSFILTER_DESCRIPTOR)
         ExAllocatePoolWithTag(PagedPool, sizeof(KSFILTER_DESCRIPTOR), SAR_TAG);
 
@@ -309,7 +402,7 @@ NTSTATUS SarCreateEndpoint(
     }
 
     endpoint->pinDesc = (PKSPIN_DESCRIPTOR_EX)
-        ExAllocatePoolWithTag(PagedPool, sizeof(KSPIN_DESCRIPTOR_EX), SAR_TAG);
+        ExAllocatePoolWithTag(PagedPool, sizeof(KSPIN_DESCRIPTOR_EX) * 2, SAR_TAG);
 
     if (!endpoint->pinDesc) {
         goto err_out;
@@ -322,6 +415,13 @@ NTSTATUS SarCreateEndpoint(
         goto err_out;
     }
 
+    endpoint->analogDataRange = (PKSDATARANGE_AUDIO)
+        ExAllocatePoolWithTag(PagedPool, sizeof(KSDATARANGE_AUDIO), SAR_TAG);
+
+    if (!endpoint->analogDataRange) {
+        goto err_out;
+    }
+
     endpoint->allocatorFraming = (PKSALLOCATOR_FRAMING_EX)
         ExAllocatePoolWithTag(PagedPool, sizeof(KSALLOCATOR_FRAMING_EX), SAR_TAG);
 
@@ -329,26 +429,53 @@ NTSTATUS SarCreateEndpoint(
         goto err_out;
     }
 
+    endpoint->nodeDesc = (PKSNODE_DESCRIPTOR)
+        ExAllocatePoolWithTag(PagedPool, sizeof(KSNODE_DESCRIPTOR), SAR_TAG);
+
+    if (!endpoint->nodeDesc) {
+        goto err_out;
+    }
+
     *endpoint->filterDesc = gFilterDescriptorTemplate;
-    *endpoint->pinDesc = gPinDescriptorTemplate;
+    endpoint->pinDesc[0] = gPinDescriptorTemplate;
+    endpoint->pinDesc[1] = gPinDescriptorTemplate;
     endpoint->filterDesc->CategoriesCount = 2;
     endpoint->filterDesc->Categories =
-        request->type == SAR_ENDPOINT_TYPE_CAPTURE ?
+        request->type == SAR_ENDPOINT_TYPE_RECORDING ?
         gCategoriesTableCapture : gCategoriesTableRender;
     endpoint->filterDesc->PinDescriptors = endpoint->pinDesc;
-    endpoint->filterDesc->PinDescriptorsCount = 1;
+    endpoint->filterDesc->PinDescriptorsCount = 2;
     endpoint->filterDesc->PinDescriptorSize = sizeof(KSPIN_DESCRIPTOR_EX);
+    endpoint->filterDesc->NodeDescriptors = endpoint->nodeDesc;
+    endpoint->filterDesc->NodeDescriptorSize = sizeof(KSNODE_DESCRIPTOR);
+    endpoint->filterDesc->NodeDescriptorsCount = 1;
 
-    PKSPIN_DESCRIPTOR pinDesc = &endpoint->pinDesc->PinDescriptor;
+    PKSPIN_DESCRIPTOR pinDesc = &endpoint->pinDesc[0].PinDescriptor;
 
     pinDesc->DataRangesCount = 1;
     pinDesc->DataRanges = (PKSDATARANGE *)&endpoint->dataRange;
     pinDesc->Communication =
-        request->type == SAR_ENDPOINT_TYPE_CAPTURE ?
+        request->type == SAR_ENDPOINT_TYPE_RECORDING ?
         KSPIN_COMMUNICATION_SOURCE : KSPIN_COMMUNICATION_SINK;
     pinDesc->DataFlow =
-        request->type == SAR_ENDPOINT_TYPE_CAPTURE ?
+        request->type == SAR_ENDPOINT_TYPE_RECORDING ?
         KSPIN_DATAFLOW_OUT : KSPIN_DATAFLOW_IN;
+    pinDesc->Category = &KSCATEGORY_AUDIO;
+
+    pinDesc = &endpoint->pinDesc[1].PinDescriptor;
+    pinDesc->DataRangesCount = 1;
+    pinDesc->DataRanges = (PKSDATARANGE *)&endpoint->analogDataRange;
+    pinDesc->Communication = KSPIN_COMMUNICATION_NONE;
+    pinDesc->Category = &KSNODETYPE_LINE_CONNECTOR;
+    pinDesc->DataFlow =
+        request->type == SAR_ENDPOINT_TYPE_RECORDING ?
+        KSPIN_DATAFLOW_IN : KSPIN_DATAFLOW_OUT;
+
+    endpoint->nodeDesc->AutomationTable = nullptr;
+    endpoint->nodeDesc->Type =
+        request->type == SAR_ENDPOINT_TYPE_RECORDING ?
+        &KSNODETYPE_ADC : &KSNODETYPE_DAC;
+    endpoint->nodeDesc->Name = nullptr;
 
     endpoint->dataRange->DataRange.FormatSize = sizeof(KSDATARANGE_AUDIO);
     endpoint->dataRange->DataRange.Flags = 0;
@@ -363,6 +490,19 @@ NTSTATUS SarCreateEndpoint(
     endpoint->dataRange->MaximumSampleFrequency = fileContext->sampleRate;
     endpoint->dataRange->MinimumSampleFrequency = fileContext->sampleRate;
     endpoint->dataRange->MaximumChannels = request->channelCount;
+
+    endpoint->analogDataRange->DataRange.FormatSize = sizeof(KSDATARANGE_AUDIO);
+    endpoint->analogDataRange->DataRange.Flags = 0;
+    endpoint->analogDataRange->DataRange.SampleSize = 0;
+    endpoint->analogDataRange->DataRange.Reserved = 0;
+    endpoint->analogDataRange->DataRange.MajorFormat = KSDATAFORMAT_TYPE_AUDIO;
+    endpoint->analogDataRange->DataRange.SubFormat = KSDATAFORMAT_SUBTYPE_ANALOG;
+    endpoint->analogDataRange->DataRange.Specifier = KSDATAFORMAT_SPECIFIER_NONE;
+    endpoint->analogDataRange->MaximumBitsPerSample = 0;
+    endpoint->analogDataRange->MinimumBitsPerSample = 0;
+    endpoint->analogDataRange->MaximumSampleFrequency = 0;
+    endpoint->analogDataRange->MinimumSampleFrequency = 0;
+    endpoint->analogDataRange->MaximumChannels = 0;
 
     request->name[MAX_ENDPOINT_NAME_LENGTH] = '\0';
     RtlInitUnicodeString(&endpoint->pendingDeviceName, request->name);
@@ -408,6 +548,14 @@ err_out:
 
     if (endpoint->dataRange) {
         ExFreePoolWithTag(endpoint->dataRange, SAR_TAG);
+    }
+
+    if (endpoint->analogDataRange) {
+        ExFreePoolWithTag(endpoint->analogDataRange, SAR_TAG);
+    }
+
+    if (endpoint->nodeDesc) {
+        ExFreePoolWithTag(endpoint->nodeDesc, SAR_TAG);
     }
 
     if (endpoint->pinDesc) {
