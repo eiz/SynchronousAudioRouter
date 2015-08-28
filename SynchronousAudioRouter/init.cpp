@@ -308,14 +308,6 @@ retry:
         RemoveEntryList(current);
         ExReleaseFastMutex(&fileContext->mutex);
 
-        status = KsFilterFactorySetDeviceClassesState(
-            endpoint->filterFactory, TRUE);
-
-        if (!NT_SUCCESS(status)) {
-            SAR_LOG("Couldn't enable KS filter factory");
-            goto out;
-        }
-
         status = SarSetDeviceInterfaceProperties(
             endpoint, symlink, &KSCATEGORY_AUDIO);
 
@@ -328,6 +320,14 @@ retry:
             &KSCATEGORY_RENDER : &KSCATEGORY_CAPTURE);
 
         if (!NT_SUCCESS(status)) {
+            goto out;
+        }
+
+        status = KsFilterFactorySetDeviceClassesState(
+            endpoint->filterFactory, TRUE);
+
+        if (!NT_SUCCESS(status)) {
+            SAR_LOG("Couldn't enable KS filter factory");
             goto out;
         }
 
@@ -485,8 +485,8 @@ NTSTATUS SarCreateEndpoint(
     endpoint->dataRange->DataRange.SubFormat = KSDATAFORMAT_SUBTYPE_PCM;
     endpoint->dataRange->DataRange.Specifier =
         KSDATAFORMAT_SPECIFIER_WAVEFORMATEX;
-    endpoint->dataRange->MaximumBitsPerSample = fileContext->sampleDepth * 3;
-    endpoint->dataRange->MinimumBitsPerSample = fileContext->sampleDepth * 3;
+    endpoint->dataRange->MaximumBitsPerSample = fileContext->sampleDepth * 8;
+    endpoint->dataRange->MinimumBitsPerSample = fileContext->sampleDepth * 8;
     endpoint->dataRange->MaximumSampleFrequency = fileContext->sampleRate;
     endpoint->dataRange->MinimumSampleFrequency = fileContext->sampleRate;
     endpoint->dataRange->MaximumChannels = request->channelCount;

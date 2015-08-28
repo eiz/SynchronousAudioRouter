@@ -40,6 +40,21 @@ BOOL createEndpoint(
     return TRUE;
 }
 
+BOOL setBufferLayout(
+    HANDLE device, DWORD bufferCount, DWORD bufferSize,
+    DWORD sampleRate, DWORD sampleDepth)
+{
+    SarSetBufferLayoutRequest request = {};
+
+    request.bufferCount = bufferCount;
+    request.bufferSize = bufferSize;
+    request.sampleRate = sampleRate;
+    request.sampleDepth = sampleDepth;
+
+    return DeviceIoControl(device, SAR_REQUEST_SET_BUFFER_LAYOUT,
+        (LPVOID)&request, sizeof(request), nullptr, 0, nullptr, nullptr);
+}
+
 int main(int argc, char *argv[])
 {
     HDEVINFO devinfo;
@@ -97,6 +112,12 @@ int main(int argc, char *argv[])
     }
 
     std::cout << "Opened SAR device." << std::endl;
+
+    if (!setBufferLayout(device, 1, 1024*3, 48000, 3)) {
+        std::cerr << "Couldn't set buffer layout: "
+            << GetLastError() << std::endl;
+        return 1;
+    }
 
     if (!createEndpoint(
         device, SAR_ENDPOINT_TYPE_PLAYBACK, 0, 2, L"Music Out (Stereo)")) {
