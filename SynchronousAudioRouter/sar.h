@@ -166,6 +166,10 @@ NTSTATUS SarCreateEndpoint(
     SarFileContext *fileContext,
     SarCreateEndpointRequest *request);
 
+NTSTATUS SarIntersectHandler(
+    PVOID context, PIRP irp, PKSP_PIN pin,
+    PKSDATARANGE dataRange, PKSDATARANGE matchingDataRange, ULONG dataBufferSize,
+    PVOID data, PULONG dataSize);
 NTSTATUS SarInitializeFileContext(SarFileContext *fileContext);
 BOOLEAN SarDeleteFileContext(SarDriverExtension *extension, PIRP irp);
 RTL_GENERIC_COMPARE_RESULTS NTAPI SarCompareFileContext(

@@ -75,7 +75,7 @@ static const KSPIN_DESCRIPTOR_EX gPinDescriptorTemplate = {
     1, // InstancesPossible
     1, // InstancesNecessary
     nullptr, // AllocatorFraming
-    nullptr, // TODO: intersection handler
+    SarIntersectHandler, // IntersectHandler
 };
 
 static const GUID gCategoriesTableCapture[] = {
@@ -568,6 +568,44 @@ err_out:
 
     ExFreePoolWithTag(endpoint, SAR_TAG);
     return status;
+}
+
+NTSTATUS SarIntersectHandler(
+    PVOID context, PIRP irp, PKSP_PIN pin,
+    PKSDATARANGE callerDataRange, PKSDATARANGE descriptorDataRange,
+    ULONG dataBufferSize, PVOID data, PULONG dataSize)
+{
+    UNREFERENCED_PARAMETER(context);
+    UNREFERENCED_PARAMETER(irp);
+    UNREFERENCED_PARAMETER(pin);
+    UNREFERENCED_PARAMETER(dataBufferSize);
+    UNREFERENCED_PARAMETER(data);
+    UNREFERENCED_PARAMETER(dataSize);
+
+#ifdef NO_LOGGING
+    UNREFERENCED_PARAMETER(callerDataRange);
+    UNREFERENCED_PARAMETER(descriptorDataRange);
+#else
+    if (callerDataRange->FormatSize == sizeof(KSDATARANGE_AUDIO) &&
+        callerDataRange->MajorFormat == KSDATAFORMAT_TYPE_AUDIO) {
+        PKSDATARANGE_AUDIO audio = (PKSDATARANGE_AUDIO)callerDataRange;
+        SAR_LOG("dataRange: %dHz-%dHz, %dbit-%dbit, x%d",
+            audio->MinimumSampleFrequency, audio->MaximumSampleFrequency,
+            audio->MinimumBitsPerSample, audio->MaximumBitsPerSample,
+            audio->MaximumChannels);
+    }
+
+    if (descriptorDataRange->FormatSize == sizeof(KSDATARANGE_AUDIO) &&
+        descriptorDataRange->MajorFormat == KSDATAFORMAT_TYPE_AUDIO) {
+        PKSDATARANGE_AUDIO audio = (PKSDATARANGE_AUDIO)descriptorDataRange;
+        SAR_LOG("matchingDataRange: %dHz-%dHz, %dbit-%dbit, x%d",
+            audio->MinimumSampleFrequency, audio->MaximumSampleFrequency,
+            audio->MinimumBitsPerSample, audio->MaximumBitsPerSample,
+            audio->MaximumChannels);
+    }
+#endif
+
+    return STATUS_NO_MATCH;
 }
 
 NTSTATUS SarIrpCreate(PDEVICE_OBJECT deviceObject, PIRP irp)
