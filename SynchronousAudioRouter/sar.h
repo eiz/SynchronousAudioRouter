@@ -26,11 +26,11 @@ extern "C" {
 #include <ntstrsafe.h>
 #include <windef.h>
 #include <ks.h>
+#define NOBITMAP
+#include <mmreg.h>
 #include <ksmedia.h>
 #include <devpkey.h>
 #include <ksproxy.h>
-#define NOBITMAP
-#include <mmreg.h>
 #else
 #include <windows.h>
 #endif
@@ -166,6 +166,13 @@ NTSTATUS SarCreateEndpoint(
     SarFileContext *fileContext,
     SarCreateEndpointRequest *request);
 
+NTSTATUS SarKsPinSetDataFormat(
+    PKSPIN pin,
+    PKSDATAFORMAT oldFormat,
+    PKSMULTIPLE_ITEM oldAttributeList,
+    const KSDATARANGE *dataRange,
+    const KSATTRIBUTE_LIST *attributeRange);
+NTSTATUS SarKsPinSetDeviceState(PKSPIN pin, KSSTATE toState, KSSTATE fromState);
 NTSTATUS SarIntersectHandler(
     PVOID context, PIRP irp, PKSP_PIN pin,
     PKSDATARANGE dataRange, PKSDATARANGE matchingDataRange, ULONG dataBufferSize,

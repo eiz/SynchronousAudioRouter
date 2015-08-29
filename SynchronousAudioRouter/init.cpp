@@ -64,8 +64,21 @@ static const KSDEVICE_DESCRIPTOR gDeviceDescriptor = {
     KSDEVICE_DESCRIPTOR_VERSION
 };
 
+static const KSPIN_DISPATCH gPinDispatch = {
+    nullptr, // Create
+    nullptr, // Close
+    nullptr, // Process
+    nullptr, // Reset
+    SarKsPinSetDataFormat, // SetDataFormat
+    SarKsPinSetDeviceState, // SetDeviceState
+    nullptr, // Connect
+    nullptr, // Disconnect
+    nullptr, // Clock
+    nullptr, // Allocator
+};
+
 static const KSPIN_DESCRIPTOR_EX gPinDescriptorTemplate = {
-    nullptr, // Dispatch
+    &gPinDispatch, // Dispatch
     nullptr, // AutomationTable
     {}, // PinDescriptor
     KSPIN_FLAG_DO_NOT_INITIATE_PROCESSING |
@@ -570,6 +583,29 @@ err_out:
     return status;
 }
 
+NTSTATUS SarKsPinSetDataFormat(
+    PKSPIN pin,
+    PKSDATAFORMAT oldFormat,
+    PKSMULTIPLE_ITEM oldAttributeList,
+    const KSDATARANGE *dataRange,
+    const KSATTRIBUTE_LIST *attributeRange)
+{
+    UNREFERENCED_PARAMETER(pin);
+    UNREFERENCED_PARAMETER(oldFormat);
+    UNREFERENCED_PARAMETER(oldAttributeList);
+    UNREFERENCED_PARAMETER(dataRange);
+    UNREFERENCED_PARAMETER(attributeRange);
+    return STATUS_NOT_IMPLEMENTED;
+}
+
+NTSTATUS SarKsPinSetDeviceState(PKSPIN pin, KSSTATE toState, KSSTATE fromState)
+{
+    UNREFERENCED_PARAMETER(pin);
+    UNREFERENCED_PARAMETER(toState);
+    UNREFERENCED_PARAMETER(fromState);
+    return STATUS_NOT_IMPLEMENTED;
+}
+
 NTSTATUS SarIntersectHandler(
     PVOID context, PIRP irp, PKSP_PIN pin,
     PKSDATARANGE callerDataRange, PKSDATARANGE descriptorDataRange,
@@ -578,34 +614,70 @@ NTSTATUS SarIntersectHandler(
     UNREFERENCED_PARAMETER(context);
     UNREFERENCED_PARAMETER(irp);
     UNREFERENCED_PARAMETER(pin);
-    UNREFERENCED_PARAMETER(dataBufferSize);
-    UNREFERENCED_PARAMETER(data);
-    UNREFERENCED_PARAMETER(dataSize);
+    PKSDATARANGE_AUDIO callerFormat = nullptr;
+    PKSDATARANGE_AUDIO myFormat = nullptr;
 
-#ifdef NO_LOGGING
-    UNREFERENCED_PARAMETER(callerDataRange);
-    UNREFERENCED_PARAMETER(descriptorDataRange);
-#else
+    *dataSize = sizeof(KSDATAFORMAT_WAVEFORMATEX);
+
     if (callerDataRange->FormatSize == sizeof(KSDATARANGE_AUDIO) &&
         callerDataRange->MajorFormat == KSDATAFORMAT_TYPE_AUDIO) {
-        PKSDATARANGE_AUDIO audio = (PKSDATARANGE_AUDIO)callerDataRange;
+        callerFormat = (PKSDATARANGE_AUDIO)callerDataRange;
         SAR_LOG("dataRange: %dHz-%dHz, %dbit-%dbit, x%d",
-            audio->MinimumSampleFrequency, audio->MaximumSampleFrequency,
-            audio->MinimumBitsPerSample, audio->MaximumBitsPerSample,
-            audio->MaximumChannels);
+            callerFormat->MinimumSampleFrequency,
+            callerFormat->MaximumSampleFrequency,
+            callerFormat->MinimumBitsPerSample,
+            callerFormat->MaximumBitsPerSample,
+            callerFormat->MaximumChannels);
     }
 
     if (descriptorDataRange->FormatSize == sizeof(KSDATARANGE_AUDIO) &&
         descriptorDataRange->MajorFormat == KSDATAFORMAT_TYPE_AUDIO) {
-        PKSDATARANGE_AUDIO audio = (PKSDATARANGE_AUDIO)descriptorDataRange;
+        myFormat = (PKSDATARANGE_AUDIO)descriptorDataRange;
         SAR_LOG("matchingDataRange: %dHz-%dHz, %dbit-%dbit, x%d",
-            audio->MinimumSampleFrequency, audio->MaximumSampleFrequency,
-            audio->MinimumBitsPerSample, audio->MaximumBitsPerSample,
-            audio->MaximumChannels);
+            myFormat->MinimumSampleFrequency,
+            myFormat->MaximumSampleFrequency,
+            myFormat->MinimumBitsPerSample,
+            myFormat->MaximumBitsPerSample,
+            myFormat->MaximumChannels);
     }
-#endif
 
-    return STATUS_NO_MATCH;
+    if (!myFormat || !callerFormat) {
+        return STATUS_NO_MATCH;
+    }
+
+    if (dataBufferSize == 0) {
+        return STATUS_BUFFER_OVERFLOW;
+    }
+
+    if (dataBufferSize < sizeof(KSDATAFORMAT_WAVEFORMATEX)) {
+        return STATUS_BUFFER_TOO_SMALL;
+    }
+
+    if (callerFormat->MaximumBitsPerSample < myFormat->MinimumBitsPerSample ||
+        callerFormat->MinimumBitsPerSample > myFormat->MaximumBitsPerSample ||
+        callerFormat->MaximumSampleFrequency < myFormat->MinimumSampleFrequency ||
+        callerFormat->MinimumSampleFrequency > myFormat->MaximumSampleFrequency ||
+        callerFormat->MaximumChannels < myFormat->MaximumChannels) {
+        return STATUS_NO_MATCH;
+    }
+
+    PKSDATAFORMAT_WAVEFORMATEX waveFormat = (PKSDATAFORMAT_WAVEFORMATEX)data;
+
+    RtlCopyMemory(
+        &waveFormat->DataFormat, &myFormat->DataRange, sizeof(KSDATAFORMAT));
+    waveFormat->WaveFormatEx.wFormatTag = WAVE_FORMAT_PCM;
+    waveFormat->WaveFormatEx.nChannels = (WORD)myFormat->MaximumChannels;
+    waveFormat->WaveFormatEx.nSamplesPerSec = myFormat->MaximumSampleFrequency;
+    waveFormat->WaveFormatEx.wBitsPerSample = (WORD)myFormat->MaximumBitsPerSample;
+    waveFormat->WaveFormatEx.nBlockAlign =
+        (WORD)myFormat->MaximumBitsPerSample / 8 * (WORD)myFormat->MaximumChannels;
+    waveFormat->WaveFormatEx.nAvgBytesPerSec =
+        waveFormat->WaveFormatEx.nBlockAlign *
+        waveFormat->WaveFormatEx.nSamplesPerSec;
+    waveFormat->WaveFormatEx.cbSize = 0;
+    waveFormat->DataFormat.SampleSize = waveFormat->WaveFormatEx.nBlockAlign;
+    waveFormat->DataFormat.FormatSize = *dataSize;
+    return STATUS_SUCCESS;
 }
 
 NTSTATUS SarIrpCreate(PDEVICE_OBJECT deviceObject, PIRP irp)
