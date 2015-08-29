@@ -24,10 +24,16 @@
     </Inf>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="init.cpp">
+    <ClCompile Include="control.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="initguid.cpp">
+    <ClCompile Include="pin.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="device.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="entry.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

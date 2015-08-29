@@ -203,8 +203,10 @@
     <FilesToPackage Include="$(TargetPath)" />
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="init.cpp" />
-    <ClCompile Include="initguid.cpp" />
+    <ClCompile Include="control.cpp" />
+    <ClCompile Include="device.cpp" />
+    <ClCompile Include="entry.cpp" />
+    <ClCompile Include="pin.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="sar.h" />

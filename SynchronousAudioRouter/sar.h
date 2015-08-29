@@ -113,6 +113,15 @@ typedef struct SarMapAudioBufferRequest
 } SarMapAudioBuffersRequest;
 
 #if defined(KERNEL)
+#define SAR_CONTROL_REFERENCE_STRING L"\\{0EB287D4-6C04-4926-AE19-3C066A4C3F3A}"
+#define SAR_TAG '1RAS'
+
+#ifdef NO_LOGGING
+#define SAR_LOG(...)
+#else
+#define SAR_LOG(...) \
+    DbgPrintEx(DPFLTR_DEFAULT_ID, DPFLTR_WARNING_LEVEL, __VA_ARGS__)
+#endif
 
 typedef struct SarDriverExtension
 {
@@ -159,6 +168,17 @@ typedef struct SarFileContext
     DWORD bufferSize;
 } SarFileContext;
 
+
+// Control
+BOOL SarCheckIoctlInput(
+    NTSTATUS *status, PIO_STACK_LOCATION irpStack, ULONG size);
+BOOLEAN SarIoctlInput(
+    NTSTATUS *status, PIRP irp, PIO_STACK_LOCATION irpStack, PVOID *buffer,
+    ULONG size);
+NTSTATUS SarSetBufferLayout(
+    SarFileContext *fileContext,
+    SarSetBufferLayoutRequest *request);
+
 NTSTATUS SarCreateEndpoint(
     PDEVICE_OBJECT device,
     PIRP irp,
@@ -166,6 +186,11 @@ NTSTATUS SarCreateEndpoint(
     SarFileContext *fileContext,
     SarCreateEndpointRequest *request);
 
+// Device
+NTSTATUS SarKsDeviceAdd(IN PKSDEVICE device);
+NTSTATUS SarKsDevicePostStart(IN PKSDEVICE device);
+
+// Pin
 NTSTATUS SarKsPinSetDataFormat(
     PKSPIN pin,
     PKSDATAFORMAT oldFormat,
@@ -173,16 +198,22 @@ NTSTATUS SarKsPinSetDataFormat(
     const KSDATARANGE *dataRange,
     const KSATTRIBUTE_LIST *attributeRange);
 NTSTATUS SarKsPinSetDeviceState(PKSPIN pin, KSSTATE toState, KSSTATE fromState);
-NTSTATUS SarIntersectHandler(
+NTSTATUS SarKsPinIntersectHandler(
     PVOID context, PIRP irp, PKSP_PIN pin,
     PKSDATARANGE dataRange, PKSDATARANGE matchingDataRange, ULONG dataBufferSize,
     PVOID data, PULONG dataSize);
+
+// Init
 NTSTATUS SarInitializeFileContext(SarFileContext *fileContext);
 BOOLEAN SarDeleteFileContext(SarDriverExtension *extension, PIRP irp);
 RTL_GENERIC_COMPARE_RESULTS NTAPI SarCompareFileContext(
     PRTL_GENERIC_TABLE table, PVOID lhs, PVOID rhs);
 PVOID NTAPI SarAllocateFileContext(PRTL_GENERIC_TABLE table, CLONG byteSize);
 VOID NTAPI SarFreeFileContext(PRTL_GENERIC_TABLE table, PVOID buffer);
+
+NTSTATUS DriverEntry(
+    IN PDRIVER_OBJECT driverObject,
+    IN PUNICODE_STRING registryPath);
 
 #endif // KERNEL
 
