@@ -178,7 +178,6 @@ BOOLEAN SarIoctlInput(
 NTSTATUS SarSetBufferLayout(
     SarFileContext *fileContext,
     SarSetBufferLayoutRequest *request);
-
 NTSTATUS SarCreateEndpoint(
     PDEVICE_OBJECT device,
     PIRP irp,

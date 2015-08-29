@@ -30,7 +30,27 @@ NTSTATUS SarKsPinSetDataFormat(
     UNREFERENCED_PARAMETER(attributeRange);
 
     SAR_LOG("SarKsPinSetDataFormat");
-    return STATUS_NOT_IMPLEMENTED;
+    NT_ASSERT(!oldFormat);
+
+    const KSDATARANGE_AUDIO *audioRange = (const KSDATARANGE_AUDIO *)dataRange;
+    PKSDATAFORMAT_WAVEFORMATEX waveFormat =
+        (PKSDATAFORMAT_WAVEFORMATEX)pin->ConnectionFormat;
+
+    if (waveFormat->DataFormat.FormatSize != sizeof(KSDATAFORMAT_WAVEFORMATEX)) {
+        return STATUS_NO_MATCH;
+    }
+
+    if (waveFormat->WaveFormatEx.wFormatTag != WAVE_FORMAT_PCM ||
+        waveFormat->WaveFormatEx.nChannels != audioRange->MaximumChannels ||
+        waveFormat->WaveFormatEx.nSamplesPerSec !=
+            audioRange->MaximumSampleFrequency ||
+        waveFormat->WaveFormatEx.wBitsPerSample !=
+            audioRange->MaximumBitsPerSample) {
+
+        return STATUS_NO_MATCH;
+    }
+
+    return STATUS_SUCCESS;
 }
 
 NTSTATUS SarKsPinSetDeviceState(PKSPIN pin, KSSTATE toState, KSSTATE fromState)
@@ -39,7 +59,7 @@ NTSTATUS SarKsPinSetDeviceState(PKSPIN pin, KSSTATE toState, KSSTATE fromState)
     UNREFERENCED_PARAMETER(toState);
     UNREFERENCED_PARAMETER(fromState);
 
-    SAR_LOG("SarKsPinSetDataFormat");
+    SAR_LOG("SarKsPinSetDeviceState");
     return STATUS_NOT_IMPLEMENTED;
 }
 
