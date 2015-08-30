@@ -17,17 +17,27 @@
 #include "sar.h"
 
 static const KSPIN_DISPATCH gPinDispatch = {
-    nullptr, // Create
-    nullptr, // Close
+    SarKsPinCreate, // Create
+    SarKsPinClose, // Close
     nullptr, // Process
-    nullptr, // Reset
+    SarKsPinReset, // Reset
     SarKsPinSetDataFormat, // SetDataFormat
     SarKsPinSetDeviceState, // SetDeviceState
-    nullptr, // Connect
-    nullptr, // Disconnect
+    SarKsPinConnect, // Connect
+    SarKsPinDisconnect, // Disconnect
     nullptr, // Clock
     nullptr, // Allocator
 };
+
+DECLARE_SIMPLE_FRAMING_EX(
+    gAllocatorFraming,
+    STATICGUIDOF(KSMEMORY_TYPE_KERNEL_NONPAGED),
+    KSALLOCATOR_REQUIREMENTF_SYSTEM_MEMORY |
+    KSALLOCATOR_REQUIREMENTF_PREFERENCES_ONLY,
+    25,
+    0,
+    2 * PAGE_SIZE,
+    2 * PAGE_SIZE);
 
 static const KSPIN_DESCRIPTOR_EX gPinDescriptorTemplate = {
     &gPinDispatch, // Dispatch
@@ -38,8 +48,8 @@ static const KSPIN_DESCRIPTOR_EX gPinDescriptorTemplate = {
     KSPIN_FLAG_PROCESS_IF_ANY_IN_RUN_STATE |
     KSPIN_FLAG_FIXED_FORMAT,
     1, // InstancesPossible
-    1, // InstancesNecessary
-    nullptr, // AllocatorFraming
+    0, // InstancesNecessary
+    &gAllocatorFraming, // AllocatorFraming
     SarKsPinIntersectHandler, // IntersectHandler
 };
 
@@ -58,8 +68,15 @@ static const KSTOPOLOGY_CONNECTION gFilterConnections[] = {
     { 0, 0, KSFILTER_NODE, 1 }
 };
 
+static KSFILTER_DISPATCH gFilterDispatch = {
+    nullptr, // Create
+    nullptr, // Close
+    SarKsFilterProcess, // Process
+    nullptr, // Reset
+};
+
 static KSFILTER_DESCRIPTOR gFilterDescriptorTemplate = {
-    nullptr, // Dispatch
+    &gFilterDispatch, // Dispatch
     nullptr, // AutomationTable
     KSFILTER_DESCRIPTOR_VERSION, // Version
     0, // Flags
@@ -311,7 +328,6 @@ NTSTATUS SarCreateEndpoint(
     }
 
     RtlZeroMemory(endpoint, SarEndpointSize(request->channelCount));
-
     endpoint->pendingIrp = irp;
     endpoint->channelCount = request->channelCount;
     endpoint->type = request->type;
@@ -380,15 +396,19 @@ NTSTATUS SarCreateEndpoint(
 
     pinDesc->DataRangesCount = 1;
     pinDesc->DataRanges = (PKSDATARANGE *)&endpoint->dataRange;
-    pinDesc->Communication =
-        request->type == SAR_ENDPOINT_TYPE_RECORDING ?
-        KSPIN_COMMUNICATION_SOURCE : KSPIN_COMMUNICATION_SINK;
+    pinDesc->Communication = KSPIN_COMMUNICATION_BOTH;
     pinDesc->DataFlow =
         request->type == SAR_ENDPOINT_TYPE_RECORDING ?
         KSPIN_DATAFLOW_OUT : KSPIN_DATAFLOW_IN;
     pinDesc->Category = &KSCATEGORY_AUDIO;
 
+    if (request->type == SAR_ENDPOINT_TYPE_PLAYBACK) {
+        endpoint->pinDesc[0].Flags |= KSPIN_FLAG_RENDERER;
+    }
+
     pinDesc = &endpoint->pinDesc[1].PinDescriptor;
+    endpoint->pinDesc[1].IntersectHandler = nullptr;
+    endpoint->pinDesc[1].Dispatch = nullptr;
     pinDesc->DataRangesCount = 1;
     pinDesc->DataRanges = (PKSDATARANGE *)&endpoint->analogDataRange;
     pinDesc->Communication = KSPIN_COMMUNICATION_NONE;

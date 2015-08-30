@@ -15,6 +15,7 @@
 // along with SynchronousAudioRouter.  If not, see <http://www.gnu.org/licenses/>.
 
 #include <initguid.h>
+#define NO_LOGGING
 #include "sar.h"
 
 DRIVER_DISPATCH SarIrpCreate;
@@ -183,7 +184,7 @@ NTSTATUS SarIrpDeviceControl(PDEVICE_OBJECT deviceObject, PIRP irp)
     irpStack = IoGetCurrentIrpStackLocation(irp);
     ioControlCode = irpStack->Parameters.DeviceIoControl.IoControlCode;
 
-    SAR_LOG("(SAR) Before: DeviceIoControl IRP: %d", ioControlCode);
+    SarDumpKsIoctl(irpStack);
 
     fileContextTemplate.fileObject = irpStack->FileObject;
     ExAcquireFastMutex(&extension->fileContextLock);

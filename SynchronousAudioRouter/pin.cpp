@@ -16,6 +16,56 @@
 
 #include "sar.h"
 
+NTSTATUS SarKsFilterProcess(PKSFILTER filter, PKSPROCESSPIN_INDEXENTRY index)
+{
+    UNREFERENCED_PARAMETER(filter);
+    UNREFERENCED_PARAMETER(index);
+    SAR_LOG("Filter level processing");
+    return STATUS_SUCCESS;
+}
+
+NTSTATUS SarKsPinCreate(PKSPIN pin, PIRP irp)
+{
+    UNREFERENCED_PARAMETER(pin);
+    UNREFERENCED_PARAMETER(irp);
+    SAR_LOG("SarKsPinCreate");
+    return STATUS_SUCCESS;
+}
+
+NTSTATUS SarKsPinClose(PKSPIN pin, PIRP irp)
+{
+    UNREFERENCED_PARAMETER(pin);
+    UNREFERENCED_PARAMETER(irp);
+    SAR_LOG("SarKsPinClose");
+    return STATUS_SUCCESS;
+}
+
+VOID SarKsPinReset(PKSPIN pin)
+{
+    UNREFERENCED_PARAMETER(pin);
+    SAR_LOG("SarKsPinReset");
+}
+
+NTSTATUS SarKsPinProcess(PKSPIN pin)
+{
+    UNREFERENCED_PARAMETER(pin);
+    SAR_LOG("SarKsPinProcess");
+    return STATUS_SUCCESS;
+}
+
+NTSTATUS SarKsPinConnect(PKSPIN pin)
+{
+    UNREFERENCED_PARAMETER(pin);
+    SAR_LOG("SarKsPinConnect");
+    return STATUS_SUCCESS;
+}
+
+VOID SarKsPinDisconnect(PKSPIN pin)
+{
+    UNREFERENCED_PARAMETER(pin);
+    SAR_LOG("SarKsPinDisconnect");
+}
+
 NTSTATUS SarKsPinSetDataFormat(
     PKSPIN pin,
     PKSDATAFORMAT oldFormat,
@@ -26,7 +76,6 @@ NTSTATUS SarKsPinSetDataFormat(
     UNREFERENCED_PARAMETER(pin);
     UNREFERENCED_PARAMETER(oldFormat);
     UNREFERENCED_PARAMETER(oldAttributeList);
-    UNREFERENCED_PARAMETER(dataRange);
     UNREFERENCED_PARAMETER(attributeRange);
 
     SAR_LOG("SarKsPinSetDataFormat");
@@ -63,6 +112,60 @@ NTSTATUS SarKsPinSetDeviceState(PKSPIN pin, KSSTATE toState, KSSTATE fromState)
     return STATUS_NOT_IMPLEMENTED;
 }
 
+#define GUID_FORMAT "{%08lx-%04x-%04x-%02x%02x-%02x%02x%02x%02x%02x%02x}"
+#define GUID_VALUES(g) (g).Data1, (g).Data2, (g).Data3, \
+    (g).Data4[0], \
+    (g).Data4[1], \
+    (g).Data4[2], \
+    (g).Data4[3], \
+    (g).Data4[4], \
+    (g).Data4[5], \
+    (g).Data4[6], \
+    (g).Data4[7]
+
+NTSTATUS SarCopyUserBuffer(PVOID dest, PIO_STACK_LOCATION irpStack, ULONG size)
+{
+    if (irpStack->Parameters.DeviceIoControl.InputBufferLength < size) {
+        return STATUS_BUFFER_OVERFLOW;
+    }
+
+    __try {
+        ProbeForRead(irpStack->Parameters.DeviceIoControl.Type3InputBuffer, size,
+            TYPE_ALIGNMENT(ULONG));
+        RtlCopyMemory(
+            dest, irpStack->Parameters.DeviceIoControl.Type3InputBuffer, size);
+        return STATUS_SUCCESS;
+    } __except(EXCEPTION_EXECUTE_HANDLER) {
+        return GetExceptionCode();
+    }
+}
+
+VOID SarDumpKsIoctl(PIO_STACK_LOCATION irpStack)
+{
+    if (irpStack->MajorFunction == IRP_MJ_DEVICE_CONTROL) {
+        if (irpStack->Parameters.DeviceIoControl.IoControlCode ==
+                IOCTL_KS_PROPERTY) {
+
+            KSPROPERTY propertyInfo = {};
+
+            SarCopyUserBuffer(&propertyInfo, irpStack, sizeof(KSPROPERTY));
+
+            SAR_LOG("KSProperty: Set " GUID_FORMAT " Id %d Flags %d",
+                GUID_VALUES(propertyInfo.Set), propertyInfo.Id,
+                propertyInfo.Flags);
+
+            if (propertyInfo.Set == KSPROPSETID_Pin &&
+                propertyInfo.Id == KSPROPERTY_PIN_PROPOSEDATAFORMAT) {
+                KSP_PIN ppInfo = {};
+
+                SarCopyUserBuffer(&ppInfo, irpStack, sizeof(KSP_PIN));
+                SAR_LOG("Breaking for pin %d", ppInfo.PinId);
+                //DbgBreakPoint();
+            }
+        }
+    }
+}
+
 NTSTATUS SarKsPinIntersectHandler(
     PVOID context, PIRP irp, PKSP_PIN pin,
     PKSDATARANGE callerDataRange, PKSDATARANGE descriptorDataRange,
@@ -74,6 +177,8 @@ NTSTATUS SarKsPinIntersectHandler(
     PKSDATARANGE_AUDIO callerFormat = nullptr;
     PKSDATARANGE_AUDIO myFormat = nullptr;
 
+    SAR_LOG("SarKsPinIntersectHandler " GUID_FORMAT,
+        GUID_VALUES(callerDataRange->MajorFormat));
     *dataSize = sizeof(KSDATAFORMAT_WAVEFORMATEX);
 
     if (callerDataRange->FormatSize == sizeof(KSDATARANGE_AUDIO) &&
@@ -134,5 +239,6 @@ NTSTATUS SarKsPinIntersectHandler(
     waveFormat->WaveFormatEx.cbSize = 0;
     waveFormat->DataFormat.SampleSize = waveFormat->WaveFormatEx.nBlockAlign;
     waveFormat->DataFormat.FormatSize = *dataSize;
+    SAR_LOG("Matched");
     return STATUS_SUCCESS;
 }

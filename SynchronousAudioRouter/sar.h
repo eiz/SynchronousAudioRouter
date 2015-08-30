@@ -175,6 +175,9 @@ BOOL SarCheckIoctlInput(
 BOOLEAN SarIoctlInput(
     NTSTATUS *status, PIRP irp, PIO_STACK_LOCATION irpStack, PVOID *buffer,
     ULONG size);
+NTSTATUS SarCopyUserBuffer(PVOID dest, PIO_STACK_LOCATION irpStack, ULONG size);
+VOID SarDumpKsIoctl(PIO_STACK_LOCATION irpStack);
+
 NTSTATUS SarSetBufferLayout(
     SarFileContext *fileContext,
     SarSetBufferLayoutRequest *request);
@@ -189,7 +192,16 @@ NTSTATUS SarCreateEndpoint(
 NTSTATUS SarKsDeviceAdd(IN PKSDEVICE device);
 NTSTATUS SarKsDevicePostStart(IN PKSDEVICE device);
 
+// Filter
+NTSTATUS SarKsFilterProcess(PKSFILTER filter, PKSPROCESSPIN_INDEXENTRY index);
+
 // Pin
+NTSTATUS SarKsPinCreate(PKSPIN pin, PIRP irp);
+NTSTATUS SarKsPinClose(PKSPIN pin, PIRP irp);
+VOID SarKsPinReset(PKSPIN pin);
+NTSTATUS SarKsPinProcess(PKSPIN pin);
+NTSTATUS SarKsPinConnect(PKSPIN pin);
+VOID SarKsPinDisconnect(PKSPIN pin);
 NTSTATUS SarKsPinSetDataFormat(
     PKSPIN pin,
     PKSDATAFORMAT oldFormat,
