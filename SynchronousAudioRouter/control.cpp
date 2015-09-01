@@ -75,9 +75,61 @@ static KSFILTER_DISPATCH gFilterDispatch = {
     nullptr, // Reset
 };
 
+NTSTATUS SarKsFilterGetGlobalInstancesCount(
+    PIRP irp, PKSIDENTIFIER request, PVOID data)
+{
+    UNREFERENCED_PARAMETER(irp);
+    PKSP_PIN pinRequest = (PKSP_PIN)request;
+    PKSPIN_CINSTANCES instances = (PKSPIN_CINSTANCES)data;
+
+    if (pinRequest->PinId == 0) {
+        instances->CurrentCount = 0;
+        instances->PossibleCount = 1;
+    } else {
+        instances->CurrentCount = 0;
+        instances->PossibleCount = 0;
+    }
+
+    return STATUS_SUCCESS;
+}
+
+NTSTATUS SarKsFilterProposeDataFormat(
+    PIRP irp, PKSIDENTIFIER request, PVOID data)
+{
+    UNREFERENCED_PARAMETER(irp);
+    UNREFERENCED_PARAMETER(request);
+    UNREFERENCED_PARAMETER(data);
+    return STATUS_SUCCESS;
+}
+
+DEFINE_KSPROPERTY_TABLE(gFilterPinProperties) {
+    DEFINE_KSPROPERTY_ITEM(
+        KSPROPERTY_PIN_GLOBALCINSTANCES,
+        SarKsFilterGetGlobalInstancesCount,
+        sizeof(KSP_PIN), sizeof(KSPIN_CINSTANCES),
+        nullptr, nullptr, 0, nullptr, nullptr, 0),
+    DEFINE_KSPROPERTY_ITEM_PIN_PROPOSEDATAFORMAT(
+        SarKsFilterProposeDataFormat)
+};
+
+DEFINE_KSPROPERTY_SET_TABLE(gFilterPropertySets) {
+    DEFINE_KSPROPERTY_SET(
+        &KSPROPSETID_Pin,
+        SIZEOF_ARRAY(gFilterPinProperties),
+        gFilterPinProperties,
+        0,
+        nullptr)
+};
+
+DEFINE_KSAUTOMATION_TABLE(gFilterAutomation) {
+    DEFINE_KSAUTOMATION_PROPERTIES(gFilterPropertySets),
+    DEFINE_KSAUTOMATION_METHODS_NULL,
+    DEFINE_KSAUTOMATION_EVENTS_NULL,
+};
+
 static KSFILTER_DESCRIPTOR gFilterDescriptorTemplate = {
     &gFilterDispatch, // Dispatch
-    nullptr, // AutomationTable
+    &gFilterAutomation, // AutomationTable
     KSFILTER_DESCRIPTOR_VERSION, // Version
     0, // Flags
     nullptr, // ReferenceGuid
