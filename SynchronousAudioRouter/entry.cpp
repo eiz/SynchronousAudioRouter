@@ -15,7 +15,6 @@
 // along with SynchronousAudioRouter.  If not, see <http://www.gnu.org/licenses/>.
 
 #include <initguid.h>
-#define NO_LOGGING
 #include "sar.h"
 
 DRIVER_DISPATCH SarIrpCreate;
@@ -117,7 +116,7 @@ BOOLEAN SarDeleteFileContext(SarDriverExtension *extension, PIRP irp)
     PIO_STACK_LOCATION irpStack;
     SarFileContext *fileContext;
     SarFileContext fileContextTemplate;
-    BOOLEAN deleted;
+//    BOOLEAN deleted;
 
     irpStack = IoGetCurrentIrpStackLocation(irp);
     fileContextTemplate.fileObject = irpStack->FileObject;
@@ -140,15 +139,16 @@ BOOLEAN SarDeleteFileContext(SarDriverExtension *extension, PIRP irp)
 
         if (fileContext->workItem) {
             IoFreeWorkItem(fileContext->workItem);
+            fileContext->workItem = nullptr;
         }
 
         ExReleaseFastMutex(&fileContext->mutex);
     }
 
-    deleted = RtlDeleteElementGenericTable(
-        &extension->fileContextTable, &fileContextTemplate);
+    //deleted = RtlDeleteElementGenericTable(
+        //&extension->fileContextTable, &fileContextTemplate);
     ExReleaseFastMutex(&extension->fileContextLock);
-    return deleted;
+    return TRUE;//deleted;
 }
 
 NTSTATUS SarIrpCleanup(PDEVICE_OBJECT deviceObject, PIRP irp)
@@ -184,7 +184,9 @@ NTSTATUS SarIrpDeviceControl(PDEVICE_OBJECT deviceObject, PIRP irp)
     irpStack = IoGetCurrentIrpStackLocation(irp);
     ioControlCode = irpStack->Parameters.DeviceIoControl.IoControlCode;
 
+#ifdef LOUD
     SarDumpKsIoctl(irpStack);
+#endif
 
     fileContextTemplate.fileObject = irpStack->FileObject;
     ExAcquireFastMutex(&extension->fileContextLock);
@@ -212,8 +214,6 @@ NTSTATUS SarIrpDeviceControl(PDEVICE_OBJECT deviceObject, PIRP irp)
             break;
         }
         case SAR_REQUEST_CREATE_ENDPOINT: {
-            SAR_LOG("(SAR) Create endpoint");
-
             SarCreateEndpointRequest request;
 
             if (!SarIoctlInput(
@@ -221,9 +221,6 @@ NTSTATUS SarIrpDeviceControl(PDEVICE_OBJECT deviceObject, PIRP irp)
 
                 break;
             }
-
-            SAR_LOG("(SAR) Create endpoint request: %d, %d, %d",
-                request.type, request.index, request.channelCount);
 
             IoMarkIrpPending(irp);
             ntStatus = SarCreateEndpoint(

@@ -78,7 +78,6 @@ NTSTATUS SarKsPinSetDataFormat(
     UNREFERENCED_PARAMETER(oldAttributeList);
     UNREFERENCED_PARAMETER(attributeRange);
 
-    SAR_LOG("SarKsPinSetDataFormat");
     NT_ASSERT(!oldFormat);
 
     const KSDATARANGE_AUDIO *audioRange = (const KSDATARANGE_AUDIO *)dataRange;
@@ -177,30 +176,16 @@ NTSTATUS SarKsPinIntersectHandler(
     PKSDATARANGE_AUDIO callerFormat = nullptr;
     PKSDATARANGE_AUDIO myFormat = nullptr;
 
-    SAR_LOG("SarKsPinIntersectHandler " GUID_FORMAT,
-        GUID_VALUES(callerDataRange->MajorFormat));
     *dataSize = sizeof(KSDATAFORMAT_WAVEFORMATEX);
 
     if (callerDataRange->FormatSize == sizeof(KSDATARANGE_AUDIO) &&
         callerDataRange->MajorFormat == KSDATAFORMAT_TYPE_AUDIO) {
         callerFormat = (PKSDATARANGE_AUDIO)callerDataRange;
-        SAR_LOG("dataRange: %dHz-%dHz, %dbit-%dbit, x%d",
-            callerFormat->MinimumSampleFrequency,
-            callerFormat->MaximumSampleFrequency,
-            callerFormat->MinimumBitsPerSample,
-            callerFormat->MaximumBitsPerSample,
-            callerFormat->MaximumChannels);
     }
 
     if (descriptorDataRange->FormatSize == sizeof(KSDATARANGE_AUDIO) &&
         descriptorDataRange->MajorFormat == KSDATAFORMAT_TYPE_AUDIO) {
         myFormat = (PKSDATARANGE_AUDIO)descriptorDataRange;
-        SAR_LOG("matchingDataRange: %dHz-%dHz, %dbit-%dbit, x%d",
-            myFormat->MinimumSampleFrequency,
-            myFormat->MaximumSampleFrequency,
-            myFormat->MinimumBitsPerSample,
-            myFormat->MaximumBitsPerSample,
-            myFormat->MaximumChannels);
     }
 
     if (!myFormat || !callerFormat) {
@@ -239,6 +224,61 @@ NTSTATUS SarKsPinIntersectHandler(
     waveFormat->WaveFormatEx.cbSize = 0;
     waveFormat->DataFormat.SampleSize = waveFormat->WaveFormatEx.nBlockAlign;
     waveFormat->DataFormat.FormatSize = *dataSize;
+    return STATUS_SUCCESS;
+}
+
+NTSTATUS SarKsPinGetGlobalInstancesCount(
+    PIRP irp, PKSIDENTIFIER request, PVOID data)
+{
+    UNREFERENCED_PARAMETER(irp);
+    PKSP_PIN pinRequest = (PKSP_PIN)request;
+    PKSPIN_CINSTANCES instances = (PKSPIN_CINSTANCES)data;
+
+    if (pinRequest->PinId == 0) {
+        instances->CurrentCount = 0;
+        instances->PossibleCount = 1;
+    } else {
+        instances->CurrentCount = 0;
+        instances->PossibleCount = 0;
+    }
+
+    return STATUS_SUCCESS;
+}
+
+NTSTATUS SarKsPinProposeDataFormat(
+    PIRP irp, PKSIDENTIFIER request, PVOID data)
+{
+    UNREFERENCED_PARAMETER(irp);
+    UNREFERENCED_PARAMETER(data);
+    PKSP_PIN pinRequest = (PKSP_PIN)request;
+    PKSDATAFORMAT_WAVEFORMATEX format = (PKSDATAFORMAT_WAVEFORMATEX)data;
+
+    if (pinRequest->PinId != 0) {
+        return STATUS_NOT_FOUND;
+    }
+
+    SarEndpoint *endpoint = SarGetEndpointFromIrp(irp);
+
+    if (!endpoint) {
+        return STATUS_NOT_FOUND;
+    }
+
+    if (format->DataFormat.MajorFormat != KSDATAFORMAT_TYPE_AUDIO ||
+        format->DataFormat.SubFormat != KSDATAFORMAT_SUBTYPE_PCM ||
+        format->DataFormat.Specifier != KSDATAFORMAT_SPECIFIER_WAVEFORMATEX ||
+        format->DataFormat.FormatSize < sizeof(KSDATAFORMAT_WAVEFORMATEX)) {
+        SAR_LOG("Format type can't be handled");
+        return STATUS_NO_MATCH;
+    }
+
+    if (format->WaveFormatEx.nChannels != endpoint->channelCount ||
+        format->WaveFormatEx.wBitsPerSample != endpoint->owner->sampleDepth * 8 ||
+        format->WaveFormatEx.wFormatTag != WAVE_FORMAT_PCM ||
+        format->WaveFormatEx.nSamplesPerSec != endpoint->owner->sampleRate) {
+        return STATUS_NO_MATCH;
+    }
+
     SAR_LOG("Matched");
     return STATUS_SUCCESS;
 }
+

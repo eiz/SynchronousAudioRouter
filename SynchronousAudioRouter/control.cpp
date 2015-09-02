@@ -16,7 +16,7 @@
 
 #include "sar.h"
 
-static const KSPIN_DISPATCH gPinDispatch = {
+const KSPIN_DISPATCH gPinDispatch = {
     SarKsPinCreate, // Create
     SarKsPinClose, // Close
     nullptr, // Process
@@ -39,7 +39,7 @@ DECLARE_SIMPLE_FRAMING_EX(
     2 * PAGE_SIZE,
     2 * PAGE_SIZE);
 
-static const KSPIN_DESCRIPTOR_EX gPinDescriptorTemplate = {
+const KSPIN_DESCRIPTOR_EX gPinDescriptorTemplate = {
     &gPinDispatch, // Dispatch
     nullptr, // AutomationTable
     {}, // PinDescriptor
@@ -53,63 +53,38 @@ static const KSPIN_DESCRIPTOR_EX gPinDescriptorTemplate = {
     SarKsPinIntersectHandler, // IntersectHandler
 };
 
-static const GUID gCategoriesTableCapture[] = {
+const GUID gCategoriesTableCapture[] = {
     STATICGUIDOF(KSCATEGORY_CAPTURE),
     STATICGUIDOF(KSCATEGORY_AUDIO),
 };
 
-static const GUID gCategoriesTableRender[] = {
+const GUID gCategoriesTableRender[] = {
     STATICGUIDOF(KSCATEGORY_RENDER),
     STATICGUIDOF(KSCATEGORY_AUDIO),
 };
 
-static const KSTOPOLOGY_CONNECTION gFilterConnections[] = {
+const KSTOPOLOGY_CONNECTION gFilterConnections[] = {
     { KSFILTER_NODE, 0, 0, 1 },
     { 0, 0, KSFILTER_NODE, 1 }
 };
 
-static KSFILTER_DISPATCH gFilterDispatch = {
+KSFILTER_DISPATCH gFilterDispatch = {
     nullptr, // Create
     nullptr, // Close
     SarKsFilterProcess, // Process
     nullptr, // Reset
 };
 
-NTSTATUS SarKsFilterGetGlobalInstancesCount(
-    PIRP irp, PKSIDENTIFIER request, PVOID data)
-{
-    UNREFERENCED_PARAMETER(irp);
-    PKSP_PIN pinRequest = (PKSP_PIN)request;
-    PKSPIN_CINSTANCES instances = (PKSPIN_CINSTANCES)data;
-
-    if (pinRequest->PinId == 0) {
-        instances->CurrentCount = 0;
-        instances->PossibleCount = 1;
-    } else {
-        instances->CurrentCount = 0;
-        instances->PossibleCount = 0;
-    }
-
-    return STATUS_SUCCESS;
-}
-
-NTSTATUS SarKsFilterProposeDataFormat(
-    PIRP irp, PKSIDENTIFIER request, PVOID data)
-{
-    UNREFERENCED_PARAMETER(irp);
-    UNREFERENCED_PARAMETER(request);
-    UNREFERENCED_PARAMETER(data);
-    return STATUS_SUCCESS;
-}
-
 DEFINE_KSPROPERTY_TABLE(gFilterPinProperties) {
     DEFINE_KSPROPERTY_ITEM(
         KSPROPERTY_PIN_GLOBALCINSTANCES,
-        SarKsFilterGetGlobalInstancesCount,
+        SarKsPinGetGlobalInstancesCount,
         sizeof(KSP_PIN), sizeof(KSPIN_CINSTANCES),
         nullptr, nullptr, 0, nullptr, nullptr, 0),
-    DEFINE_KSPROPERTY_ITEM_PIN_PROPOSEDATAFORMAT(
-        SarKsFilterProposeDataFormat)
+    DEFINE_KSPROPERTY_ITEM(
+        KSPROPERTY_PIN_PROPOSEDATAFORMAT,
+        nullptr, sizeof(KSP_PIN), sizeof(KSDATAFORMAT_WAVEFORMATEX),
+        SarKsPinProposeDataFormat, nullptr, 0, nullptr, nullptr, 0)
 };
 
 DEFINE_KSPROPERTY_SET_TABLE(gFilterPropertySets) {
@@ -285,8 +260,6 @@ VOID SarProcessPendingEndpoints(PDEVICE_OBJECT deviceObject, PVOID context)
     NTSTATUS status = STATUS_UNSUCCESSFUL;
     SarFileContext *fileContext = (SarFileContext *)context;
 
-    SAR_LOG("Processing pending endpoints");
-
     ExAcquireFastMutex(&fileContext->mutex);
 
 retry:
@@ -298,7 +271,6 @@ retry:
             KsFilterFactoryGetSymbolicLink(endpoint->filterFactory);
         PLIST_ENTRY current = entry;
 
-        SAR_LOG("Processing a pending endpoint");
         entry = endpoint->listEntry.Flink;
         RemoveEntryList(current);
         ExReleaseFastMutex(&fileContext->mutex);
@@ -383,6 +355,7 @@ NTSTATUS SarCreateEndpoint(
     endpoint->pendingIrp = irp;
     endpoint->channelCount = request->channelCount;
     endpoint->type = request->type;
+    endpoint->owner = fileContext;
 
     for (DWORD i = 0; i < endpoint->channelCount; ++i) {
         endpoint->channelMappings[i] = SAR_INVALID_BUFFER;

@@ -135,26 +135,6 @@ typedef struct SarDriverExtension
     LONG nextFilterId;
 } SarDriverExtension;
 
-#define SarEndpointSize(channelCount) \
-    (sizeof(SarEndpoint) + sizeof(DWORD) * (channelCount))
-
-typedef struct SarEndpoint
-{
-    LIST_ENTRY listEntry;
-    PIRP pendingIrp;
-    UNICODE_STRING pendingDeviceName;
-    PKSFILTERFACTORY filterFactory;
-    PKSFILTER_DESCRIPTOR filterDesc;
-    PKSPIN_DESCRIPTOR_EX pinDesc;
-    PKSNODE_DESCRIPTOR nodeDesc;
-    PKSDATARANGE_AUDIO dataRange;
-    PKSDATARANGE_AUDIO analogDataRange;
-    PKSALLOCATOR_FRAMING_EX allocatorFraming;
-    DWORD type;
-    DWORD channelCount;
-    DWORD channelMappings[0];
-} SarFilterInfo;
-
 typedef struct SarFileContext
 {
     PFILE_OBJECT fileObject;
@@ -168,6 +148,26 @@ typedef struct SarFileContext
     DWORD bufferSize;
 } SarFileContext;
 
+#define SarEndpointSize(channelCount) \
+    (sizeof(SarEndpoint) + sizeof(DWORD) * (channelCount))
+
+typedef struct SarEndpoint
+{
+    LIST_ENTRY listEntry;
+    PIRP pendingIrp;
+    UNICODE_STRING pendingDeviceName;
+    SarFileContext *owner;
+    PKSFILTERFACTORY filterFactory;
+    PKSFILTER_DESCRIPTOR filterDesc;
+    PKSPIN_DESCRIPTOR_EX pinDesc;
+    PKSNODE_DESCRIPTOR nodeDesc;
+    PKSDATARANGE_AUDIO dataRange;
+    PKSDATARANGE_AUDIO analogDataRange;
+    PKSALLOCATOR_FRAMING_EX allocatorFraming;
+    DWORD type;
+    DWORD channelCount;
+    DWORD channelMappings[0];
+} SarEndpoint;
 
 // Control
 BOOL SarCheckIoctlInput(
@@ -213,6 +213,10 @@ NTSTATUS SarKsPinIntersectHandler(
     PVOID context, PIRP irp, PKSP_PIN pin,
     PKSDATARANGE dataRange, PKSDATARANGE matchingDataRange, ULONG dataBufferSize,
     PVOID data, PULONG dataSize);
+NTSTATUS SarKsPinGetGlobalInstancesCount(
+    PIRP irp, PKSIDENTIFIER request, PVOID data);
+NTSTATUS SarKsPinProposeDataFormat(
+    PIRP irp, PKSIDENTIFIER request, PVOID data);
 
 // Init
 NTSTATUS SarInitializeFileContext(SarFileContext *fileContext);
@@ -221,10 +225,24 @@ RTL_GENERIC_COMPARE_RESULTS NTAPI SarCompareFileContext(
     PRTL_GENERIC_TABLE table, PVOID lhs, PVOID rhs);
 PVOID NTAPI SarAllocateFileContext(PRTL_GENERIC_TABLE table, CLONG byteSize);
 VOID NTAPI SarFreeFileContext(PRTL_GENERIC_TABLE table, PVOID buffer);
-
 NTSTATUS DriverEntry(
     IN PDRIVER_OBJECT driverObject,
     IN PUNICODE_STRING registryPath);
+
+// Utility
+
+#define FOR_EACH_GENERIC(table, objType, obj, restartKey) \
+    for (objType *obj = (objType *)RtlEnumerateGenericTableWithoutSplaying( \
+        (table), &(restartKey)); \
+        obj; \
+        obj = (objType *)RtlEnumerateGenericTableWithoutSplaying( \
+        (table), &(restartKey)))
+
+SarDriverExtension *SarGetDriverExtension(PDRIVER_OBJECT driverObject);
+SarDriverExtension *SarGetDriverExtensionFromIrp(PIRP irp);
+SarFileContext *SarGetFileContextFromFileObject(
+    SarDriverExtension *extension, PFILE_OBJECT fileObject);
+SarEndpoint *SarGetEndpointFromIrp(PIRP irp);
 
 #endif // KERNEL
 
