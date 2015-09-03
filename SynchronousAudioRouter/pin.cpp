@@ -21,7 +21,7 @@ NTSTATUS SarKsFilterProcess(PKSFILTER filter, PKSPROCESSPIN_INDEXENTRY index)
     UNREFERENCED_PARAMETER(filter);
     UNREFERENCED_PARAMETER(index);
     SAR_LOG("Filter level processing");
-    return STATUS_SUCCESS;
+    return STATUS_PENDING;
 }
 
 NTSTATUS SarKsPinCreate(PKSPIN pin, PIRP irp)
@@ -108,7 +108,7 @@ NTSTATUS SarKsPinSetDeviceState(PKSPIN pin, KSSTATE toState, KSSTATE fromState)
     UNREFERENCED_PARAMETER(fromState);
 
     SAR_LOG("SarKsPinSetDeviceState");
-    return STATUS_NOT_IMPLEMENTED;
+    return STATUS_SUCCESS;
 }
 
 #define GUID_FORMAT "{%08lx-%04x-%04x-%02x%02x-%02x%02x%02x%02x%02x%02x}"

@@ -116,7 +116,7 @@ BOOLEAN SarDeleteFileContext(SarDriverExtension *extension, PIRP irp)
     PIO_STACK_LOCATION irpStack;
     SarFileContext *fileContext;
     SarFileContext fileContextTemplate;
-//    BOOLEAN deleted;
+    BOOLEAN deleted;
 
     irpStack = IoGetCurrentIrpStackLocation(irp);
     fileContextTemplate.fileObject = irpStack->FileObject;
@@ -139,16 +139,15 @@ BOOLEAN SarDeleteFileContext(SarDriverExtension *extension, PIRP irp)
 
         if (fileContext->workItem) {
             IoFreeWorkItem(fileContext->workItem);
-            fileContext->workItem = nullptr;
         }
 
         ExReleaseFastMutex(&fileContext->mutex);
     }
 
-    //deleted = RtlDeleteElementGenericTable(
-        //&extension->fileContextTable, &fileContextTemplate);
+    deleted = RtlDeleteElementGenericTable(
+        &extension->fileContextTable, &fileContextTemplate);
     ExReleaseFastMutex(&extension->fileContextLock);
-    return TRUE;//deleted;
+    return deleted;
 }
 
 NTSTATUS SarIrpCleanup(PDEVICE_OBJECT deviceObject, PIRP irp)
@@ -230,7 +229,7 @@ NTSTATUS SarIrpDeviceControl(PDEVICE_OBJECT deviceObject, PIRP irp)
         case SAR_REQUEST_MAP_AUDIO_BUFFER:
         case SAR_REQUEST_AUDIO_TICK:
         default:
-            SAR_LOG("(SAR) Unknown ioctl %d");
+            SAR_LOG("(SAR) Unknown ioctl %d", ioControlCode);
             break;
     }
 

@@ -126,6 +126,10 @@ int main(int argc, char *argv[])
         return 1;
     }
 
+    while (true) {
+        Sleep(1000);
+    }
+
     CloseHandle(device);
     return 0;
 }
