@@ -157,6 +157,7 @@ typedef struct SarEndpoint
     PIRP pendingIrp;
     UNICODE_STRING pendingDeviceName;
     SarFileContext *owner;
+    PKSPIN runningPin;
     PKSFILTERFACTORY filterFactory;
     PKSFILTER_DESCRIPTOR filterDesc;
     PKSPIN_DESCRIPTOR_EX pinDesc;

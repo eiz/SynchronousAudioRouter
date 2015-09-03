@@ -19,7 +19,7 @@
 const KSPIN_DISPATCH gPinDispatch = {
     SarKsPinCreate, // Create
     SarKsPinClose, // Close
-    nullptr, // Process
+    SarKsPinProcess, // Process
     SarKsPinReset, // Reset
     SarKsPinSetDataFormat, // SetDataFormat
     SarKsPinSetDeviceState, // SetDeviceState
@@ -71,7 +71,7 @@ const KSTOPOLOGY_CONNECTION gFilterConnections[] = {
 KSFILTER_DISPATCH gFilterDispatch = {
     nullptr, // Create
     nullptr, // Close
-    SarKsFilterProcess, // Process
+    nullptr, // Process
     nullptr, // Reset
 };
 

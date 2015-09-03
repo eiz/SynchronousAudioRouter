@@ -55,8 +55,6 @@ SarEndpoint *SarGetEndpointFromIrp(PIRP irp)
 
     ExAcquireFastMutex(&extension->fileContextLock);
 
-    SAR_LOG("Looking for %p", factory);
-
     FOR_EACH_GENERIC(
         &extension->fileContextTable, SarFileContext, fileContext, restartKey) {
         ExAcquireFastMutex(&fileContext->mutex);
@@ -67,7 +65,6 @@ SarEndpoint *SarGetEndpointFromIrp(PIRP irp)
             SarEndpoint *endpoint =
                 CONTAINING_RECORD(entry, SarEndpoint, listEntry);
 
-            SAR_LOG("Checking %p", endpoint->filterFactory);
             if (endpoint->filterFactory == factory) {
                 found = endpoint;
                 break;

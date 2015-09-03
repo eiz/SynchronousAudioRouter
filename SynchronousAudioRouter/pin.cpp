@@ -16,12 +16,11 @@
 
 #include "sar.h"
 
-NTSTATUS SarKsFilterProcess(PKSFILTER filter, PKSPROCESSPIN_INDEXENTRY index)
+NTSTATUS SarKsPinProcess(PKSPIN pin)
 {
-    UNREFERENCED_PARAMETER(filter);
-    UNREFERENCED_PARAMETER(index);
-    SAR_LOG("Filter level processing");
-    return STATUS_PENDING;
+    UNREFERENCED_PARAMETER(pin);
+    SAR_LOG("Pin level processing");
+    return STATUS_SUCCESS;
 }
 
 NTSTATUS SarKsPinCreate(PKSPIN pin, PIRP irp)
@@ -44,13 +43,6 @@ VOID SarKsPinReset(PKSPIN pin)
 {
     UNREFERENCED_PARAMETER(pin);
     SAR_LOG("SarKsPinReset");
-}
-
-NTSTATUS SarKsPinProcess(PKSPIN pin)
-{
-    UNREFERENCED_PARAMETER(pin);
-    SAR_LOG("SarKsPinProcess");
-    return STATUS_SUCCESS;
 }
 
 NTSTATUS SarKsPinConnect(PKSPIN pin)
@@ -107,7 +99,7 @@ NTSTATUS SarKsPinSetDeviceState(PKSPIN pin, KSSTATE toState, KSSTATE fromState)
     UNREFERENCED_PARAMETER(toState);
     UNREFERENCED_PARAMETER(fromState);
 
-    SAR_LOG("SarKsPinSetDeviceState");
+    SAR_LOG("SarKsPinSetDeviceState %d %d", toState, fromState);
     return STATUS_SUCCESS;
 }
 
@@ -278,7 +270,6 @@ NTSTATUS SarKsPinProposeDataFormat(
         return STATUS_NO_MATCH;
     }
 
-    SAR_LOG("Matched");
     return STATUS_SUCCESS;
 }
 
