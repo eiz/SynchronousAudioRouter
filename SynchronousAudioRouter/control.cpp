@@ -540,3 +540,25 @@ err_out:
     ExFreePoolWithTag(endpoint, SAR_TAG);
     return status;
 }
+
+NTSTATUS SarProcessActivePins(SarFileContext *fileContext)
+{
+    ExAcquireFastMutex(&fileContext->mutex);
+
+    PLIST_ENTRY entry = fileContext->endpointList.Flink;
+
+    while (entry != &fileContext->endpointList) {
+        SarEndpoint *endpoint = CONTAINING_RECORD(entry, SarEndpoint, listEntry);
+
+        entry = entry->Flink;
+
+        PKSPIN pin = endpoint->activePin; // BUG: race condition (pin can go away)
+
+        if (pin) {
+            KsPinAttemptProcessing(pin, FALSE);
+        }
+    }
+
+    ExReleaseFastMutex(&fileContext->mutex);
+    return STATUS_SUCCESS;
+}

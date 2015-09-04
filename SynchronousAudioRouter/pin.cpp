@@ -18,9 +18,19 @@
 
 NTSTATUS SarKsPinProcess(PKSPIN pin)
 {
-    UNREFERENCED_PARAMETER(pin);
-    SAR_LOG("Pin level processing");
-    return STATUS_SUCCESS;
+    PKSSTREAM_POINTER sptr = KsPinGetLeadingEdgeStreamPointer(
+        pin, KSSTREAM_POINTER_STATE_LOCKED);
+
+    // TODO. just consume all frames for now
+    if (sptr) {
+        SAR_LOG("Got leading edge: %lu bytes", sptr->OffsetIn.Count);
+        KsStreamPointerAdvanceOffsetsAndUnlock(
+            sptr, sptr->OffsetIn.Count, 0, FALSE);
+        return STATUS_SUCCESS;
+    } else {
+        SAR_LOG("No frames");
+        return STATUS_PENDING;
+    }
 }
 
 NTSTATUS SarKsPinCreate(PKSPIN pin, PIRP irp)
@@ -28,6 +38,14 @@ NTSTATUS SarKsPinCreate(PKSPIN pin, PIRP irp)
     UNREFERENCED_PARAMETER(pin);
     UNREFERENCED_PARAMETER(irp);
     SAR_LOG("SarKsPinCreate");
+
+    pin->Context = SarGetEndpointFromIrp(irp);
+
+    if (!pin->Context) {
+        SAR_LOG("Failed to find endpoint for pin");
+        return STATUS_NOT_FOUND;
+    }
+
     return STATUS_SUCCESS;
 }
 
@@ -98,6 +116,23 @@ NTSTATUS SarKsPinSetDeviceState(PKSPIN pin, KSSTATE toState, KSSTATE fromState)
     UNREFERENCED_PARAMETER(pin);
     UNREFERENCED_PARAMETER(toState);
     UNREFERENCED_PARAMETER(fromState);
+
+    SarEndpoint *endpoint = (SarEndpoint *)pin->Context;
+
+    if (fromState == KSSTATE_STOP && toState != KSSTATE_STOP) {
+        InterlockedCompareExchangePointer(
+            (PVOID *)&endpoint->activePin, pin, nullptr);
+
+        if (endpoint->activePin != pin) {
+            return STATUS_RESOURCE_IN_USE;
+        }
+    }
+
+    if (toState == KSSTATE_STOP && fromState != KSSTATE_STOP) {
+        if (endpoint->activePin == pin) {
+            InterlockedExchangePointer((PVOID *)&endpoint->activePin, nullptr);
+        }
+    }
 
     SAR_LOG("SarKsPinSetDeviceState %d %d", toState, fromState);
     return STATUS_SUCCESS;

@@ -194,6 +194,10 @@ NTSTATUS SarIrpDeviceControl(PDEVICE_OBJECT deviceObject, PIRP irp)
     ExReleaseFastMutex(&extension->fileContextLock);
 
     if (!fileContext) {
+        if (ioControlCode == IOCTL_KS_WRITE_STREAM) {
+            SAR_LOG("WRITE_STREAM");
+        }
+
         return extension->ksDispatchDeviceControl(deviceObject, irp);
     }
 
@@ -226,8 +230,11 @@ NTSTATUS SarIrpDeviceControl(PDEVICE_OBJECT deviceObject, PIRP irp)
                 deviceObject, irp, extension, fileContext, &request);
             break;
         }
+        case SAR_REQUEST_AUDIO_TICK: {
+            ntStatus = SarProcessActivePins(fileContext);
+            break;
+        }
         case SAR_REQUEST_MAP_AUDIO_BUFFER:
-        case SAR_REQUEST_AUDIO_TICK:
         default:
             SAR_LOG("(SAR) Unknown ioctl %d", ioControlCode);
             break;

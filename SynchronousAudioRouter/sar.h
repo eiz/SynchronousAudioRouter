@@ -157,7 +157,7 @@ typedef struct SarEndpoint
     PIRP pendingIrp;
     UNICODE_STRING pendingDeviceName;
     SarFileContext *owner;
-    PKSPIN runningPin;
+    PKSPIN activePin;
     PKSFILTERFACTORY filterFactory;
     PKSFILTER_DESCRIPTOR filterDesc;
     PKSPIN_DESCRIPTOR_EX pinDesc;
@@ -178,7 +178,6 @@ BOOLEAN SarIoctlInput(
     ULONG size);
 NTSTATUS SarCopyUserBuffer(PVOID dest, PIO_STACK_LOCATION irpStack, ULONG size);
 VOID SarDumpKsIoctl(PIO_STACK_LOCATION irpStack);
-
 NTSTATUS SarSetBufferLayout(
     SarFileContext *fileContext,
     SarSetBufferLayoutRequest *request);
@@ -188,13 +187,11 @@ NTSTATUS SarCreateEndpoint(
     SarDriverExtension *extension,
     SarFileContext *fileContext,
     SarCreateEndpointRequest *request);
+NTSTATUS SarProcessActivePins(SarFileContext *fileContext);
 
 // Device
 NTSTATUS SarKsDeviceAdd(IN PKSDEVICE device);
 NTSTATUS SarKsDevicePostStart(IN PKSDEVICE device);
-
-// Filter
-NTSTATUS SarKsFilterProcess(PKSFILTER filter, PKSPROCESSPIN_INDEXENTRY index);
 
 // Pin
 NTSTATUS SarKsPinCreate(PKSPIN pin, PIRP irp);

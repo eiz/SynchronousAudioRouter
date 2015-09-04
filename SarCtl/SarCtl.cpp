@@ -55,6 +55,12 @@ BOOL setBufferLayout(
         (LPVOID)&request, sizeof(request), nullptr, 0, nullptr, nullptr);
 }
 
+BOOL audioTick(HANDLE device)
+{
+    return DeviceIoControl(device, SAR_REQUEST_AUDIO_TICK,
+        nullptr, 0, nullptr, 0, nullptr, nullptr);
+}
+
 int main(int argc, char *argv[])
 {
     HDEVINFO devinfo;
@@ -128,6 +134,7 @@ int main(int argc, char *argv[])
 
     while (true) {
         Sleep(1000);
+        audioTick(device);
     }
 
     CloseHandle(device);
