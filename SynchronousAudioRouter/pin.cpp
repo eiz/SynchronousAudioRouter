@@ -16,21 +16,20 @@
 
 #include "sar.h"
 
+NTSTATUS SarKsPinRtGetBuffer(
+    PIRP irp, PKSIDENTIFIER request, PVOID data)
+{
+    UNREFERENCED_PARAMETER(irp);
+    UNREFERENCED_PARAMETER(request);
+    UNREFERENCED_PARAMETER(data);
+    SAR_LOG("SarKsPinRtGetBuffer");
+    return STATUS_NOT_IMPLEMENTED;
+}
+
 NTSTATUS SarKsPinProcess(PKSPIN pin)
 {
-    PKSSTREAM_POINTER sptr = KsPinGetLeadingEdgeStreamPointer(
-        pin, KSSTREAM_POINTER_STATE_LOCKED);
-
-    // TODO. just consume all frames for now
-    if (sptr) {
-        SAR_LOG("Got leading edge: %lu bytes", sptr->OffsetIn.Count);
-        KsStreamPointerAdvanceOffsetsAndUnlock(
-            sptr, sptr->OffsetIn.Count, 0, FALSE);
-        return STATUS_SUCCESS;
-    } else {
-        SAR_LOG("No frames");
-        return STATUS_PENDING;
-    }
+    UNREFERENCED_PARAMETER(pin);
+    return STATUS_PENDING;
 }
 
 NTSTATUS SarKsPinCreate(PKSPIN pin, PIRP irp)
@@ -208,6 +207,12 @@ NTSTATUS SarKsPinIntersectHandler(
     if (callerDataRange->FormatSize == sizeof(KSDATARANGE_AUDIO) &&
         callerDataRange->MajorFormat == KSDATAFORMAT_TYPE_AUDIO) {
         callerFormat = (PKSDATARANGE_AUDIO)callerDataRange;
+        SAR_LOG("callerFormat: %d-%dHz, %d-%dbits, x%d",
+            callerFormat->MinimumSampleFrequency,
+            callerFormat->MaximumSampleFrequency,
+            callerFormat->MinimumBitsPerSample,
+            callerFormat->MaximumBitsPerSample,
+            callerFormat->MaximumChannels);
     }
 
     if (descriptorDataRange->FormatSize == sizeof(KSDATARANGE_AUDIO) &&

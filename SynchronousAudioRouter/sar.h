@@ -215,6 +215,8 @@ NTSTATUS SarKsPinGetGlobalInstancesCount(
     PIRP irp, PKSIDENTIFIER request, PVOID data);
 NTSTATUS SarKsPinProposeDataFormat(
     PIRP irp, PKSIDENTIFIER request, PVOID data);
+NTSTATUS SarKsPinRtGetBuffer(
+    PIRP irp, PKSIDENTIFIER request, PVOID data);
 
 // Init
 NTSTATUS SarInitializeFileContext(SarFileContext *fileContext);

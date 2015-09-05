@@ -29,6 +29,29 @@ const KSPIN_DISPATCH gPinDispatch = {
     nullptr, // Allocator
 };
 
+DEFINE_KSPROPERTY_TABLE(gPinRtAudioProperties) {
+    DEFINE_KSPROPERTY_ITEM(
+        KSPROPERTY_RTAUDIO_BUFFER,
+        SarKsPinRtGetBuffer,
+        sizeof(KSRTAUDIO_BUFFER_PROPERTY), sizeof(KSRTAUDIO_BUFFER),
+        nullptr, nullptr, 0, nullptr, nullptr, 0),
+};
+
+DEFINE_KSPROPERTY_SET_TABLE(gPinPropertySets) {
+    DEFINE_KSPROPERTY_SET(
+        &KSPROPSETID_RtAudio,
+        SIZEOF_ARRAY(gPinRtAudioProperties),
+        gPinRtAudioProperties,
+        0,
+        nullptr)
+};
+
+DEFINE_KSAUTOMATION_TABLE(gPinAutomation) {
+    DEFINE_KSAUTOMATION_PROPERTIES(gPinPropertySets),
+    DEFINE_KSAUTOMATION_METHODS_NULL,
+    DEFINE_KSAUTOMATION_EVENTS_NULL,
+};
+
 DECLARE_SIMPLE_FRAMING_EX(
     gAllocatorFraming,
     STATICGUIDOF(KSMEMORY_TYPE_KERNEL_NONPAGED),
@@ -46,7 +69,8 @@ const KSPIN_DESCRIPTOR_EX gPinDescriptorTemplate = {
     KSPIN_FLAG_DO_NOT_INITIATE_PROCESSING |
     KSPIN_FLAG_FRAMES_NOT_REQUIRED_FOR_PROCESSING |
     KSPIN_FLAG_PROCESS_IF_ANY_IN_RUN_STATE |
-    KSPIN_FLAG_FIXED_FORMAT,
+    KSPIN_FLAG_FIXED_FORMAT |
+    KSPIN_FLAG_DO_NOT_USE_STANDARD_TRANSPORT,
     1, // InstancesPossible
     0, // InstancesNecessary
     &gAllocatorFraming, // AllocatorFraming
@@ -56,11 +80,13 @@ const KSPIN_DESCRIPTOR_EX gPinDescriptorTemplate = {
 const GUID gCategoriesTableCapture[] = {
     STATICGUIDOF(KSCATEGORY_CAPTURE),
     STATICGUIDOF(KSCATEGORY_AUDIO),
+    STATICGUIDOF(KSCATEGORY_REALTIME),
 };
 
 const GUID gCategoriesTableRender[] = {
     STATICGUIDOF(KSCATEGORY_RENDER),
     STATICGUIDOF(KSCATEGORY_AUDIO),
+    STATICGUIDOF(KSCATEGORY_REALTIME),
 };
 
 const KSTOPOLOGY_CONNECTION gFilterConnections[] = {
@@ -283,6 +309,13 @@ retry:
         }
 
         status = SarSetDeviceInterfaceProperties(
+            endpoint, symlink, &KSCATEGORY_REALTIME);
+
+        if (!NT_SUCCESS(status)) {
+            goto out;
+        }
+
+        status = SarSetDeviceInterfaceProperties(
             endpoint, symlink, endpoint->type == SAR_ENDPOINT_TYPE_PLAYBACK ?
             &KSCATEGORY_RENDER : &KSCATEGORY_CAPTURE);
 
@@ -406,7 +439,7 @@ NTSTATUS SarCreateEndpoint(
     *endpoint->filterDesc = gFilterDescriptorTemplate;
     endpoint->pinDesc[0] = gPinDescriptorTemplate;
     endpoint->pinDesc[1] = gPinDescriptorTemplate;
-    endpoint->filterDesc->CategoriesCount = 2;
+    endpoint->filterDesc->CategoriesCount = 3;
     endpoint->filterDesc->Categories =
         request->type == SAR_ENDPOINT_TYPE_RECORDING ?
         gCategoriesTableCapture : gCategoriesTableRender;
@@ -419,6 +452,7 @@ NTSTATUS SarCreateEndpoint(
 
     PKSPIN_DESCRIPTOR pinDesc = &endpoint->pinDesc[0].PinDescriptor;
 
+    endpoint->pinDesc[0].AutomationTable = &gPinAutomation;
     pinDesc->DataRangesCount = 1;
     pinDesc->DataRanges = (PKSDATARANGE *)&endpoint->dataRange;
     pinDesc->Communication = KSPIN_COMMUNICATION_BOTH;
