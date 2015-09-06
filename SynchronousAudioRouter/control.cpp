@@ -154,7 +154,12 @@ DEFINE_KSPROPERTY_TABLE(gFilterPinProperties) {
         KSPROPERTY_PIN_PROPOSEDATAFORMAT,
         SarKsPinGetDefaultDataFormat,
         sizeof(KSP_PIN), 0,
-        SarKsPinProposeDataFormat, nullptr, 0, nullptr, nullptr, 0)
+        SarKsPinProposeDataFormat, nullptr, 0, nullptr, nullptr, 0),
+    DEFINE_KSPROPERTY_ITEM(
+        KSPROPERTY_PIN_NAME,
+        SarKsPinGetName,
+        sizeof(KSP_PIN), 0,
+        SarKsPinGetName, nullptr, 0, nullptr, nullptr, 0)
 };
 
 DEFINE_KSPROPERTY_SET_TABLE(gFilterPropertySets) {
@@ -322,8 +327,8 @@ NTSTATUS SarSetDeviceInterfaceProperties(
     status = IoSetDeviceInterfacePropertyData(&aliasLink,
         &DEVPKEY_DeviceInterface_FriendlyName, LOCALE_NEUTRAL, 0,
         DEVPROP_TYPE_STRING,
-        endpoint->pendingDeviceName.Length + sizeof(WCHAR),
-        endpoint->pendingDeviceName.Buffer);
+        endpoint->deviceName.Length + sizeof(WCHAR),
+        endpoint->deviceName.Buffer);
 
     if (!NT_SUCCESS(status)) {
         SAR_LOG("Couldn't set friendly name: %08X", status);
@@ -477,13 +482,10 @@ NTSTATUS SarCreateEndpoint(
 
     RtlZeroMemory(endpoint, SarEndpointSize(request->channelCount));
     endpoint->pendingIrp = irp;
+    endpoint->bufferIndex = request->bufferIndex;
     endpoint->channelCount = request->channelCount;
     endpoint->type = request->type;
     endpoint->owner = fileContext;
-
-    for (DWORD i = 0; i < endpoint->channelCount; ++i) {
-        endpoint->channelMappings[i] = SAR_INVALID_BUFFER;
-    }
 
     endpoint->filterDesc = (PKSFILTER_DESCRIPTOR)
         ExAllocatePoolWithTag(PagedPool, sizeof(KSFILTER_DESCRIPTOR), SAR_TAG);
@@ -603,7 +605,8 @@ NTSTATUS SarCreateEndpoint(
     endpoint->analogDataRange->MaximumChannels = 0;
 
     request->name[MAX_ENDPOINT_NAME_LENGTH] = '\0';
-    RtlInitUnicodeString(&endpoint->pendingDeviceName, request->name);
+    RtlInitUnicodeString(&endpoint->deviceName, request->name);
+    SarStringDuplicate(&endpoint->deviceName, &endpoint->deviceName);
 
     LONG filterId = InterlockedIncrement(&extension->nextFilterId);
 

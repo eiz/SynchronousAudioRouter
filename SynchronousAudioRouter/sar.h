@@ -93,6 +93,7 @@ typedef struct SarCreateEndpointRequest
     DWORD type;
     DWORD index;
     DWORD channelCount;
+    DWORD bufferIndex;
     WCHAR name[MAX_ENDPOINT_NAME_LENGTH+1];
 } SarCreateEndpointRequest;
 
@@ -103,14 +104,6 @@ typedef struct SarSetBufferLayoutRequest
     DWORD sampleRate;
     DWORD sampleDepth;
 } SarSetAudioBuffersRequest;
-
-typedef struct SarMapAudioBufferRequest
-{
-    DWORD type;
-    DWORD index;
-    DWORD channel;
-    DWORD bufferIndex;
-} SarMapAudioBuffersRequest;
 
 #if defined(KERNEL)
 #define SAR_CONTROL_REFERENCE_STRING L"\\{0EB287D4-6C04-4926-AE19-3C066A4C3F3A}"
@@ -156,7 +149,7 @@ typedef struct SarEndpoint
 {
     LIST_ENTRY listEntry;
     PIRP pendingIrp;
-    UNICODE_STRING pendingDeviceName;
+    UNICODE_STRING deviceName;
     SarFileContext *owner;
     PKSPIN activePin;
     PKSFILTERFACTORY filterFactory;
@@ -167,8 +160,8 @@ typedef struct SarEndpoint
     PKSDATARANGE_AUDIO analogDataRange;
     PKSALLOCATOR_FRAMING_EX allocatorFraming;
     DWORD type;
+    DWORD bufferIndex;
     DWORD channelCount;
-    DWORD channelMappings[0];
 } SarEndpoint;
 
 // Control
@@ -212,6 +205,8 @@ NTSTATUS SarKsPinIntersectHandler(
     PVOID context, PIRP irp, PKSP_PIN pin,
     PKSDATARANGE dataRange, PKSDATARANGE matchingDataRange, ULONG dataBufferSize,
     PVOID data, PULONG dataSize);
+NTSTATUS SarKsPinGetName(
+    PIRP irp, PKSIDENTIFIER request, PVOID data);
 NTSTATUS SarKsPinGetGlobalInstancesCount(
     PIRP irp, PKSIDENTIFIER request, PVOID data);
 NTSTATUS SarKsPinGetDefaultDataFormat(
@@ -264,6 +259,8 @@ SarDriverExtension *SarGetDriverExtensionFromIrp(PIRP irp);
 SarFileContext *SarGetFileContextFromFileObject(
     SarDriverExtension *extension, PFILE_OBJECT fileObject);
 SarEndpoint *SarGetEndpointFromIrp(PIRP irp);
+NTSTATUS SarStringDuplicate(PUNICODE_STRING str, PUNICODE_STRING src);
+VOID SarStringFree(PUNICODE_STRING str);
 
 #endif // KERNEL
 

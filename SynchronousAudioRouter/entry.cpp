@@ -142,6 +142,10 @@ BOOLEAN SarDeleteFileContext(SarDriverExtension *extension, PIRP irp)
         }
 
         ExReleaseFastMutex(&fileContext->mutex);
+
+        if (fileContext->bufferSection) {
+            ZwClose(fileContext->bufferSection);
+        }
     }
 
     deleted = RtlDeleteElementGenericTable(

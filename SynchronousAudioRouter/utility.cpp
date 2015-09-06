@@ -81,3 +81,24 @@ SarEndpoint *SarGetEndpointFromIrp(PIRP irp)
     ExReleaseFastMutex(&extension->fileContextLock);
     return found;
 }
+
+NTSTATUS SarStringDuplicate(PUNICODE_STRING str, PUNICODE_STRING src)
+{
+    PWCH buffer = (PWCH)ExAllocatePoolWithTag(
+        PagedPool, src->MaximumLength, SAR_TAG);
+
+    if (!buffer) {
+        return STATUS_INSUFFICIENT_RESOURCES;
+    }
+
+    RtlCopyMemory(buffer, src->Buffer, src->MaximumLength);
+    str->Length = src->Length;
+    str->MaximumLength = src->MaximumLength;
+    str->Buffer = buffer;
+    return STATUS_SUCCESS;
+}
+
+VOID SarStringFree(PUNICODE_STRING str)
+{
+    ExFreePoolWithTag(str->Buffer, SAR_TAG);
+}

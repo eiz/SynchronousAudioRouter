@@ -16,6 +16,35 @@
 
 #include "sar.h"
 
+NTSTATUS SarKsPinGetName(
+    PIRP irp, PKSIDENTIFIER request, PVOID data)
+{
+    SarEndpoint *endpoint = SarGetEndpointFromIrp(irp);
+    PKSP_PIN pinRequest = (PKSP_PIN)request;
+
+    if (!endpoint || pinRequest->PinId != 1) {
+        return STATUS_NOT_FOUND;
+    }
+
+    PIO_STACK_LOCATION irpStack = IoGetCurrentIrpStackLocation(irp);
+    ULONG outputLength = irpStack->Parameters.DeviceIoControl.OutputBufferLength;
+
+    irp->IoStatus.Information = endpoint->deviceName.MaximumLength;
+
+    if (outputLength == 0) {
+        return STATUS_BUFFER_OVERFLOW;
+    }
+
+    if (outputLength < endpoint->deviceName.MaximumLength) {
+        return STATUS_BUFFER_TOO_SMALL;
+    }
+
+    UNICODE_STRING output = { 0, (USHORT)outputLength, (PWCH)data };
+
+    RtlCopyUnicodeString(&output, &endpoint->deviceName);
+    return STATUS_SUCCESS;
+}
+
 NTSTATUS SarKsPinProcess(PKSPIN pin)
 {
     UNREFERENCED_PARAMETER(pin);
