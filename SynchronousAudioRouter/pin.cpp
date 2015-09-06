@@ -43,6 +43,11 @@ NTSTATUS SarKsPinClose(PKSPIN pin, PIRP irp)
     UNREFERENCED_PARAMETER(pin);
     UNREFERENCED_PARAMETER(irp);
     SAR_LOG("SarKsPinClose");
+    SarEndpoint *endpoint = (SarEndpoint *)pin->Context;
+
+    InterlockedCompareExchangePointer(
+        (PVOID *)&endpoint->activePin, nullptr, pin);
+
     return STATUS_SUCCESS;
 }
 

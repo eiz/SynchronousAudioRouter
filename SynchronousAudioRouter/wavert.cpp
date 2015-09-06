@@ -23,7 +23,13 @@ NTSTATUS SarKsPinRtGetBuffer(
     UNREFERENCED_PARAMETER(request);
     UNREFERENCED_PARAMETER(data);
     SAR_LOG("SarKsPinRtGetBuffer");
-    return STATUS_NOT_IMPLEMENTED;
+    PKSRTAUDIO_BUFFER_PROPERTY prop = (PKSRTAUDIO_BUFFER_PROPERTY)request;
+    PKSRTAUDIO_BUFFER buffer = (PKSRTAUDIO_BUFFER)data;
+
+    buffer->ActualBufferSize = prop->RequestedBufferSize;
+    buffer->BufferAddress = (PVOID)0x124;
+    buffer->CallMemoryBarrier = FALSE;
+    return STATUS_SUCCESS;
 }
 
 NTSTATUS SarKsPinRtGetBufferWithNotification(
@@ -53,7 +59,12 @@ NTSTATUS SarKsPinRtGetHwLatency(
     UNREFERENCED_PARAMETER(request);
     UNREFERENCED_PARAMETER(data);
     SAR_LOG("SarKsPinRtGetHwLatency");
-    return STATUS_NOT_IMPLEMENTED;
+    PKSRTAUDIO_HWLATENCY latency = (PKSRTAUDIO_HWLATENCY)data;
+
+    latency->FifoSize = 0;
+    latency->ChipsetDelay = 0;
+    latency->CodecDelay = 0;
+    return STATUS_SUCCESS;
 }
 
 NTSTATUS SarKsPinRtGetPacketCount(
@@ -73,7 +84,14 @@ NTSTATUS SarKsPinRtGetPositionRegister(
     UNREFERENCED_PARAMETER(request);
     UNREFERENCED_PARAMETER(data);
     SAR_LOG("SarKsPinRtGetPositionRegister");
-    return STATUS_NOT_IMPLEMENTED;
+    PKSRTAUDIO_HWREGISTER reg = (PKSRTAUDIO_HWREGISTER)data;
+
+    reg->Register = (PVOID)0x130;
+    reg->Width = 32;
+    reg->Accuracy = 0;
+    reg->Numerator = 0;
+    reg->Denominator = 0;
+    return STATUS_SUCCESS;
 }
 
 NTSTATUS SarKsPinRtGetPresentationPosition(

@@ -142,6 +142,7 @@ typedef struct SarFileContext
     PIO_WORKITEM workItem;
     LIST_ENTRY endpointList;
     LIST_ENTRY pendingEndpointList;
+    HANDLE bufferSection;
     DWORD sampleRate;
     DWORD sampleDepth;
     DWORD bufferCount;

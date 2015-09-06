@@ -225,6 +225,14 @@ NTSTATUS SarSetBufferLayout(
     SarFileContext *fileContext,
     SarSetBufferLayoutRequest *request)
 {
+    HANDLE section = nullptr;
+    OBJECT_ATTRIBUTES sectionAttributes;
+    DECLARE_UNICODE_STRING_SIZE(sectionName, 64);
+    LARGE_INTEGER sectionSize;
+    NTSTATUS status;
+    SIZE_T viewSize = 0;
+    PVOID baseAddress = nullptr;
+
     if (request->bufferCount > SAR_MAX_BUFFER_COUNT ||
         request->bufferSize > SAR_MAX_BUFFER_SIZE ||
         request->sampleDepth < SAR_MIN_SAMPLE_DEPTH ||
@@ -235,11 +243,50 @@ NTSTATUS SarSetBufferLayout(
     }
 
     ExAcquireFastMutex(&fileContext->mutex);
+
+    if (fileContext->bufferCount) {
+        ExReleaseFastMutex(&fileContext->mutex);
+        return STATUS_INVALID_STATE_TRANSITION;
+    }
+
     fileContext->bufferCount = request->bufferCount;
     fileContext->bufferSize = request->bufferSize;
     fileContext->sampleDepth = request->sampleDepth;
     fileContext->sampleRate = request->sampleRate;
     ExReleaseFastMutex(&fileContext->mutex);
+
+    // TODO: don't be an aslr bypass
+    RtlUnicodeStringPrintf(
+        &sectionName,
+        L"\\BaseNamedObjects\\SynchronousAudioRouter_%p", fileContext);
+    InitializeObjectAttributes(
+        &sectionAttributes, &sectionName, OBJ_KERNEL_HANDLE, nullptr, nullptr);
+    sectionSize.QuadPart = fileContext->bufferCount * fileContext->bufferSize;
+
+    status = ZwCreateSection(&section,
+        SECTION_MAP_READ|SECTION_MAP_WRITE|SECTION_QUERY,
+        &sectionAttributes, &sectionSize, PAGE_READWRITE, SEC_COMMIT, nullptr);
+
+    if (!NT_SUCCESS(status)) {
+        SAR_LOG("Failed to allocate buffer section %08X", status);
+        ExAcquireFastMutex(&fileContext->mutex);
+        fileContext->bufferCount = fileContext->bufferSize =
+            fileContext->sampleDepth = fileContext->sampleRate = 0;
+        ExReleaseFastMutex(&fileContext->mutex);
+        return status;
+    }
+
+    status = ZwMapViewOfSection(section,
+        ZwCurrentProcess(), &baseAddress, 0, 0, nullptr,
+        &viewSize, ViewUnmap, 0, PAGE_READWRITE);
+
+    if (!NT_SUCCESS(status)) {
+        SAR_LOG("Couldn't map view of section");
+        ZwClose(section);
+        return status;
+    }
+
+    fileContext->bufferSection = section;
     return STATUS_SUCCESS;
 }
 
