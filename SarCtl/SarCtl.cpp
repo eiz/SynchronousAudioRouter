@@ -119,7 +119,7 @@ int main(int argc, char *argv[])
 
     std::cout << "Opened SAR device." << std::endl;
 
-    if (!setBufferLayout(device, 1, 1024*3, 48000, 3)) {
+    if (!setBufferLayout(device, 1, 1024*3, 48000, 2)) {
         std::cerr << "Couldn't set buffer layout: "
             << GetLastError() << std::endl;
         return 1;

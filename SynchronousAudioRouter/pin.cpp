@@ -112,6 +112,7 @@ NTSTATUS SarKsPinSetDataFormat(
 
 NTSTATUS SarKsPinSetDeviceState(PKSPIN pin, KSSTATE toState, KSSTATE fromState)
 {
+    SAR_LOG("SarKsPinSetDeviceState %d %d", toState, fromState);
     UNREFERENCED_PARAMETER(pin);
     UNREFERENCED_PARAMETER(toState);
     UNREFERENCED_PARAMETER(fromState);
@@ -133,7 +134,6 @@ NTSTATUS SarKsPinSetDeviceState(PKSPIN pin, KSSTATE toState, KSSTATE fromState)
         }
     }
 
-    SAR_LOG("SarKsPinSetDeviceState %d %d", toState, fromState);
     return STATUS_SUCCESS;
 }
 
@@ -218,6 +218,8 @@ NTSTATUS SarKsPinIntersectHandler(
     if (descriptorDataRange->FormatSize == sizeof(KSDATARANGE_AUDIO) &&
         descriptorDataRange->MajorFormat == KSDATAFORMAT_TYPE_AUDIO) {
         myFormat = (PKSDATARANGE_AUDIO)descriptorDataRange;
+    } else {
+        return STATUS_NO_MATCH;
     }
 
     if (!myFormat || !callerFormat) {
@@ -277,13 +279,55 @@ NTSTATUS SarKsPinGetGlobalInstancesCount(
     return STATUS_SUCCESS;
 }
 
+NTSTATUS SarKsPinGetDefaultDataFormat(
+    PIRP irp, PKSIDENTIFIER request, PVOID data)
+{
+    PKSP_PIN pinRequest = (PKSP_PIN)request;
+
+    if (pinRequest->PinId != 0) {
+        return STATUS_NOT_FOUND;
+    }
+
+    SarEndpoint *endpoint = SarGetEndpointFromIrp(irp);
+    PIO_STACK_LOCATION irpStack = IoGetCurrentIrpStackLocation(irp);
+    ULONG outputLength = irpStack->Parameters.DeviceIoControl.OutputBufferLength;
+
+    if (!endpoint) {
+        return STATUS_NOT_FOUND;
+    }
+
+    if (outputLength < sizeof(KSDATAFORMAT_WAVEFORMATEX)) {
+        irp->IoStatus.Information = sizeof(KSDATAFORMAT_WAVEFORMATEX);
+        return STATUS_BUFFER_OVERFLOW;
+    }
+
+    PKSDATAFORMAT_WAVEFORMATEX waveFormat = (PKSDATAFORMAT_WAVEFORMATEX)data;
+    PKSDATARANGE_AUDIO myFormat = endpoint->dataRange;
+
+    RtlCopyMemory(
+        &waveFormat->DataFormat, endpoint->dataRange, sizeof(KSDATAFORMAT));
+
+    waveFormat->WaveFormatEx.wFormatTag = WAVE_FORMAT_PCM;
+    waveFormat->WaveFormatEx.nChannels = (WORD)myFormat->MaximumChannels;
+    waveFormat->WaveFormatEx.nSamplesPerSec = myFormat->MaximumSampleFrequency;
+    waveFormat->WaveFormatEx.wBitsPerSample = (WORD)myFormat->MaximumBitsPerSample;
+    waveFormat->WaveFormatEx.nBlockAlign =
+        (WORD)myFormat->MaximumBitsPerSample / 8 * (WORD)myFormat->MaximumChannels;
+    waveFormat->WaveFormatEx.nAvgBytesPerSec =
+        waveFormat->WaveFormatEx.nBlockAlign *
+        waveFormat->WaveFormatEx.nSamplesPerSec;
+    waveFormat->WaveFormatEx.cbSize = 0;
+    waveFormat->DataFormat.SampleSize = waveFormat->WaveFormatEx.nBlockAlign;
+    waveFormat->DataFormat.FormatSize = sizeof(KSDATAFORMAT_WAVEFORMATEX);
+    return STATUS_SUCCESS;
+}
+
 NTSTATUS SarKsPinProposeDataFormat(
     PIRP irp, PKSIDENTIFIER request, PVOID data)
 {
-    UNREFERENCED_PARAMETER(irp);
-    UNREFERENCED_PARAMETER(data);
     PKSP_PIN pinRequest = (PKSP_PIN)request;
-    PKSDATAFORMAT_WAVEFORMATEX format = (PKSDATAFORMAT_WAVEFORMATEX)data;
+    PIO_STACK_LOCATION irpStack = IoGetCurrentIrpStackLocation(irp);
+    ULONG outputLength = irpStack->Parameters.DeviceIoControl.OutputBufferLength;
 
     if (pinRequest->PinId != 0) {
         return STATUS_NOT_FOUND;
@@ -295,17 +339,34 @@ NTSTATUS SarKsPinProposeDataFormat(
         return STATUS_NOT_FOUND;
     }
 
+    if (outputLength < sizeof(KSDATAFORMAT)) {
+        return STATUS_BUFFER_TOO_SMALL;
+    }
+
+    PKSDATAFORMAT_WAVEFORMATEX format = (PKSDATAFORMAT_WAVEFORMATEX)data;
+
     if (format->DataFormat.MajorFormat != KSDATAFORMAT_TYPE_AUDIO ||
         format->DataFormat.SubFormat != KSDATAFORMAT_SUBTYPE_PCM ||
-        format->DataFormat.Specifier != KSDATAFORMAT_SPECIFIER_WAVEFORMATEX ||
-        format->DataFormat.FormatSize < sizeof(KSDATAFORMAT_WAVEFORMATEX)) {
-        SAR_LOG("Format type can't be handled");
+        format->DataFormat.Specifier != KSDATAFORMAT_SPECIFIER_WAVEFORMATEX) {
+        SAR_LOG("Format type can't be handled %d %d %d"
+            GUID_FORMAT " " GUID_FORMAT " " GUID_FORMAT,
+            format->DataFormat.FormatSize,
+            sizeof(KSDATAFORMAT_WAVEFORMATEX),
+            sizeof(KSDATAFORMAT),
+            GUID_VALUES(format->DataFormat.MajorFormat),
+            GUID_VALUES(format->DataFormat.SubFormat),
+            GUID_VALUES(format->DataFormat.Specifier));
         return STATUS_NO_MATCH;
+    }
+
+    if (outputLength < sizeof(KSDATAFORMAT_WAVEFORMATEX)) {
+        return STATUS_BUFFER_TOO_SMALL;
     }
 
     if (format->WaveFormatEx.nChannels != endpoint->channelCount ||
         format->WaveFormatEx.wBitsPerSample != endpoint->owner->sampleDepth * 8 ||
-        format->WaveFormatEx.wFormatTag != WAVE_FORMAT_PCM ||
+        (format->WaveFormatEx.wFormatTag != WAVE_FORMAT_PCM &&
+         format->WaveFormatEx.wFormatTag != WAVE_FORMAT_EXTENSIBLE) ||
         format->WaveFormatEx.nSamplesPerSec != endpoint->owner->sampleRate) {
         return STATUS_NO_MATCH;
     }

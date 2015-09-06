@@ -62,6 +62,13 @@ DECLARE_SIMPLE_FRAMING_EX(
     2 * PAGE_SIZE,
     2 * PAGE_SIZE);
 
+const KSPIN_INTERFACE gPinInterfaces[] = {
+    {
+        STATICGUIDOF(KSINTERFACESETID_Standard),
+        KSINTERFACE_STANDARD_LOOPED_STREAMING
+    }
+};
+
 const KSPIN_DESCRIPTOR_EX gPinDescriptorTemplate = {
     &gPinDispatch, // Dispatch
     nullptr, // AutomationTable
@@ -109,7 +116,8 @@ DEFINE_KSPROPERTY_TABLE(gFilterPinProperties) {
         nullptr, nullptr, 0, nullptr, nullptr, 0),
     DEFINE_KSPROPERTY_ITEM(
         KSPROPERTY_PIN_PROPOSEDATAFORMAT,
-        nullptr, sizeof(KSP_PIN), sizeof(KSDATAFORMAT_WAVEFORMATEX),
+        SarKsPinGetDefaultDataFormat,
+        sizeof(KSP_PIN), 0,
         SarKsPinProposeDataFormat, nullptr, 0, nullptr, nullptr, 0)
 };
 
@@ -460,6 +468,8 @@ NTSTATUS SarCreateEndpoint(
         request->type == SAR_ENDPOINT_TYPE_RECORDING ?
         KSPIN_DATAFLOW_OUT : KSPIN_DATAFLOW_IN;
     pinDesc->Category = &KSCATEGORY_AUDIO;
+    pinDesc->InterfacesCount = 1;
+    pinDesc->Interfaces = gPinInterfaces;
 
     if (request->type == SAR_ENDPOINT_TYPE_PLAYBACK) {
         endpoint->pinDesc[0].Flags |= KSPIN_FLAG_RENDERER;

@@ -213,6 +213,8 @@ NTSTATUS SarKsPinIntersectHandler(
     PVOID data, PULONG dataSize);
 NTSTATUS SarKsPinGetGlobalInstancesCount(
     PIRP irp, PKSIDENTIFIER request, PVOID data);
+NTSTATUS SarKsPinGetDefaultDataFormat(
+    PIRP irp, PKSIDENTIFIER request, PVOID data);
 NTSTATUS SarKsPinProposeDataFormat(
     PIRP irp, PKSIDENTIFIER request, PVOID data);
 NTSTATUS SarKsPinRtGetBuffer(
