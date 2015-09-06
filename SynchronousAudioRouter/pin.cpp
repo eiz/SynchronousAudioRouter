@@ -16,16 +16,6 @@
 
 #include "sar.h"
 
-NTSTATUS SarKsPinRtGetBuffer(
-    PIRP irp, PKSIDENTIFIER request, PVOID data)
-{
-    UNREFERENCED_PARAMETER(irp);
-    UNREFERENCED_PARAMETER(request);
-    UNREFERENCED_PARAMETER(data);
-    SAR_LOG("SarKsPinRtGetBuffer");
-    return STATUS_NOT_IMPLEMENTED;
-}
-
 NTSTATUS SarKsPinProcess(PKSPIN pin)
 {
     UNREFERENCED_PARAMETER(pin);

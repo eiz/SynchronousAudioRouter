@@ -208,6 +208,7 @@
     <ClCompile Include="entry.cpp" />
     <ClCompile Include="pin.cpp" />
     <ClCompile Include="utility.cpp" />
+    <ClCompile Include="wavert.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="sar.h" />

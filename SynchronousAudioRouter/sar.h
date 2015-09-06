@@ -219,6 +219,24 @@ NTSTATUS SarKsPinProposeDataFormat(
     PIRP irp, PKSIDENTIFIER request, PVOID data);
 NTSTATUS SarKsPinRtGetBuffer(
     PIRP irp, PKSIDENTIFIER request, PVOID data);
+NTSTATUS SarKsPinRtGetBufferWithNotification(
+    PIRP irp, PKSIDENTIFIER request, PVOID data);
+NTSTATUS SarKsPinRtGetClockRegister(
+    PIRP irp, PKSIDENTIFIER request, PVOID data);
+NTSTATUS SarKsPinRtGetHwLatency(
+    PIRP irp, PKSIDENTIFIER request, PVOID data);
+NTSTATUS SarKsPinRtGetPacketCount(
+    PIRP irp, PKSIDENTIFIER request, PVOID data);
+NTSTATUS SarKsPinRtGetPositionRegister(
+    PIRP irp, PKSIDENTIFIER request, PVOID data);
+NTSTATUS SarKsPinRtGetPresentationPosition(
+    PIRP irp, PKSIDENTIFIER request, PVOID data);
+NTSTATUS SarKsPinRtQueryNotificationSupport(
+    PIRP irp, PKSIDENTIFIER request, PVOID data);
+NTSTATUS SarKsPinRtRegisterNotificationEvent(
+    PIRP irp, PKSIDENTIFIER request, PVOID data);
+NTSTATUS SarKsPinRtUnregisterNotificationEvent(
+    PIRP irp, PKSIDENTIFIER request, PVOID data);
 
 // Init
 NTSTATUS SarInitializeFileContext(SarFileContext *fileContext);

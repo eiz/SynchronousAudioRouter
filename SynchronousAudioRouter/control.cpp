@@ -29,12 +29,48 @@ const KSPIN_DISPATCH gPinDispatch = {
     nullptr, // Allocator
 };
 
+#define DEFINE_KSPROPERTY_GETTER(id, handler, intype, outtype) \
+    DEFINE_KSPROPERTY_ITEM((id), (handler), sizeof(intype), sizeof(outtype), \
+    nullptr, nullptr, 0, nullptr, nullptr, 0)
+
 DEFINE_KSPROPERTY_TABLE(gPinRtAudioProperties) {
+    DEFINE_KSPROPERTY_GETTER(
+        KSPROPERTY_RTAUDIO_BUFFER, SarKsPinRtGetBuffer,
+        KSRTAUDIO_BUFFER_PROPERTY, KSRTAUDIO_BUFFER),
+    DEFINE_KSPROPERTY_GETTER(
+        KSPROPERTY_RTAUDIO_BUFFER_WITH_NOTIFICATION,
+        SarKsPinRtGetBufferWithNotification,
+        KSRTAUDIO_BUFFER_PROPERTY, KSRTAUDIO_BUFFER),
+    DEFINE_KSPROPERTY_GETTER(
+        KSPROPERTY_RTAUDIO_CLOCKREGISTER, SarKsPinRtGetClockRegister,
+        KSRTAUDIO_HWREGISTER_PROPERTY, KSRTAUDIO_HWREGISTER),
+    DEFINE_KSPROPERTY_GETTER(KSPROPERTY_RTAUDIO_HWLATENCY, SarKsPinRtGetHwLatency,
+        KSPROPERTY, KSRTAUDIO_HWLATENCY),
+    DEFINE_KSPROPERTY_GETTER(
+        KSPROPERTY_RTAUDIO_PACKETCOUNT, SarKsPinRtGetPacketCount,
+        KSPROPERTY, ULONG),
+    DEFINE_KSPROPERTY_GETTER(
+        KSPROPERTY_RTAUDIO_POSITIONREGISTER, SarKsPinRtGetPositionRegister,
+        KSRTAUDIO_HWREGISTER_PROPERTY, KSRTAUDIO_HWREGISTER),
+    DEFINE_KSPROPERTY_GETTER(
+        KSPROPERTY_RTAUDIO_PRESENTATION_POSITION,
+        SarKsPinRtGetPresentationPosition,
+        KSPROPERTY, KSAUDIO_PRESENTATION_POSITION),
+    DEFINE_KSPROPERTY_GETTER(
+        KSPROPERTY_RTAUDIO_QUERY_NOTIFICATION_SUPPORT,
+        SarKsPinRtQueryNotificationSupport, KSPROPERTY, BOOL),
     DEFINE_KSPROPERTY_ITEM(
-        KSPROPERTY_RTAUDIO_BUFFER,
-        SarKsPinRtGetBuffer,
-        sizeof(KSRTAUDIO_BUFFER_PROPERTY), sizeof(KSRTAUDIO_BUFFER),
-        nullptr, nullptr, 0, nullptr, nullptr, 0),
+        KSPROPERTY_RTAUDIO_REGISTER_NOTIFICATION_EVENT,
+        SarKsPinRtRegisterNotificationEvent,
+        sizeof(KSRTAUDIO_NOTIFICATION_EVENT_PROPERTY), 0,
+        SarKsPinRtRegisterNotificationEvent,
+        nullptr, 0, nullptr, nullptr, 0),
+    DEFINE_KSPROPERTY_ITEM(
+        KSPROPERTY_RTAUDIO_UNREGISTER_NOTIFICATION_EVENT,
+        SarKsPinRtUnregisterNotificationEvent,
+        sizeof(KSRTAUDIO_NOTIFICATION_EVENT_PROPERTY), 0,
+        SarKsPinRtUnregisterNotificationEvent,
+        nullptr, 0, nullptr, nullptr, 0),
 };
 
 DEFINE_KSPROPERTY_SET_TABLE(gPinPropertySets) {
