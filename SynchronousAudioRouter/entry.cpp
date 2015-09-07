@@ -188,7 +188,7 @@ NTSTATUS SarIrpDeviceControl(PDEVICE_OBJECT deviceObject, PIRP irp)
     ioControlCode = irpStack->Parameters.DeviceIoControl.IoControlCode;
 
 #ifdef LOUD
-    SarDumpKsIoctl(irpStack);
+    SarDumpKsIoctl(irp);
 #endif
 
     fileContextTemplate.fileObject = irpStack->FileObject;
@@ -198,10 +198,6 @@ NTSTATUS SarIrpDeviceControl(PDEVICE_OBJECT deviceObject, PIRP irp)
     ExReleaseFastMutex(&extension->fileContextLock);
 
     if (!fileContext) {
-        if (ioControlCode == IOCTL_KS_WRITE_STREAM) {
-            SAR_LOG("WRITE_STREAM");
-        }
-
         return extension->ksDispatchDeviceControl(deviceObject, irp);
     }
 
@@ -210,22 +206,32 @@ NTSTATUS SarIrpDeviceControl(PDEVICE_OBJECT deviceObject, PIRP irp)
             SAR_LOG("(SAR) create audio buffers");
 
             SarSetBufferLayoutRequest request;
+            SarSetBufferLayoutResponse response;
 
-            if (!SarIoctlInput(
-                &ntStatus, irp, irpStack, (PVOID *)&request, sizeof(request))) {
+            ntStatus = SarReadUserBuffer(
+                &request, irp, sizeof(SarSetBufferLayoutRequest));
 
+            if (!NT_SUCCESS(ntStatus)) {
                 break;
             }
 
-            ntStatus = SarSetBufferLayout(fileContext, &request);
+            ntStatus = SarSetBufferLayout(fileContext, &request, &response);
+
+            if (!NT_SUCCESS(ntStatus)) {
+                break;
+            }
+
+            ntStatus = SarWriteUserBuffer(
+                &response, irp, sizeof(SarSetBufferLayoutResponse));
             break;
         }
         case SAR_REQUEST_CREATE_ENDPOINT: {
             SarCreateEndpointRequest request;
 
-            if (!SarIoctlInput(
-                &ntStatus, irp, irpStack, (PVOID *)&request, sizeof(request))) {
+            ntStatus = SarReadUserBuffer(
+                &request, irp, sizeof(SarCreateEndpointRequest));
 
+            if (!NT_SUCCESS(ntStatus)) {
                 break;
             }
 
@@ -270,7 +276,6 @@ NTSTATUS SarInitializeFileContext(SarFileContext *fileContext)
     InitializeListHead(&fileContext->pendingEndpointList);
     fileContext->sampleRate = 0;
     fileContext->sampleDepth = 0;
-    fileContext->bufferCount = 0;
     fileContext->bufferSize = 0;
 
     fileContext->workItem = IoAllocateWorkItem(

@@ -19,15 +19,74 @@
 NTSTATUS SarKsPinRtGetBuffer(
     PIRP irp, PKSIDENTIFIER request, PVOID data)
 {
-    UNREFERENCED_PARAMETER(irp);
-    UNREFERENCED_PARAMETER(request);
-    UNREFERENCED_PARAMETER(data);
     SAR_LOG("SarKsPinRtGetBuffer");
     PKSRTAUDIO_BUFFER_PROPERTY prop = (PKSRTAUDIO_BUFFER_PROPERTY)request;
     PKSRTAUDIO_BUFFER buffer = (PKSRTAUDIO_BUFFER)data;
+    SarEndpoint *endpoint = SarGetEndpointFromIrp(irp);
+    SarFileContext *fileContext = endpoint->owner;
+    NTSTATUS status;
+
+    if (!endpoint) {
+        SAR_LOG("No valid endpoint");
+        return STATUS_NOT_FOUND;
+    }
+
+    if (prop->BaseAddress != nullptr) {
+        SAR_LOG("It wants a specific address");
+        return STATUS_NOT_IMPLEMENTED;
+    }
+
+    SIZE_T viewSize = ROUND_UP(prop->RequestedBufferSize, SAR_BUFFER_CELL_SIZE);
+
+    ExAcquireFastMutex(&fileContext->mutex);
+
+    if (!fileContext->bufferSection) {
+        SAR_LOG("Buffer isn't allocated");
+        ExReleaseFastMutex(&fileContext->mutex);
+        return STATUS_INSUFFICIENT_RESOURCES;
+    }
+
+    ULONG cellIndex = RtlFindClearBitsAndSet(
+        &fileContext->bufferMap, (ULONG)(viewSize / SAR_BUFFER_CELL_SIZE), 0);
+
+    if (cellIndex == 0xFFFFFFFF) {
+        ExReleaseFastMutex(&fileContext->mutex);
+        return STATUS_INSUFFICIENT_RESOURCES;
+    }
+
+    ExReleaseFastMutex(&fileContext->mutex);
+
+    PVOID mappedAddress = nullptr;
+    LARGE_INTEGER sectionOffset;
+
+    sectionOffset.QuadPart = cellIndex * SAR_BUFFER_CELL_SIZE;
+    SAR_LOG("Mapping %08X %016llX", viewSize, sectionOffset.QuadPart);
+    status = ZwMapViewOfSection(endpoint->owner->bufferSection, ZwCurrentProcess(),
+        &mappedAddress, 0, 0, &sectionOffset, &viewSize, ViewUnmap,
+        0, PAGE_READWRITE);
+
+    if (!NT_SUCCESS(status)) {
+        SAR_LOG("Section mapping failed %08X", status);
+        return status;
+    }
+
+    SarEndpointRegisters regs;
+
+    regs.isActive = TRUE;
+    regs.bufferOffset = cellIndex * SAR_BUFFER_CELL_SIZE;
+    regs.bufferSize = prop->RequestedBufferSize;
+    regs.clockRegister = 0;
+    regs.positionRegister = 0;
+
+    status = SarWriteEndpointRegisters(&regs, endpoint);
+
+    if (!NT_SUCCESS(status)) {
+        SAR_LOG("Couldn't write endpoint registers: %08X", status);
+        return status; // TODO: goto err_out
+    }
 
     buffer->ActualBufferSize = prop->RequestedBufferSize;
-    buffer->BufferAddress = (PVOID)0x124;
+    buffer->BufferAddress = mappedAddress;
     buffer->CallMemoryBarrier = FALSE;
     return STATUS_SUCCESS;
 }
@@ -45,10 +104,18 @@ NTSTATUS SarKsPinRtGetBufferWithNotification(
 NTSTATUS SarKsPinRtGetClockRegister(
     PIRP irp, PKSIDENTIFIER request, PVOID data)
 {
-    UNREFERENCED_PARAMETER(irp);
     UNREFERENCED_PARAMETER(request);
-    UNREFERENCED_PARAMETER(data);
     SAR_LOG("SarKsPinRtGetClockRegister");
+
+    PKSRTAUDIO_HWREGISTER reg = (PKSRTAUDIO_HWREGISTER)data;
+    SarEndpoint *endpoint = SarGetEndpointFromIrp(irp);
+
+    reg->Register =
+        &endpoint->activeRegisterFileUVA[endpoint->index].clockRegister;
+    reg->Width = 32;
+    reg->Accuracy = 0;
+    reg->Numerator = endpoint->owner->sampleRate;
+    reg->Denominator = 1;
     return STATUS_NOT_IMPLEMENTED;
 }
 
@@ -80,13 +147,13 @@ NTSTATUS SarKsPinRtGetPacketCount(
 NTSTATUS SarKsPinRtGetPositionRegister(
     PIRP irp, PKSIDENTIFIER request, PVOID data)
 {
-    UNREFERENCED_PARAMETER(irp);
     UNREFERENCED_PARAMETER(request);
-    UNREFERENCED_PARAMETER(data);
     SAR_LOG("SarKsPinRtGetPositionRegister");
     PKSRTAUDIO_HWREGISTER reg = (PKSRTAUDIO_HWREGISTER)data;
+    SarEndpoint *endpoint = SarGetEndpointFromIrp(irp);
 
-    reg->Register = (PVOID)0x130;
+    reg->Register =
+        &endpoint->activeRegisterFileUVA[endpoint->index].positionRegister;
     reg->Width = 32;
     reg->Accuracy = 0;
     reg->Numerator = 0;

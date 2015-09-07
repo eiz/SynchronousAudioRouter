@@ -41,18 +41,40 @@ BOOL createEndpoint(
 }
 
 BOOL setBufferLayout(
-    HANDLE device, DWORD bufferCount, DWORD bufferSize,
-    DWORD sampleRate, DWORD sampleDepth)
+    HANDLE device, DWORD bufferSize,
+    DWORD sampleRate, DWORD sampleDepth,
+    SarEndpointRegisters **regsOut,
+    LPVOID *bufferOut,
+    DWORD *bufferSizeOut)
 {
     SarSetBufferLayoutRequest request = {};
+    SarSetBufferLayoutResponse response = {};
 
-    request.bufferCount = bufferCount;
     request.bufferSize = bufferSize;
     request.sampleRate = sampleRate;
     request.sampleDepth = sampleDepth;
 
-    return DeviceIoControl(device, SAR_REQUEST_SET_BUFFER_LAYOUT,
-        (LPVOID)&request, sizeof(request), nullptr, 0, nullptr, nullptr);
+    if (!DeviceIoControl(device, SAR_REQUEST_SET_BUFFER_LAYOUT,
+        (LPVOID)&request, sizeof(request), (LPVOID)&response, sizeof(response),
+        nullptr, nullptr)) {
+
+        return FALSE;
+    }
+
+    if (regsOut) {
+        *regsOut = (SarEndpointRegisters *)
+            ((PCH)response.virtualAddress + response.registerBase);
+    }
+
+    if (bufferOut) {
+        *bufferOut = response.virtualAddress;
+    }
+
+    if (bufferSizeOut) {
+        *bufferSizeOut = response.actualSize;
+    }
+
+    return TRUE;
 }
 
 BOOL audioTick(HANDLE device)
@@ -119,7 +141,9 @@ int main(int argc, char *argv[])
 
     std::cout << "Opened SAR device." << std::endl;
 
-    if (!setBufferLayout(device, 1, 1024*3, 48000, 2)) {
+    SarEndpointRegisters *regs = nullptr;
+
+    if (!setBufferLayout(device, 1024 * 1024, 96000, 3, &regs, nullptr, nullptr)) {
         std::cerr << "Couldn't set buffer layout: "
             << GetLastError() << std::endl;
         return 1;
@@ -134,6 +158,10 @@ int main(int argc, char *argv[])
 
     while (true) {
         Sleep(1000);
+        std::cout << "Active: " << regs->isActive << " Offset: "
+                  << regs->bufferOffset << " Size: " << regs->bufferSize
+                  << " Clock: " << regs->clockRegister << " Position: "
+                  << regs->positionRegister << std::endl;
 //        audioTick(device);
     }
 

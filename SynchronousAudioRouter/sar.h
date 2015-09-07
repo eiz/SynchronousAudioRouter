@@ -70,40 +70,54 @@ DEFINE_GUID(GUID_DEVINTERFACE_SYNCHRONOUSAUDIOROUTER,
 #define SAR_ENDPOINT_TYPE_PLAYBACK 2
 
 #define SAR_REQUEST_SET_BUFFER_LAYOUT CTL_CODE( \
-    FILE_DEVICE_UNKNOWN, 1, METHOD_IN_DIRECT, FILE_READ_DATA | FILE_WRITE_DATA)
+    FILE_DEVICE_UNKNOWN, 1, METHOD_NEITHER, FILE_READ_DATA | FILE_WRITE_DATA)
 #define SAR_REQUEST_CREATE_ENDPOINT CTL_CODE( \
-    FILE_DEVICE_UNKNOWN, 2, METHOD_IN_DIRECT, FILE_READ_DATA | FILE_WRITE_DATA)
+    FILE_DEVICE_UNKNOWN, 2, METHOD_NEITHER, FILE_READ_DATA | FILE_WRITE_DATA)
 #define SAR_REQUEST_MAP_AUDIO_BUFFER CTL_CODE( \
-    FILE_DEVICE_UNKNOWN, 3, METHOD_IN_DIRECT, FILE_READ_DATA | FILE_WRITE_DATA)
+    FILE_DEVICE_UNKNOWN, 3, METHOD_NEITHER, FILE_READ_DATA | FILE_WRITE_DATA)
 #define SAR_REQUEST_AUDIO_TICK CTL_CODE( \
-    FILE_DEVICE_UNKNOWN, 4, METHOD_IN_DIRECT, FILE_READ_DATA | FILE_WRITE_DATA)
+    FILE_DEVICE_UNKNOWN, 4, METHOD_NEITHER, FILE_READ_DATA | FILE_WRITE_DATA)
 
-#define SAR_MAX_CHANNEL_COUNT 256
-#define SAR_MAX_BUFFER_COUNT 1024
-#define SAR_MAX_BUFFER_SIZE 65536
+#define SAR_MAX_BUFFER_SIZE 1024 * 1024 * 128
 #define SAR_MIN_SAMPLE_DEPTH 1
 #define SAR_MAX_SAMPLE_DEPTH 3
-#define SAR_MIN_SAMPLE_RATE 44100
+#define SAR_MIN_SAMPLE_RATE 8000
 #define SAR_MAX_SAMPLE_RATE 192000
-
-#define SAR_INVALID_BUFFER 0xFFFFFFFF
+#define SAR_MAX_CHANNEL_COUNT 32
+#define SAR_BUFFER_CELL_SIZE 65536
+#define SAR_MAX_ENDPOINT_COUNT \
+    (SAR_BUFFER_CELL_SIZE / sizeof(SarEndpointRegisters))
 
 typedef struct SarCreateEndpointRequest
 {
     DWORD type;
     DWORD index;
     DWORD channelCount;
-    DWORD bufferIndex;
     WCHAR name[MAX_ENDPOINT_NAME_LENGTH+1];
 } SarCreateEndpointRequest;
 
 typedef struct SarSetBufferLayoutRequest
 {
-    DWORD bufferCount;
     DWORD bufferSize;
     DWORD sampleRate;
     DWORD sampleDepth;
-} SarSetAudioBuffersRequest;
+} SarSetBufferLayoutRequest;
+
+typedef struct SarSetBufferLayoutResponse
+{
+    PVOID virtualAddress;
+    DWORD actualSize;
+    DWORD registerBase;
+} SarSetBufferLayoutResponse;
+
+typedef struct SarEndpointRegisters
+{
+    BOOL isActive;
+    DWORD positionRegister;
+    DWORD clockRegister;
+    DWORD bufferOffset;
+    DWORD bufferSize;
+} SarEndpointRegisters;
 
 #if defined(KERNEL)
 #define SAR_CONTROL_REFERENCE_STRING L"\\{0EB287D4-6C04-4926-AE19-3C066A4C3F3A}"
@@ -136,14 +150,17 @@ typedef struct SarFileContext
     LIST_ENTRY endpointList;
     LIST_ENTRY pendingEndpointList;
     HANDLE bufferSection;
+    RTL_BITMAP bufferMap;
+    DWORD bufferSize;
     DWORD sampleRate;
     DWORD sampleDepth;
-    DWORD bufferCount;
-    DWORD bufferSize;
 } SarFileContext;
 
-#define SarEndpointSize(channelCount) \
-    (sizeof(SarEndpoint) + sizeof(DWORD) * (channelCount))
+#define SarBufferMapEntryCount(fileContext) \
+    ((fileContext)->bufferSize / SAR_BUFFER_CELL_SIZE)
+#define SarBufferMapSize(fileContext) ( \
+    SarBufferMapEntryCount(fileContext) / sizeof(DWORD) + \
+    ((SarBufferMapEntryCount(fileContext) % sizeof(DWORD)) != 0) ? 1 : 0)
 
 typedef struct SarEndpoint
 {
@@ -151,7 +168,10 @@ typedef struct SarEndpoint
     PIRP pendingIrp;
     UNICODE_STRING deviceName;
     SarFileContext *owner;
+    // TODO: lock pin instance data
     PKSPIN activePin;
+    SarEndpointRegisters *activeRegisterFileUVA;
+    PVOID activeBufferVirtualAddress;
     PKSFILTERFACTORY filterFactory;
     PKSFILTER_DESCRIPTOR filterDesc;
     PKSPIN_DESCRIPTOR_EX pinDesc;
@@ -160,21 +180,26 @@ typedef struct SarEndpoint
     PKSDATARANGE_AUDIO analogDataRange;
     PKSALLOCATOR_FRAMING_EX allocatorFraming;
     DWORD type;
-    DWORD bufferIndex;
+    DWORD index;
     DWORD channelCount;
 } SarEndpoint;
+
+typedef struct SarFreeBuffer
+{
+    SarFreeBuffer *next;
+    DWORD size;
+} SarFreeBuffer;
 
 // Control
 BOOL SarCheckIoctlInput(
     NTSTATUS *status, PIO_STACK_LOCATION irpStack, ULONG size);
-BOOLEAN SarIoctlInput(
-    NTSTATUS *status, PIRP irp, PIO_STACK_LOCATION irpStack, PVOID *buffer,
-    ULONG size);
-NTSTATUS SarCopyUserBuffer(PVOID dest, PIO_STACK_LOCATION irpStack, ULONG size);
+NTSTATUS SarReadUserBuffer(PVOID src, PIRP irp, ULONG size);
+NTSTATUS SarWriteUserBuffer(PVOID src, PIRP irp, ULONG size);
 VOID SarDumpKsIoctl(PIO_STACK_LOCATION irpStack);
 NTSTATUS SarSetBufferLayout(
     SarFileContext *fileContext,
-    SarSetBufferLayoutRequest *request);
+    SarSetBufferLayoutRequest *request,
+    SarSetBufferLayoutResponse *response);
 NTSTATUS SarCreateEndpoint(
     PDEVICE_OBJECT device,
     PIRP irp,
@@ -253,12 +278,27 @@ NTSTATUS DriverEntry(
         obj; \
         obj = (objType *)RtlEnumerateGenericTableWithoutSplaying( \
         (table), &(restartKey)))
+#define GUID_FORMAT "{%08lx-%04x-%04x-%02x%02x-%02x%02x%02x%02x%02x%02x}"
+#define GUID_VALUES(g) (g).Data1, (g).Data2, (g).Data3, \
+    (g).Data4[0], \
+    (g).Data4[1], \
+    (g).Data4[2], \
+    (g).Data4[3], \
+    (g).Data4[4], \
+    (g).Data4[5], \
+    (g).Data4[6], \
+    (g).Data4[7]
+#define ROUND_UP(N, S) ((((N) + (S) - 1) / (S)) * (S))
 
 SarDriverExtension *SarGetDriverExtension(PDRIVER_OBJECT driverObject);
 SarDriverExtension *SarGetDriverExtensionFromIrp(PIRP irp);
 SarFileContext *SarGetFileContextFromFileObject(
     SarDriverExtension *extension, PFILE_OBJECT fileObject);
 SarEndpoint *SarGetEndpointFromIrp(PIRP irp);
+NTSTATUS SarReadEndpointRegisters(
+    SarEndpointRegisters *regs, SarEndpoint *endpoint);
+NTSTATUS SarWriteEndpointRegisters(
+    SarEndpointRegisters *regs, SarEndpoint *endpoint);
 NTSTATUS SarStringDuplicate(PUNICODE_STRING str, PUNICODE_STRING src);
 VOID SarStringFree(PUNICODE_STRING str);
 

@@ -208,27 +208,10 @@ BOOL SarCheckIoctlInput(
     return TRUE;
 }
 
-BOOLEAN SarIoctlInput(
-    NTSTATUS *status, PIRP irp, PIO_STACK_LOCATION irpStack, PVOID *buffer,
-    ULONG size)
-{
-    UNREFERENCED_PARAMETER(buffer);
-
-    if (!status) {
-        return FALSE;
-    }
-
-    if (!SarCheckIoctlInput(status, irpStack, size)) {
-        return FALSE;
-    }
-
-    RtlCopyMemory(buffer, irp->AssociatedIrp.SystemBuffer, size);
-    return NT_SUCCESS(*status);
-}
-
 NTSTATUS SarSetBufferLayout(
     SarFileContext *fileContext,
-    SarSetBufferLayoutRequest *request)
+    SarSetBufferLayoutRequest *request,
+    SarSetBufferLayoutResponse *response)
 {
     HANDLE section = nullptr;
     OBJECT_ATTRIBUTES sectionAttributes;
@@ -238,8 +221,7 @@ NTSTATUS SarSetBufferLayout(
     SIZE_T viewSize = 0;
     PVOID baseAddress = nullptr;
 
-    if (request->bufferCount > SAR_MAX_BUFFER_COUNT ||
-        request->bufferSize > SAR_MAX_BUFFER_SIZE ||
+    if (request->bufferSize > SAR_MAX_BUFFER_SIZE ||
         request->sampleDepth < SAR_MIN_SAMPLE_DEPTH ||
         request->sampleDepth > SAR_MAX_SAMPLE_DEPTH ||
         request->sampleRate < SAR_MIN_SAMPLE_RATE ||
@@ -249,13 +231,12 @@ NTSTATUS SarSetBufferLayout(
 
     ExAcquireFastMutex(&fileContext->mutex);
 
-    if (fileContext->bufferCount) {
+    if (fileContext->bufferSize) {
         ExReleaseFastMutex(&fileContext->mutex);
         return STATUS_INVALID_STATE_TRANSITION;
     }
 
-    fileContext->bufferCount = request->bufferCount;
-    fileContext->bufferSize = request->bufferSize;
+    fileContext->bufferSize = ROUND_TO_PAGES(request->bufferSize);
     fileContext->sampleDepth = request->sampleDepth;
     fileContext->sampleRate = request->sampleRate;
     ExReleaseFastMutex(&fileContext->mutex);
@@ -266,19 +247,25 @@ NTSTATUS SarSetBufferLayout(
         L"\\BaseNamedObjects\\SynchronousAudioRouter_%p", fileContext);
     InitializeObjectAttributes(
         &sectionAttributes, &sectionName, OBJ_KERNEL_HANDLE, nullptr, nullptr);
-    sectionSize.QuadPart = fileContext->bufferCount * fileContext->bufferSize;
+    sectionSize.QuadPart = fileContext->bufferSize + SAR_BUFFER_CELL_SIZE;
 
+    DWORD bufferMapSize = SarBufferMapSize(fileContext);
+    // TODO: don't leak this
+    PULONG bufferMap = (PULONG)ExAllocatePoolWithTag(
+        PagedPool, bufferMapSize, SAR_TAG);
+
+    if (!bufferMap) {
+        return STATUS_INSUFFICIENT_RESOURCES;
+    }
+
+    RtlZeroMemory(bufferMap, bufferMapSize);
     status = ZwCreateSection(&section,
         SECTION_MAP_READ|SECTION_MAP_WRITE|SECTION_QUERY,
         &sectionAttributes, &sectionSize, PAGE_READWRITE, SEC_COMMIT, nullptr);
 
     if (!NT_SUCCESS(status)) {
         SAR_LOG("Failed to allocate buffer section %08X", status);
-        ExAcquireFastMutex(&fileContext->mutex);
-        fileContext->bufferCount = fileContext->bufferSize =
-            fileContext->sampleDepth = fileContext->sampleRate = 0;
-        ExReleaseFastMutex(&fileContext->mutex);
-        return status;
+        goto err_out;
     }
 
     status = ZwMapViewOfSection(section,
@@ -287,23 +274,30 @@ NTSTATUS SarSetBufferLayout(
 
     if (!NT_SUCCESS(status)) {
         SAR_LOG("Couldn't map view of section");
-        ZwClose(section);
-        return status;
+        goto err_out;
     }
 
+    response->actualSize = sectionSize.LowPart;
+    response->virtualAddress = baseAddress;
+    response->registerBase = sectionSize.LowPart - SAR_BUFFER_CELL_SIZE;
+    ExAcquireFastMutex(&fileContext->mutex);
+    RtlInitializeBitMap(&fileContext->bufferMap,
+        bufferMap, SarBufferMapEntryCount(fileContext));
     fileContext->bufferSection = section;
+    ExReleaseFastMutex(&fileContext->mutex);
     return STATUS_SUCCESS;
-}
 
-// on driver entry: create ks device object
-// on create endpoint: create ks filter & ks pin
-//  - audio category
-//    - for capture endpoints use KSCATEGORY_CAPTURE
-//    - for playback endpoints use KSCATEGORY_RENDER
-//  - filter has 1 pin
-//  - pin has possibly multichannel data format (KSDATARANGE)
-//  - pin supports a single KSDATARANGE
-//  - pin flags: KSPIN_FLAG_DO_NOT_INITIATE_PROCESSING KSPIN_FLAG_PROCESS_IN_RUN_STATE_ONLY KSPIN_FLAG_FIXED_FORMAT KSPIN_FLAG_FRAMES_NOT_REQUIRED_FOR_PROCESSING
+err_out:
+    if (section) {
+        ZwClose(section);
+    }
+
+    ExAcquireFastMutex(&fileContext->mutex);
+    fileContext->bufferSize =
+        fileContext->sampleDepth = fileContext->sampleRate = 0;
+    ExReleaseFastMutex(&fileContext->mutex);
+    return status;
+}
 
 NTSTATUS SarSetDeviceInterfaceProperties(
     SarEndpoint *endpoint,
@@ -459,8 +453,9 @@ NTSTATUS SarCreateEndpoint(
     UNREFERENCED_PARAMETER(fileContext);
     WCHAR buf[20] = {};
     UNICODE_STRING referenceString = { 0, sizeof(buf), buf };
-    NTSTATUS status = STATUS_INSUFFICIENT_RESOURCES;
+    NTSTATUS status = STATUS_SUCCESS;
     PKSDEVICE ksDevice = KsGetDeviceForDeviceObject(device);
+    BOOLEAN deviceNameAllocated = FALSE;
     SarEndpoint *endpoint;
 
     if (request->type != SAR_ENDPOINT_TYPE_RECORDING &&
@@ -468,23 +463,28 @@ NTSTATUS SarCreateEndpoint(
         return STATUS_INVALID_PARAMETER;
     }
 
-    if (request->channelCount > SAR_MAX_CHANNEL_COUNT) {
+    if (request->index >= SAR_MAX_ENDPOINT_COUNT ||
+        request->channelCount > SAR_MAX_CHANNEL_COUNT) {
         return STATUS_INVALID_PARAMETER;
     }
 
+    if (!NT_SUCCESS(status)) {
+        return status;
+    }
+
+    status = STATUS_INSUFFICIENT_RESOURCES;
     endpoint = (SarEndpoint *)
-        ExAllocatePoolWithTag(PagedPool,
-            SarEndpointSize(request->channelCount), SAR_TAG);
+        ExAllocatePoolWithTag(PagedPool, sizeof(SarEndpoint), SAR_TAG);
 
     if (!endpoint) {
         return STATUS_INSUFFICIENT_RESOURCES;
     }
 
-    RtlZeroMemory(endpoint, SarEndpointSize(request->channelCount));
+    RtlZeroMemory(endpoint, sizeof(SarEndpoint));
     endpoint->pendingIrp = irp;
-    endpoint->bufferIndex = request->bufferIndex;
     endpoint->channelCount = request->channelCount;
     endpoint->type = request->type;
+    endpoint->index = request->index;
     endpoint->owner = fileContext;
 
     endpoint->filterDesc = (PKSFILTER_DESCRIPTOR)
@@ -606,7 +606,13 @@ NTSTATUS SarCreateEndpoint(
 
     request->name[MAX_ENDPOINT_NAME_LENGTH] = '\0';
     RtlInitUnicodeString(&endpoint->deviceName, request->name);
-    SarStringDuplicate(&endpoint->deviceName, &endpoint->deviceName);
+    status = SarStringDuplicate(&endpoint->deviceName, &endpoint->deviceName);
+
+    if (!NT_SUCCESS(status)) {
+        goto err_out;
+    }
+
+    deviceNameAllocated = TRUE;
 
     LONG filterId = InterlockedIncrement(&extension->nextFilterId);
 
@@ -637,6 +643,10 @@ NTSTATUS SarCreateEndpoint(
     return STATUS_PENDING;
 
 err_out:
+    if (deviceNameAllocated) {
+        SarStringFree(&endpoint->deviceName);
+    }
+
     if (endpoint->filterFactory) {
         KsAcquireDevice(ksDevice);
         KsDeleteFilterFactory(endpoint->filterFactory);

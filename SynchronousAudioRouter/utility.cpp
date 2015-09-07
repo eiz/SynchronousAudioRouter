@@ -98,7 +98,85 @@ NTSTATUS SarStringDuplicate(PUNICODE_STRING str, PUNICODE_STRING src)
     return STATUS_SUCCESS;
 }
 
+NTSTATUS SarReadEndpointRegisters(
+    SarEndpointRegisters *regs, SarEndpoint *endpoint)
+{
+    ASSERT(endpoint->activeRegisterFileUVA);
+
+    __try {
+        SarEndpointRegisters *source =
+            &endpoint->activeRegisterFileUVA[endpoint->index];
+
+        ProbeForRead(source, sizeof(SarEndpointRegisters), TYPE_ALIGNMENT(ULONG));
+        RtlCopyMemory(regs, source, sizeof(SarEndpointRegisters));
+    } __except(EXCEPTION_EXECUTE_HANDLER) {
+        return GetExceptionCode();
+    }
+
+    return STATUS_SUCCESS;
+}
+
+NTSTATUS SarWriteEndpointRegisters(
+    SarEndpointRegisters *regs, SarEndpoint *endpoint)
+{
+    ASSERT(endpoint->activeRegisterFileUVA);
+
+    __try {
+        SarEndpointRegisters *dest =
+            &endpoint->activeRegisterFileUVA[endpoint->index];
+
+        ProbeForWrite(dest, sizeof(SarEndpointRegisters), TYPE_ALIGNMENT(ULONG));
+        RtlCopyMemory(dest, regs, sizeof(SarEndpointRegisters));
+    } __except(EXCEPTION_EXECUTE_HANDLER) {
+        return GetExceptionCode();
+    }
+
+    return STATUS_SUCCESS;
+}
+
 VOID SarStringFree(PUNICODE_STRING str)
 {
     ExFreePoolWithTag(str->Buffer, SAR_TAG);
+}
+
+NTSTATUS SarReadUserBuffer(PVOID dest, PIRP irp, ULONG size)
+{
+    PIO_STACK_LOCATION irpStack = IoGetCurrentIrpStackLocation(irp);
+
+    if (irpStack->Parameters.DeviceIoControl.InputBufferLength < size) {
+        return STATUS_BUFFER_OVERFLOW;
+    }
+
+    __try {
+        ProbeForRead(irpStack->Parameters.DeviceIoControl.Type3InputBuffer, size,
+            TYPE_ALIGNMENT(ULONG));
+        RtlCopyMemory(
+            dest, irpStack->Parameters.DeviceIoControl.Type3InputBuffer, size);
+        return STATUS_SUCCESS;
+    } __except(EXCEPTION_EXECUTE_HANDLER) {
+        return GetExceptionCode();
+    }
+}
+
+NTSTATUS SarWriteUserBuffer(PVOID src, PIRP irp, ULONG size)
+{
+    PIO_STACK_LOCATION irpStack = IoGetCurrentIrpStackLocation(irp);
+
+    irp->IoStatus.Information = size;
+
+    if (irpStack->Parameters.DeviceIoControl.OutputBufferLength == 0) {
+        return STATUS_BUFFER_OVERFLOW;
+    }
+
+    if (irpStack->Parameters.DeviceIoControl.OutputBufferLength < size) {
+        return STATUS_BUFFER_TOO_SMALL;
+    }
+
+    __try {
+        ProbeForWrite(irp->UserBuffer, size, TYPE_ALIGNMENT(ULONG));
+        RtlCopyMemory(irp->UserBuffer, src, size);
+        return STATUS_SUCCESS;
+    } __except(EXCEPTION_EXECUTE_HANDLER) {
+        return GetExceptionCode();
+    }
 }

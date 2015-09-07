@@ -56,27 +56,56 @@ NTSTATUS SarKsPinCreate(PKSPIN pin, PIRP irp)
     UNREFERENCED_PARAMETER(pin);
     UNREFERENCED_PARAMETER(irp);
     SAR_LOG("SarKsPinCreate");
+    SarEndpoint *endpoint = SarGetEndpointFromIrp(irp);
+    SIZE_T viewSize = SAR_BUFFER_CELL_SIZE;
+    LARGE_INTEGER registerFileOffset;
+    NTSTATUS status;
 
-    pin->Context = SarGetEndpointFromIrp(irp);
+    pin->Context = endpoint;
 
     if (!pin->Context) {
         SAR_LOG("Failed to find endpoint for pin");
         return STATUS_NOT_FOUND;
     }
 
-    return STATUS_SUCCESS;
+    InterlockedCompareExchangePointer(
+        (PVOID *)&endpoint->activePin, pin, nullptr);
+
+    if (endpoint->activePin != pin) {
+        return STATUS_RESOURCE_IN_USE;
+    }
+
+    endpoint->activeBufferVirtualAddress = nullptr;
+    endpoint->activeRegisterFileUVA = nullptr;
+    registerFileOffset.QuadPart = endpoint->owner->bufferSize;
+    status = ZwMapViewOfSection(endpoint->owner->bufferSection,
+        ZwCurrentProcess(), (PVOID *)&endpoint->activeRegisterFileUVA, 0, 0,
+        &registerFileOffset, &viewSize, ViewUnmap, 0, PAGE_READWRITE);
+
+    if (!NT_SUCCESS(status)) {
+        SAR_LOG("Failed to map register file to userspace %08X", status);
+    }
+
+    return status;
 }
 
 NTSTATUS SarKsPinClose(PKSPIN pin, PIRP irp)
 {
-    UNREFERENCED_PARAMETER(pin);
     UNREFERENCED_PARAMETER(irp);
     SAR_LOG("SarKsPinClose");
     SarEndpoint *endpoint = (SarEndpoint *)pin->Context;
+    SarEndpointRegisters regs = {};
 
-    InterlockedCompareExchangePointer(
-        (PVOID *)&endpoint->activePin, nullptr, pin);
+    if (endpoint->activeBufferVirtualAddress) {
+        ZwUnmapViewOfSection(
+            ZwCurrentProcess(), endpoint->activeBufferVirtualAddress);
+        SarWriteEndpointRegisters(&regs, endpoint);
+    }
 
+    ZwUnmapViewOfSection(ZwCurrentProcess(), endpoint->activeRegisterFileUVA);
+    endpoint->activeBufferVirtualAddress = nullptr;
+    endpoint->activeRegisterFileUVA = nullptr;
+    InterlockedExchangePointer((PVOID *)&endpoint->activePin, nullptr);
     return STATUS_SUCCESS;
 }
 
@@ -140,64 +169,20 @@ NTSTATUS SarKsPinSetDeviceState(PKSPIN pin, KSSTATE toState, KSSTATE fromState)
     UNREFERENCED_PARAMETER(pin);
     UNREFERENCED_PARAMETER(toState);
     UNREFERENCED_PARAMETER(fromState);
-
-    SarEndpoint *endpoint = (SarEndpoint *)pin->Context;
-
-    if (fromState == KSSTATE_STOP && toState != KSSTATE_STOP) {
-        InterlockedCompareExchangePointer(
-            (PVOID *)&endpoint->activePin, pin, nullptr);
-
-        if (endpoint->activePin != pin) {
-            return STATUS_RESOURCE_IN_USE;
-        }
-    }
-
-    if (toState == KSSTATE_STOP && fromState != KSSTATE_STOP) {
-        if (endpoint->activePin == pin) {
-            InterlockedExchangePointer((PVOID *)&endpoint->activePin, nullptr);
-        }
-    }
-
     return STATUS_SUCCESS;
 }
 
-#define GUID_FORMAT "{%08lx-%04x-%04x-%02x%02x-%02x%02x%02x%02x%02x%02x}"
-#define GUID_VALUES(g) (g).Data1, (g).Data2, (g).Data3, \
-    (g).Data4[0], \
-    (g).Data4[1], \
-    (g).Data4[2], \
-    (g).Data4[3], \
-    (g).Data4[4], \
-    (g).Data4[5], \
-    (g).Data4[6], \
-    (g).Data4[7]
-
-NTSTATUS SarCopyUserBuffer(PVOID dest, PIO_STACK_LOCATION irpStack, ULONG size)
+VOID SarDumpKsIoctl(PIRP irp)
 {
-    if (irpStack->Parameters.DeviceIoControl.InputBufferLength < size) {
-        return STATUS_BUFFER_OVERFLOW;
-    }
+    PIO_STACK_LOCATION irpStack = IoGetCurrentIrpStackLocation(irp);
 
-    __try {
-        ProbeForRead(irpStack->Parameters.DeviceIoControl.Type3InputBuffer, size,
-            TYPE_ALIGNMENT(ULONG));
-        RtlCopyMemory(
-            dest, irpStack->Parameters.DeviceIoControl.Type3InputBuffer, size);
-        return STATUS_SUCCESS;
-    } __except(EXCEPTION_EXECUTE_HANDLER) {
-        return GetExceptionCode();
-    }
-}
-
-VOID SarDumpKsIoctl(PIO_STACK_LOCATION irpStack)
-{
     if (irpStack->MajorFunction == IRP_MJ_DEVICE_CONTROL) {
         if (irpStack->Parameters.DeviceIoControl.IoControlCode ==
                 IOCTL_KS_PROPERTY) {
 
             KSPROPERTY propertyInfo = {};
 
-            SarCopyUserBuffer(&propertyInfo, irpStack, sizeof(KSPROPERTY));
+            SarReadUserBuffer(&propertyInfo, irp, sizeof(KSPROPERTY));
 
             SAR_LOG("KSProperty: Set " GUID_FORMAT " Id %d Flags %d",
                 GUID_VALUES(propertyInfo.Set), propertyInfo.Id,
@@ -207,7 +192,7 @@ VOID SarDumpKsIoctl(PIO_STACK_LOCATION irpStack)
                 propertyInfo.Id == KSPROPERTY_PIN_PROPOSEDATAFORMAT) {
                 KSP_PIN ppInfo = {};
 
-                SarCopyUserBuffer(&ppInfo, irpStack, sizeof(KSP_PIN));
+                SarReadUserBuffer(&ppInfo, irp, sizeof(KSP_PIN));
                 SAR_LOG("Breaking for pin %d", ppInfo.PinId);
                 //DbgBreakPoint();
             }
@@ -288,12 +273,12 @@ NTSTATUS SarKsPinIntersectHandler(
 NTSTATUS SarKsPinGetGlobalInstancesCount(
     PIRP irp, PKSIDENTIFIER request, PVOID data)
 {
-    UNREFERENCED_PARAMETER(irp);
     PKSP_PIN pinRequest = (PKSP_PIN)request;
     PKSPIN_CINSTANCES instances = (PKSPIN_CINSTANCES)data;
+    SarEndpoint *endpoint = SarGetEndpointFromIrp(irp);
 
     if (pinRequest->PinId == 0) {
-        instances->CurrentCount = 0;
+        instances->CurrentCount = endpoint->activePin ? 1 : 0;
         instances->PossibleCount = 1;
     } else {
         instances->CurrentCount = 0;
