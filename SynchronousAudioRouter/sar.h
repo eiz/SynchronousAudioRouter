@@ -46,6 +46,9 @@ extern "C" {
 DEFINE_GUID(GUID_DEVINTERFACE_SYNCHRONOUSAUDIOROUTER,
     0xc16e8d6c, 0xc4cc, 0x4c76, 0xb1, 0x1c, 0x79, 0xb8, 0x41, 0x4e, 0xa9, 0x68);
 
+// TODO: this information is now obsolete. buffers are direct mapped using wavert
+// so there's no audio tick or mapping ioctls.
+
 // things the sar ioctl needs to be able to do:
 // - create a ks audio endpoint (capture or playback)
 // - delete a ks audio endpoint
@@ -73,10 +76,6 @@ DEFINE_GUID(GUID_DEVINTERFACE_SYNCHRONOUSAUDIOROUTER,
     FILE_DEVICE_UNKNOWN, 1, METHOD_NEITHER, FILE_READ_DATA | FILE_WRITE_DATA)
 #define SAR_REQUEST_CREATE_ENDPOINT CTL_CODE( \
     FILE_DEVICE_UNKNOWN, 2, METHOD_NEITHER, FILE_READ_DATA | FILE_WRITE_DATA)
-#define SAR_REQUEST_MAP_AUDIO_BUFFER CTL_CODE( \
-    FILE_DEVICE_UNKNOWN, 3, METHOD_NEITHER, FILE_READ_DATA | FILE_WRITE_DATA)
-#define SAR_REQUEST_AUDIO_TICK CTL_CODE( \
-    FILE_DEVICE_UNKNOWN, 4, METHOD_NEITHER, FILE_READ_DATA | FILE_WRITE_DATA)
 
 #define SAR_MAX_BUFFER_SIZE 1024 * 1024 * 128
 #define SAR_MIN_SAMPLE_DEPTH 1
@@ -206,7 +205,6 @@ NTSTATUS SarCreateEndpoint(
     SarDriverExtension *extension,
     SarFileContext *fileContext,
     SarCreateEndpointRequest *request);
-NTSTATUS SarProcessActivePins(SarFileContext *fileContext);
 
 // Device
 NTSTATUS SarKsDeviceAdd(IN PKSDEVICE device);

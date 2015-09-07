@@ -77,12 +77,6 @@ BOOL setBufferLayout(
     return TRUE;
 }
 
-BOOL audioTick(HANDLE device)
-{
-    return DeviceIoControl(device, SAR_REQUEST_AUDIO_TICK,
-        nullptr, 0, nullptr, 0, nullptr, nullptr);
-}
-
 int main(int argc, char *argv[])
 {
     HDEVINFO devinfo;
@@ -142,8 +136,11 @@ int main(int argc, char *argv[])
     std::cout << "Opened SAR device." << std::endl;
 
     SarEndpointRegisters *regs = nullptr;
+    PCH buffer = nullptr;
+    DWORD bufferSize = 0;
 
-    if (!setBufferLayout(device, 1024 * 1024, 96000, 3, &regs, nullptr, nullptr)) {
+    if (!setBufferLayout(
+        device, 1024 * 1024, 96000, 3, &regs, (LPVOID *)&buffer, &bufferSize)) {
         std::cerr << "Couldn't set buffer layout: "
             << GetLastError() << std::endl;
         return 1;
@@ -157,12 +154,39 @@ int main(int argc, char *argv[])
     }
 
     while (true) {
-        Sleep(1000);
-        std::cout << "Active: " << regs->isActive << " Offset: "
-                  << regs->bufferOffset << " Size: " << regs->bufferSize
-                  << " Clock: " << regs->clockRegister << " Position: "
-                  << regs->positionRegister << std::endl;
-//        audioTick(device);
+        Sleep(100);
+
+        SarEndpointRegisters snap;
+        PCH first = nullptr, last = nullptr;
+        DWORD sum = 0;
+
+        RtlCopyMemory(&snap, regs, sizeof(SarEndpointRegisters));
+        std::cout << "Active: " << snap.isActive << " Offset: "
+                  << snap.bufferOffset << " Size: " << snap.bufferSize
+                  << " Clock: " << snap.clockRegister << " Position: "
+                  << snap.positionRegister << std::endl;
+
+        for (PCH p = buffer; p < buffer + bufferSize - SAR_BUFFER_CELL_SIZE; ++p) {
+            if (*p) {
+                if (!first) {
+                    first = p;
+                }
+
+                last = p;
+                sum += *p;
+            }
+        }
+
+        if (first) {
+            std::cout << "First: " << (first - buffer)
+                      << " Last: " << (last - buffer)
+                      << " Sum: " << sum << std::endl;
+        }
+
+        if (snap.bufferSize) {
+            regs->positionRegister =
+                (regs->positionRegister + 1024) % snap.bufferSize;
+        }
     }
 
     CloseHandle(device);

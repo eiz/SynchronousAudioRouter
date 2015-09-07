@@ -240,11 +240,6 @@ NTSTATUS SarIrpDeviceControl(PDEVICE_OBJECT deviceObject, PIRP irp)
                 deviceObject, irp, extension, fileContext, &request);
             break;
         }
-        case SAR_REQUEST_AUDIO_TICK: {
-            ntStatus = SarProcessActivePins(fileContext);
-            break;
-        }
-        case SAR_REQUEST_MAP_AUDIO_BUFFER:
         default:
             SAR_LOG("(SAR) Unknown ioctl %d", ioControlCode);
             break;

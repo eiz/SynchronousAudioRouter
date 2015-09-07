@@ -96,10 +96,13 @@ NTSTATUS SarKsPinClose(PKSPIN pin, PIRP irp)
     SarEndpoint *endpoint = (SarEndpoint *)pin->Context;
     SarEndpointRegisters regs = {};
 
+    if (!NT_SUCCESS(SarWriteEndpointRegisters(&regs, endpoint))) {
+        SAR_LOG("Couldn't clear endpoint registers");
+    }
+
     if (endpoint->activeBufferVirtualAddress) {
         ZwUnmapViewOfSection(
             ZwCurrentProcess(), endpoint->activeBufferVirtualAddress);
-        SarWriteEndpointRegisters(&regs, endpoint);
     }
 
     ZwUnmapViewOfSection(ZwCurrentProcess(), endpoint->activeRegisterFileUVA);
@@ -187,15 +190,6 @@ VOID SarDumpKsIoctl(PIRP irp)
             SAR_LOG("KSProperty: Set " GUID_FORMAT " Id %d Flags %d",
                 GUID_VALUES(propertyInfo.Set), propertyInfo.Id,
                 propertyInfo.Flags);
-
-            if (propertyInfo.Set == KSPROPSETID_Pin &&
-                propertyInfo.Id == KSPROPERTY_PIN_PROPOSEDATAFORMAT) {
-                KSP_PIN ppInfo = {};
-
-                SarReadUserBuffer(&ppInfo, irp, sizeof(KSP_PIN));
-                SAR_LOG("Breaking for pin %d", ppInfo.PinId);
-                //DbgBreakPoint();
-            }
         }
     }
 }
