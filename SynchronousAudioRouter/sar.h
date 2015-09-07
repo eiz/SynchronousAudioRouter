@@ -169,6 +169,7 @@ typedef struct SarEndpoint
     SarFileContext *owner;
     // TODO: lock pin instance data
     PKSPIN activePin;
+    PEPROCESS activeProcess;
     SarEndpointRegisters *activeRegisterFileUVA;
     PVOID activeBufferVirtualAddress;
     PKSFILTERFACTORY filterFactory;

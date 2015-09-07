@@ -36,6 +36,11 @@ NTSTATUS SarKsPinRtGetBuffer(
         return STATUS_NOT_IMPLEMENTED;
     }
 
+    if (endpoint->activeProcess != PsGetCurrentProcess()) {
+        SAR_LOG("Process didn't create the active pin");
+        return STATUS_ACCESS_DENIED;
+    }
+
     SIZE_T viewSize = ROUND_UP(prop->RequestedBufferSize, SAR_BUFFER_CELL_SIZE);
 
     ExAcquireFastMutex(&fileContext->mutex);
@@ -77,11 +82,11 @@ NTSTATUS SarKsPinRtGetBuffer(
     regs.bufferSize = prop->RequestedBufferSize;
     regs.clockRegister = 0;
     regs.positionRegister = 0;
-
     status = SarWriteEndpointRegisters(&regs, endpoint);
 
     if (!NT_SUCCESS(status)) {
-        SAR_LOG("Couldn't write endpoint registers: %08X", status);
+        SAR_LOG("Couldn't write endpoint registers: %08X %p %p", status,
+            endpoint->activeProcess, PsGetCurrentProcess());
         return status; // TODO: goto err_out
     }
 

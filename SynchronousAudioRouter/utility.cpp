@@ -85,7 +85,7 @@ SarEndpoint *SarGetEndpointFromIrp(PIRP irp)
 NTSTATUS SarStringDuplicate(PUNICODE_STRING str, PUNICODE_STRING src)
 {
     PWCH buffer = (PWCH)ExAllocatePoolWithTag(
-        PagedPool, src->MaximumLength, SAR_TAG);
+        NonPagedPool, src->MaximumLength, SAR_TAG);
 
     if (!buffer) {
         return STATUS_INSUFFICIENT_RESOURCES;

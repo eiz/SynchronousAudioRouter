@@ -123,6 +123,7 @@ BOOLEAN SarDeleteFileContext(SarDriverExtension *extension, PIRP irp)
     ExAcquireFastMutex(&extension->fileContextLock);
     fileContext = (SarFileContext *)RtlLookupElementGenericTable(
         &extension->fileContextTable, (PVOID)&fileContextTemplate);
+    ExReleaseFastMutex(&extension->fileContextLock);
 
     if (fileContext) {
         ExAcquireFastMutex(&fileContext->mutex);
@@ -148,6 +149,7 @@ BOOLEAN SarDeleteFileContext(SarDriverExtension *extension, PIRP irp)
         }
     }
 
+    ExAcquireFastMutex(&extension->fileContextLock);
     deleted = RtlDeleteElementGenericTable(
         &extension->fileContextTable, &fileContextTemplate);
     ExReleaseFastMutex(&extension->fileContextLock);
@@ -298,7 +300,7 @@ RTL_GENERIC_COMPARE_RESULTS NTAPI SarCompareFileContext(
 PVOID NTAPI SarAllocateFileContext(PRTL_GENERIC_TABLE table, CLONG byteSize)
 {
     UNREFERENCED_PARAMETER(table);
-    return ExAllocatePoolWithTag(PagedPool, byteSize, SAR_TAG);
+    return ExAllocatePoolWithTag(NonPagedPool, byteSize, SAR_TAG);
 }
 
 VOID NTAPI SarFreeFileContext(PRTL_GENERIC_TABLE table, PVOID buffer)

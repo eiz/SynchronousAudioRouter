@@ -75,6 +75,7 @@ NTSTATUS SarKsPinCreate(PKSPIN pin, PIRP irp)
         return STATUS_RESOURCE_IN_USE;
     }
 
+    endpoint->activeProcess = PsGetCurrentProcess();
     endpoint->activeBufferVirtualAddress = nullptr;
     endpoint->activeRegisterFileUVA = nullptr;
     registerFileOffset.QuadPart = endpoint->owner->bufferSize;

@@ -252,7 +252,7 @@ NTSTATUS SarSetBufferLayout(
     DWORD bufferMapSize = SarBufferMapSize(fileContext);
     // TODO: don't leak this
     PULONG bufferMap = (PULONG)ExAllocatePoolWithTag(
-        PagedPool, bufferMapSize, SAR_TAG);
+        NonPagedPool, bufferMapSize, SAR_TAG);
 
     if (!bufferMap) {
         return STATUS_INSUFFICIENT_RESOURCES;
@@ -474,7 +474,7 @@ NTSTATUS SarCreateEndpoint(
 
     status = STATUS_INSUFFICIENT_RESOURCES;
     endpoint = (SarEndpoint *)
-        ExAllocatePoolWithTag(PagedPool, sizeof(SarEndpoint), SAR_TAG);
+        ExAllocatePoolWithTag(NonPagedPool, sizeof(SarEndpoint), SAR_TAG);
 
     if (!endpoint) {
         return STATUS_INSUFFICIENT_RESOURCES;
@@ -488,42 +488,44 @@ NTSTATUS SarCreateEndpoint(
     endpoint->owner = fileContext;
 
     endpoint->filterDesc = (PKSFILTER_DESCRIPTOR)
-        ExAllocatePoolWithTag(PagedPool, sizeof(KSFILTER_DESCRIPTOR), SAR_TAG);
+        ExAllocatePoolWithTag(NonPagedPool, sizeof(KSFILTER_DESCRIPTOR), SAR_TAG);
 
     if (!endpoint->filterDesc) {
         goto err_out;
     }
 
     endpoint->pinDesc = (PKSPIN_DESCRIPTOR_EX)
-        ExAllocatePoolWithTag(PagedPool, sizeof(KSPIN_DESCRIPTOR_EX) * 2, SAR_TAG);
+        ExAllocatePoolWithTag(
+            NonPagedPool, sizeof(KSPIN_DESCRIPTOR_EX) * 2, SAR_TAG);
 
     if (!endpoint->pinDesc) {
         goto err_out;
     }
 
     endpoint->dataRange = (PKSDATARANGE_AUDIO)
-        ExAllocatePoolWithTag(PagedPool, sizeof(KSDATARANGE_AUDIO), SAR_TAG);
+        ExAllocatePoolWithTag(NonPagedPool, sizeof(KSDATARANGE_AUDIO), SAR_TAG);
 
     if (!endpoint->dataRange) {
         goto err_out;
     }
 
     endpoint->analogDataRange = (PKSDATARANGE_AUDIO)
-        ExAllocatePoolWithTag(PagedPool, sizeof(KSDATARANGE_AUDIO), SAR_TAG);
+        ExAllocatePoolWithTag(NonPagedPool, sizeof(KSDATARANGE_AUDIO), SAR_TAG);
 
     if (!endpoint->analogDataRange) {
         goto err_out;
     }
 
     endpoint->allocatorFraming = (PKSALLOCATOR_FRAMING_EX)
-        ExAllocatePoolWithTag(PagedPool, sizeof(KSALLOCATOR_FRAMING_EX), SAR_TAG);
+        ExAllocatePoolWithTag(
+            NonPagedPool, sizeof(KSALLOCATOR_FRAMING_EX), SAR_TAG);
 
     if (!endpoint->allocatorFraming) {
         goto err_out;
     }
 
     endpoint->nodeDesc = (PKSNODE_DESCRIPTOR)
-        ExAllocatePoolWithTag(PagedPool, sizeof(KSNODE_DESCRIPTOR), SAR_TAG);
+        ExAllocatePoolWithTag(NonPagedPool, sizeof(KSNODE_DESCRIPTOR), SAR_TAG);
 
     if (!endpoint->nodeDesc) {
         goto err_out;
