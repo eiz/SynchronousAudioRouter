@@ -4,7 +4,7 @@ HKCR {
 			s 'Synchronous Audio Router ASIO' {
 			ProgID = s 'SynchronousAudioRouter.1'
 			InProcServer32 = s '%MODULE%' {
-				ThreadingModel = s 'Apartment'
+				val ThreadingModel = s 'Apartment'
 			}
 		}
 	}
