@@ -48,9 +48,9 @@ struct __declspec(uuid("{0569D852-1F6A-44A7-B7B5-EFB78B66BE21}")) IASIO:
     public IUnknown
 {
     virtual bool init(void *sysHandle) = 0;
-    virtual void getDriverName(char *name) = 0;
+    virtual void getDriverName(char name[32]) = 0;
     virtual long getDriverVersion() = 0;
-    virtual void getErrorMessage(char *str) = 0;
+    virtual void getErrorMessage(char str[124]) = 0;
     virtual long start() = 0;
     virtual long stop() = 0;
     virtual long getChannels(

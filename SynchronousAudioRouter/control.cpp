@@ -192,22 +192,6 @@ static KSFILTER_DESCRIPTOR gFilterDescriptorTemplate = {
     nullptr, // ComponentId
 };
 
-BOOL SarCheckIoctlInput(
-    NTSTATUS *status, PIO_STACK_LOCATION irpStack, ULONG size)
-{
-    ULONG length = irpStack->Parameters.DeviceIoControl.InputBufferLength;
-
-    if (length < size) {
-        if (status) {
-            *status = STATUS_BUFFER_TOO_SMALL;
-        }
-
-        return FALSE;
-    }
-
-    return TRUE;
-}
-
 NTSTATUS SarSetBufferLayout(
     SarFileContext *fileContext,
     SarSetBufferLayoutRequest *request,

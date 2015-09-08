@@ -191,8 +191,6 @@ typedef struct SarFreeBuffer
 } SarFreeBuffer;
 
 // Control
-BOOL SarCheckIoctlInput(
-    NTSTATUS *status, PIO_STACK_LOCATION irpStack, ULONG size);
 NTSTATUS SarReadUserBuffer(PVOID src, PIRP irp, ULONG size);
 NTSTATUS SarWriteUserBuffer(PVOID src, PIRP irp, ULONG size);
 VOID SarDumpKsIoctl(PIO_STACK_LOCATION irpStack);

@@ -26,23 +26,27 @@ SarAsioWrapper::SarAsioWrapper()
 bool SarAsioWrapper::init(void *sysHandle)
 {
     OutputDebugString(L"SarAsioWrapper::init");
-    return false;
+
+    _hwnd = (HWND)sysHandle;
+    return true;
 }
 
-void SarAsioWrapper::getDriverName(char *name)
+void SarAsioWrapper::getDriverName(char name[32])
 {
     OutputDebugString(L"SarAsioWrapper::getDriverName");
+    strcpy_s(name, 32, "Synchronous Audio Router");
 }
 
 long SarAsioWrapper::getDriverVersion()
 {
     OutputDebugString(L"SarAsioWrapper::getDriverVersion");
-    return 0;
+    return 1;
 }
 
-void SarAsioWrapper::getErrorMessage(char *str)
+void SarAsioWrapper::getErrorMessage(char str[124])
 {
     OutputDebugString(L"SarAsioWrapper::getErrorMessage");
+    strcpy_s(str, 124, "");
 }
 
 long SarAsioWrapper::start()

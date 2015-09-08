@@ -37,9 +37,9 @@ struct ATL_NO_VTABLE SarAsioWrapper:
     SarAsioWrapper();
 
     virtual bool init(void *sysHandle) override;
-    virtual void getDriverName(char *name) override;
+    virtual void getDriverName(char name[32]) override;
     virtual long getDriverVersion() override;
-    virtual void getErrorMessage(char *str) override;
+    virtual void getErrorMessage(char str[124]) override;
     virtual long start() override;
     virtual long stop() override;
     virtual long getChannels(
@@ -64,6 +64,9 @@ struct ATL_NO_VTABLE SarAsioWrapper:
     virtual long controlPanel() override;
     virtual long future(long selector, void *opt) override;
     virtual long outputReady() override;
+
+private:
+    HWND _hwnd;
 };
 
 OBJECT_ENTRY_AUTO(CLSID_SarAsioWrapper, SarAsioWrapper)
