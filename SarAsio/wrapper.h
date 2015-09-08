@@ -34,6 +34,8 @@ struct ATL_NO_VTABLE SarAsioWrapper:
 
     DECLARE_REGISTRY_RESOURCEID(IDR_SARASIO)
 
+    SarAsioWrapper();
+
     virtual bool init(void *sysHandle) override;
     virtual void getDriverName(char *name) override;
     virtual long getDriverVersion() override;

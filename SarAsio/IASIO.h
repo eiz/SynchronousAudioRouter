@@ -44,7 +44,7 @@ typedef struct Callbacks
 {
 } Callbacks;
 
-struct __declspec(uuid("188135E1-D565-11D2-854F-00A0C99F5D19")) IASIO:
+struct __declspec(uuid("{0569D852-1F6A-44A7-B7B5-EFB78B66BE21}")) IASIO:
     public IUnknown
 {
     virtual bool init(void *sysHandle) = 0;

@@ -3,7 +3,9 @@ HKCR {
 		ForceRemove '{0569D852-1F6A-44A7-B7B5-EFB78B66BE21}' =
 			s 'Synchronous Audio Router ASIO' {
 			ProgID = s 'SynchronousAudioRouter.1'
-			InProcServer32 = s '%MODULE%'
+			InProcServer32 = s '%MODULE%' {
+				ThreadingModel = s 'Apartment'
+			}
 		}
 	}
 }
