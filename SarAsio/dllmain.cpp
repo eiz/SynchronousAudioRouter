@@ -20,8 +20,28 @@
 
 SarAsioModule _AtlModule;
 
-BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID reserved)
+BOOL WINAPI DllMain(HMODULE hModule, DWORD reason, LPVOID reserved)
 {
     UNREFERENCED_PARAMETER(hModule);
     return _AtlModule.DllMain(reason, reserved);
+}
+
+STDAPI DllCanUnloadNow()
+{
+    return _AtlModule.DllCanUnloadNow();
+}
+
+STDAPI DllGetClassObject(REFCLSID rclsid, REFIID riid, LPVOID *ppv)
+{
+    return _AtlModule.DllGetClassObject(rclsid, riid, ppv);
+}
+
+STDAPI DllRegisterServer()
+{
+    return _AtlModule.DllRegisterServer(FALSE);
+}
+
+STDAPI DllUnregisterServer()
+{
+    return _AtlModule.DllUnregisterServer(FALSE);
 }

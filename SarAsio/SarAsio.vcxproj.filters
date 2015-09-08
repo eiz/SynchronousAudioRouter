@@ -49,6 +49,9 @@
     <None Include="SarAsio.rgs">
       <Filter>Resource Files</Filter>
     </None>
+    <None Include="SarAsio.def">
+      <Filter>Source Files</Filter>
+    </None>
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="SarAsio.rc">

@@ -1,3 +1,21 @@
-HKR
-{
+HKCR {
+	NoRemove CLSID {
+		ForceRemove '{0569D852-1F6A-44A7-B7B5-EFB78B66BE21}' =
+			s 'Synchronous Audio Router ASIO' {
+			ProgID = s 'SynchronousAudioRouter.1'
+			InProcServer32 = s '%MODULE%'
+		}
+	}
+}
+
+HKLM {
+	NoRemove SOFTWARE {
+		NoRemove ASIO {
+			ForceRemove 'Synchronous Audio Router'
+			{
+				val CLSID = s '{0569D852-1F6A-44A7-B7B5-EFB78B66BE21}'
+				val Description = s 'Synchronous Audio Router'
+			}
+		}
+	}
 }

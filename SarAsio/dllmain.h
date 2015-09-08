@@ -28,4 +28,11 @@ struct SarAsioModule: public CAtlDllModuleT<SarAsioModule>
 
 extern SarAsioModule _AtlModule;
 
+BOOL WINAPI DllMain(
+    HMODULE hModule, DWORD reason, LPVOID reserved);
+STDAPI DllCanUnloadNow();
+STDAPI DllGetClassObject(REFCLSID rclsid, REFIID riid, LPVOID *ppv);
+STDAPI DllRegisterServer();
+STDAPI DllUnregisterServer();
+
 #endif // _SAR_ASIO_DLLMAIN_H
