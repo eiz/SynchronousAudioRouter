@@ -97,16 +97,23 @@ NTSTATUS SarKsPinClose(PKSPIN pin, PIRP irp)
     SarEndpoint *endpoint = (SarEndpoint *)pin->Context;
     SarEndpointRegisters regs = {};
 
-    if (!NT_SUCCESS(SarWriteEndpointRegisters(&regs, endpoint))) {
-        SAR_LOG("Couldn't clear endpoint registers");
+    // TODO: what if process is recycled before we check this?
+    if (endpoint->activeProcess == PsGetCurrentProcess()) {
+        if (!NT_SUCCESS(SarWriteEndpointRegisters(&regs, endpoint))) {
+            SAR_LOG("Couldn't clear endpoint registers");
+        }
+
+        if (endpoint->activeBufferVirtualAddress) {
+            ZwUnmapViewOfSection(
+                ZwCurrentProcess(), endpoint->activeBufferVirtualAddress);
+        }
+
+        ZwUnmapViewOfSection(ZwCurrentProcess(), endpoint->activeRegisterFileUVA);
+    } else {
+        SAR_LOG("Pin closed in a different process than the one that created it.");
     }
 
-    if (endpoint->activeBufferVirtualAddress) {
-        ZwUnmapViewOfSection(
-            ZwCurrentProcess(), endpoint->activeBufferVirtualAddress);
-    }
-
-    ZwUnmapViewOfSection(ZwCurrentProcess(), endpoint->activeRegisterFileUVA);
+    endpoint->activeProcess = nullptr;
     endpoint->activeBufferVirtualAddress = nullptr;
     endpoint->activeRegisterFileUVA = nullptr;
     InterlockedExchangePointer((PVOID *)&endpoint->activePin, nullptr);

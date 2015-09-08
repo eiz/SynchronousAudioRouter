@@ -115,6 +115,11 @@ NTSTATUS SarKsPinRtGetClockRegister(
     PKSRTAUDIO_HWREGISTER reg = (PKSRTAUDIO_HWREGISTER)data;
     SarEndpoint *endpoint = SarGetEndpointFromIrp(irp);
 
+    if (endpoint->activeProcess != PsGetCurrentProcess()) {
+        SAR_LOG("Process didn't create the active pin");
+        return STATUS_ACCESS_DENIED;
+    }
+
     reg->Register =
         &endpoint->activeRegisterFileUVA[endpoint->index].clockRegister;
     reg->Width = 32;
@@ -156,6 +161,11 @@ NTSTATUS SarKsPinRtGetPositionRegister(
     SAR_LOG("SarKsPinRtGetPositionRegister");
     PKSRTAUDIO_HWREGISTER reg = (PKSRTAUDIO_HWREGISTER)data;
     SarEndpoint *endpoint = SarGetEndpointFromIrp(irp);
+
+    if (endpoint->activeProcess != PsGetCurrentProcess()) {
+        SAR_LOG("Process didn't create the active pin");
+        return STATUS_ACCESS_DENIED;
+    }
 
     reg->Register =
         &endpoint->activeRegisterFileUVA[endpoint->index].positionRegister;

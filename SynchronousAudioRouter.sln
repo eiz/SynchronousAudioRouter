@@ -7,6 +7,8 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "SynchronousAudioRouter", "S
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "SarCtl", "SarCtl\SarCtl.vcxproj", "{69A577D3-A856-45E6-88D5-9DDE7342A50E}"
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "SarAsio", "SarAsio\SarAsio.vcxproj", "{5206150B-C3F2-4259-B545-7B75E3C03B57}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|ARM = Debug|ARM
@@ -47,6 +49,18 @@ Global
 		{69A577D3-A856-45E6-88D5-9DDE7342A50E}.Release|x64.Build.0 = Release|x64
 		{69A577D3-A856-45E6-88D5-9DDE7342A50E}.Release|x86.ActiveCfg = Release|Win32
 		{69A577D3-A856-45E6-88D5-9DDE7342A50E}.Release|x86.Build.0 = Release|Win32
+		{5206150B-C3F2-4259-B545-7B75E3C03B57}.Debug|ARM.ActiveCfg = Debug|Win32
+		{5206150B-C3F2-4259-B545-7B75E3C03B57}.Debug|ARM64.ActiveCfg = Debug|Win32
+		{5206150B-C3F2-4259-B545-7B75E3C03B57}.Debug|x64.ActiveCfg = Debug|x64
+		{5206150B-C3F2-4259-B545-7B75E3C03B57}.Debug|x64.Build.0 = Debug|x64
+		{5206150B-C3F2-4259-B545-7B75E3C03B57}.Debug|x86.ActiveCfg = Debug|Win32
+		{5206150B-C3F2-4259-B545-7B75E3C03B57}.Debug|x86.Build.0 = Debug|Win32
+		{5206150B-C3F2-4259-B545-7B75E3C03B57}.Release|ARM.ActiveCfg = Release|Win32
+		{5206150B-C3F2-4259-B545-7B75E3C03B57}.Release|ARM64.ActiveCfg = Release|Win32
+		{5206150B-C3F2-4259-B545-7B75E3C03B57}.Release|x64.ActiveCfg = Release|x64
+		{5206150B-C3F2-4259-B545-7B75E3C03B57}.Release|x64.Build.0 = Release|x64
+		{5206150B-C3F2-4259-B545-7B75E3C03B57}.Release|x86.ActiveCfg = Release|Win32
+		{5206150B-C3F2-4259-B545-7B75E3C03B57}.Release|x86.Build.0 = Release|Win32
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
