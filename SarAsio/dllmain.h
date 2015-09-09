@@ -27,6 +27,7 @@ struct SarAsioModule: public CAtlDllModuleT<SarAsioModule>
 };
 
 extern SarAsioModule _AtlModule;
+extern HMODULE gDllModule;
 
 BOOL WINAPI DllMain(
     HMODULE hModule, DWORD reason, LPVOID reserved);

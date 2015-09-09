@@ -17,6 +17,8 @@
 #ifndef _SAR_ASIO_IASIO_H
 #define _SAR_ASIO_IASIO_H
 
+namespace Sar {
+
 typedef struct ClockSource
 {
     long index;
@@ -76,4 +78,5 @@ struct __declspec(uuid("{0569D852-1F6A-44A7-B7B5-EFB78B66BE21}")) IASIO:
     virtual long outputReady() = 0;
 };
 
+} // namespace Sar
 #endif // _SAR_ASIO_IASIO_H

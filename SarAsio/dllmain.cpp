@@ -19,10 +19,11 @@
 #include "dllmain.h"
 
 SarAsioModule _AtlModule;
+HMODULE gDllModule;
 
 BOOL WINAPI DllMain(HMODULE hModule, DWORD reason, LPVOID reserved)
 {
-    UNREFERENCED_PARAMETER(hModule);
+    gDllModule = hModule;
     return _AtlModule.DllMain(reason, reserved);
 }
 

@@ -16,7 +16,11 @@
 
 #include "stdafx.h"
 #include <initguid.h>
+#include "configui.h"
+#include "dllmain.h"
 #include "wrapper.h"
+
+using namespace Sar;
 
 SarAsioWrapper::SarAsioWrapper()
 {
@@ -139,6 +143,9 @@ long SarAsioWrapper::disposeBuffers()
 long SarAsioWrapper::controlPanel()
 {
     OutputDebugString(L"SarAsioWrapper::controlPanel");
+    auto sheet = std::make_shared<ConfigurationPropertyDialog>();
+
+    sheet->show(_hwnd);
     return 0;
 }
 

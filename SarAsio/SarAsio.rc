@@ -38,25 +38,33 @@ STYLE DS_SHELLFONT | WS_CAPTION | WS_CHILDWINDOW | WS_DISABLED
 CAPTION "Endpoints"
 FONT 8, "MS Shell Dlg", 400, 0, 0
 {
-    GROUPBOX "Hardware Interface", 0,
+    GROUPBOX "Hardware Interface", 1000,
         8, 8, 304, 28,
         0, WS_EX_LEFT
-    COMBOBOX 0,
+    COMBOBOX 1001,
         14, 18, 244, 17,
         CBS_DROPDOWNLIST | CBS_HASSTRINGS, WS_EX_LEFT
-    PUSHBUTTON "&Configure", 0,
+    PUSHBUTTON "&Configure", 1002,
         262, 17, 44, 14,
         0, WS_EX_LEFT
-    GROUPBOX "Windows Audio Devices", 0,
+    GROUPBOX "Windows Audio Devices", 1003,
         8, 44, 304, 128,
         0, WS_EX_LEFT
-    CONTROL "", 0,
+    CONTROL "", 1004,
         WC_LISTVIEW, WS_TABSTOP | WS_BORDER | LVS_ALIGNLEFT | LVS_REPORT,
         14, 54, 292, 96
-    PUSHBUTTON "&Add", 0,
+    PUSHBUTTON "&Add", 1005,
         14, 154, 44, 14,
         0, WS_EX_LEFT
-    PUSHBUTTON "&Remove", 0,
+    PUSHBUTTON "&Remove", 1006,
         62, 154, 44, 14,
         0, WS_EX_LEFT
+}
+
+LANGUAGE LANG_NEUTRAL, SUBLANG_NEUTRAL
+IDD_CONFIG_APPLICATIONS DIALOGEX 0, 0, 320, 180
+STYLE DS_SHELLFONT | WS_CAPTION | WS_CHILDWINDOW | WS_DISABLED
+CAPTION "Applications"
+FONT 8, "MS Shell Dlg", 400, 0, 0
+{
 }

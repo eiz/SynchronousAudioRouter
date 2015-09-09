@@ -19,6 +19,8 @@
 
 #include "IASIO.h"
 
+namespace Sar {
+
 // {0569D852-1F6A-44A7-B7B5-EFB78B66BE21}
 DEFINE_GUID(CLSID_SarAsioWrapper,
     0x569d852, 0x1f6a, 0x44a7, 0xb7, 0xb5, 0xef, 0xb7, 0x8b, 0x66, 0xbe, 0x21);
@@ -71,4 +73,5 @@ private:
 
 OBJECT_ENTRY_AUTO(CLSID_SarAsioWrapper, SarAsioWrapper)
 
+} // namespace Sar
 #endif // _SAR_ASIO_WRAPPER_H
