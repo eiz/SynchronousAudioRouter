@@ -17,7 +17,7 @@
 #ifndef _SAR_ASIO_WRAPPER_H
 #define _SAR_ASIO_WRAPPER_H
 
-#include "IASIO.h"
+#include "tinyasio.h"
 
 namespace Sar {
 

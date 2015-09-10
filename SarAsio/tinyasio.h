@@ -14,21 +14,27 @@
 // You should have received a copy of the GNU General Public License
 // along with SynchronousAudioRouter.  If not, see <http://www.gnu.org/licenses/>.
 
-#ifndef _SAR_ASIO_IASIO_H
-#define _SAR_ASIO_IASIO_H
+#ifndef _SAR_ASIO_TINYASIO_H
+#define _SAR_ASIO_TINYASIO_H
 
 namespace Sar {
 
-typedef struct ClockSource
+struct AsioDriver
+{
+    std::string name;
+    std::string clsid;
+};
+
+struct ClockSource
 {
     long index;
     long channel;
     long group;
     bool isCurrentSource;
     char name[32];
-} ClockSource;
+};
 
-typedef struct ChannelInfo
+struct ChannelInfo
 {
     long index;
     bool isInput;
@@ -36,15 +42,15 @@ typedef struct ChannelInfo
     long group;
     long sampleType;
     char name[32];
-} ChannelInfo;
+};
 
-typedef struct BufferInfo
+struct BufferInfo
 {
-} BufferInfo;
+};
 
-typedef struct Callbacks
+struct Callbacks
 {
-} Callbacks;
+};
 
 struct __declspec(uuid("{0569D852-1F6A-44A7-B7B5-EFB78B66BE21}")) IASIO:
     public IUnknown
@@ -78,5 +84,7 @@ struct __declspec(uuid("{0569D852-1F6A-44A7-B7B5-EFB78B66BE21}")) IASIO:
     virtual long outputReady() = 0;
 };
 
+std::vector<AsioDriver> InstalledAsioDrivers();
+
 } // namespace Sar
-#endif // _SAR_ASIO_IASIO_H
+#endif // _SAR_ASIO_TINYASIO_H

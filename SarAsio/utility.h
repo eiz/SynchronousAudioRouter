@@ -14,27 +14,16 @@
 // You should have received a copy of the GNU General Public License
 // along with SynchronousAudioRouter.  If not, see <http://www.gnu.org/licenses/>.
 
-#pragma once
+#ifndef _SAR_ASIO_UTILITY_H
+#define _SAR_ASIO_UTILITY_H
 
-#include "targetver.h"
+namespace Sar {
 
-#define WIN32_LEAN_AND_MEAN
-#include <windows.h>
-#include <CommCtrl.h>
-#include <prsht.h>
+#ifndef UNICODE
+#error "SarAsio must be built with unicode"
+#endif
 
-#define _ATL_CSTRING_EXPLICIT_CONSTRUCTORS
+std::string TCHARtoUTF8(TCHAR *ptr);
 
-#include <atlbase.h>
-#include <atlcom.h>
-#include <atlstr.h>
-
-#include <codecvt>
-#include <cstddef>
-#include <cstdint>
-#include <locale>
-#include <memory>
-#include <string>
-#include <vector>
-
-#include "resource.h"
+} // namespace Sar
+#endif // _SAR_ASIO_UTILITY_H

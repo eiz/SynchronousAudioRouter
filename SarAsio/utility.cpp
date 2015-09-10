@@ -14,27 +14,14 @@
 // You should have received a copy of the GNU General Public License
 // along with SynchronousAudioRouter.  If not, see <http://www.gnu.org/licenses/>.
 
-#pragma once
+#include "stdafx.h"
+#include "utility.h"
 
-#include "targetver.h"
+using namespace Sar;
 
-#define WIN32_LEAN_AND_MEAN
-#include <windows.h>
-#include <CommCtrl.h>
-#include <prsht.h>
+std::string Sar::TCHARtoUTF8(TCHAR *ptr)
+{
+    std::wstring_convert<std::codecvt_utf8<wchar_t>> converter;
 
-#define _ATL_CSTRING_EXPLICIT_CONSTRUCTORS
-
-#include <atlbase.h>
-#include <atlcom.h>
-#include <atlstr.h>
-
-#include <codecvt>
-#include <cstddef>
-#include <cstdint>
-#include <locale>
-#include <memory>
-#include <string>
-#include <vector>
-
-#include "resource.h"
+    return converter.to_bytes(ptr);
+}

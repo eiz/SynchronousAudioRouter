@@ -18,6 +18,7 @@
 #include <initguid.h>
 #include "configui.h"
 #include "dllmain.h"
+#include "tinyasio.h"
 #include "wrapper.h"
 
 using namespace Sar;
@@ -143,6 +144,11 @@ long SarAsioWrapper::disposeBuffers()
 long SarAsioWrapper::controlPanel()
 {
     OutputDebugString(L"SarAsioWrapper::controlPanel");
+
+    for (auto driver : InstalledAsioDrivers()) {
+        OutputDebugStringA(driver.name.c_str());
+    }
+
     auto sheet = std::make_shared<ConfigurationPropertyDialog>();
 
     sheet->show(_hwnd);

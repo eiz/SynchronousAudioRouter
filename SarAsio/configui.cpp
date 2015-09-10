@@ -89,6 +89,11 @@ EndpointsPropertySheetPage::EndpointsPropertySheetPage()
 INT_PTR EndpointsPropertySheetPage::dialogProc(
     HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
 {
+    switch (msg) {
+        case WM_INITDIALOG:
+            break;
+    }
+
     return 0;
 }
 
