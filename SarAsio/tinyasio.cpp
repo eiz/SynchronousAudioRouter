@@ -62,6 +62,7 @@ std::vector<AsioDriver> InstalledAsioDrivers()
         result.emplace_back(driver);
     }
 
+    RegCloseKey(asio);
     return result;
 }
 
