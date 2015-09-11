@@ -17,6 +17,8 @@
 #ifndef _SAR_ASIO_CONFIGUI_H
 #define _SAR_ASIO_CONFIGUI_H
 
+#include "tinyasio.h"
+
 namespace Sar {
 
 struct PropertySheetPage: public PROPSHEETPAGE
@@ -26,7 +28,8 @@ struct PropertySheetPage: public PROPSHEETPAGE
 protected:
     virtual INT_PTR dialogProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
         = 0;
-    HPROPSHEETPAGE create();
+
+    HWND _hwnd;
 
 private:
     static INT_PTR CALLBACK dialogProcStub(
@@ -51,6 +54,16 @@ struct EndpointsPropertySheetPage: public PropertySheetPage
 protected:
     virtual INT_PTR dialogProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
         override;
+
+private:
+    void initControls();
+
+    std::vector<AsioDriver> _drivers;
+    HWND _hardwareInterfaceDropdown;
+    HWND _hardwareInterfaceConfigButton;
+    HWND _listView;
+    HWND _addButton;
+    HWND _removeButton;
 };
 
 struct ApplicationsPropertySheetPage: public PropertySheetPage
@@ -67,8 +80,8 @@ struct ConfigurationPropertyDialog: public PropertyDialog
     ConfigurationPropertyDialog();
 
 private:
-    std::shared_ptr<EndpointsPropertySheetPage> endpoints;
-    std::shared_ptr<ApplicationsPropertySheetPage> applications;
+    std::shared_ptr<EndpointsPropertySheetPage> _endpoints;
+    std::shared_ptr<ApplicationsPropertySheetPage> _applications;
 };
 
 } // namespace Sar

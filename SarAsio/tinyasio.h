@@ -19,12 +19,6 @@
 
 namespace Sar {
 
-struct AsioDriver
-{
-    std::string name;
-    std::string clsid;
-};
-
 struct ClockSource
 {
     long index;
@@ -82,6 +76,13 @@ struct __declspec(uuid("{0569D852-1F6A-44A7-B7B5-EFB78B66BE21}")) IASIO:
     virtual long controlPanel() = 0;
     virtual long future(long selector, void *opt) = 0;
     virtual long outputReady() = 0;
+};
+
+struct AsioDriver
+{
+    std::string name;
+    std::string clsid;
+    HRESULT open(IASIO **ppAsio);
 };
 
 std::vector<AsioDriver> InstalledAsioDrivers();

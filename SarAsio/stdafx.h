@@ -22,6 +22,7 @@
 #include <windows.h>
 #include <CommCtrl.h>
 #include <prsht.h>
+#include <windowsx.h>
 
 #define _ATL_CSTRING_EXPLICIT_CONSTRUCTORS
 

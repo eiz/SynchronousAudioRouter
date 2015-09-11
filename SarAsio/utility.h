@@ -23,7 +23,8 @@ namespace Sar {
 #error "SarAsio must be built with unicode"
 #endif
 
-std::string TCHARtoUTF8(TCHAR *ptr);
+std::string TCHARToUTF8(TCHAR *ptr);
+std::wstring UTF8ToWide(const std::string& str);
 
 } // namespace Sar
 #endif // _SAR_ASIO_UTILITY_H

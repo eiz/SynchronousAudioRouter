@@ -17,6 +17,7 @@
 #include "stdafx.h"
 #include "configui.h"
 #include "dllmain.h"
+#include "utility.h"
 
 using namespace Sar;
 
@@ -29,11 +30,6 @@ PropertySheetPage::PropertySheetPage()
     lParam = (LPARAM)this;
 }
 
-HPROPSHEETPAGE PropertySheetPage::create()
-{
-    return nullptr;
-}
-
 INT_PTR CALLBACK PropertySheetPage::dialogProcStub(
     HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
 {
@@ -41,6 +37,7 @@ INT_PTR CALLBACK PropertySheetPage::dialogProcStub(
         PropertySheetPage *page =
             (PropertySheetPage *)((PROPSHEETPAGE *)lparam)->lParam;
 
+        page->_hwnd = hwnd;
         SetWindowLongPtr(hwnd, GWLP_USERDATA, (LONG_PTR)page);
     }
 
@@ -84,6 +81,13 @@ INT_PTR PropertyDialog::show(HWND parent)
 EndpointsPropertySheetPage::EndpointsPropertySheetPage()
 {
     pszTemplate = MAKEINTRESOURCE(IDD_CONFIG_ENDPOINTS);
+
+    for (auto driver : InstalledAsioDrivers()) {
+        // Skip our own driver.
+        if (driver.clsid != "{0569D852-1F6A-44A7-B7B5-EFB78B66BE21}") {
+            _drivers.emplace_back(driver);
+        }
+    }
 }
 
 INT_PTR EndpointsPropertySheetPage::dialogProc(
@@ -91,10 +95,30 @@ INT_PTR EndpointsPropertySheetPage::dialogProc(
 {
     switch (msg) {
         case WM_INITDIALOG:
+            initControls();
             break;
     }
 
     return 0;
+}
+
+void EndpointsPropertySheetPage::initControls()
+{
+    _hardwareInterfaceDropdown = GetDlgItem(_hwnd, 1001);
+    _hardwareInterfaceConfigButton = GetDlgItem(_hwnd, 1002);
+    _listView = GetDlgItem(_hwnd, 1004);
+    _addButton = GetDlgItem(_hwnd, 1005);
+    _removeButton = GetDlgItem(_hwnd, 1006);
+
+    ComboBox_AddString(_hardwareInterfaceDropdown, TEXT("None"));
+
+    for (auto& driver : _drivers) {
+        auto wstr = UTF8ToWide(driver.name);
+
+        ComboBox_AddString(_hardwareInterfaceDropdown, wstr.c_str());
+    }
+
+    ComboBox_SetCurSel(_hardwareInterfaceDropdown, 0);
 }
 
 ApplicationsPropertySheetPage::ApplicationsPropertySheetPage()
@@ -109,10 +133,10 @@ INT_PTR ApplicationsPropertySheetPage::dialogProc(
 }
 
 ConfigurationPropertyDialog::ConfigurationPropertyDialog()
-    : endpoints(std::make_shared<EndpointsPropertySheetPage>()),
-      applications(std::make_shared<ApplicationsPropertySheetPage>())
+    : _endpoints(std::make_shared<EndpointsPropertySheetPage>()),
+      _applications(std::make_shared<ApplicationsPropertySheetPage>())
 {
     pszCaption = TEXT("Synchronous Audio Router");
-    addPage(endpoints);
-    addPage(applications);
+    addPage(_endpoints);
+    addPage(_applications);
 }

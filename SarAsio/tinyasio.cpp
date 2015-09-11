@@ -48,7 +48,7 @@ std::vector<AsioDriver> InstalledAsioDrivers()
             continue;
         }
 
-        driver.clsid = TCHARtoUTF8(value);
+        driver.clsid = TCHARToUTF8(value);
         valueSize = 256;
 
         if (RegGetValue(
@@ -58,12 +58,28 @@ std::vector<AsioDriver> InstalledAsioDrivers()
             continue;
         }
 
-        driver.name = TCHARtoUTF8(value);
+        driver.name = TCHARToUTF8(value);
         result.emplace_back(driver);
     }
 
     RegCloseKey(asio);
     return result;
+}
+
+HRESULT AsioDriver::open(IASIO **ppAsio)
+{
+    HRESULT status;
+    auto wstr = UTF8ToWide(clsid);
+    GUID clsid;
+
+    status = CLSIDFromString(wstr.c_str(), &clsid);
+
+    if (!SUCCEEDED(status)) {
+        return status;
+    }
+
+    return CoCreateInstance(
+        clsid, nullptr, CLSCTX_INPROC_SERVER, clsid, (LPVOID *)ppAsio);
 }
 
 } // namespace Sar

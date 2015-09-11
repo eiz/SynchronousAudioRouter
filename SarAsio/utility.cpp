@@ -17,11 +17,20 @@
 #include "stdafx.h"
 #include "utility.h"
 
-using namespace Sar;
+namespace Sar {
 
-std::string Sar::TCHARtoUTF8(TCHAR *ptr)
+std::string TCHARToUTF8(TCHAR *ptr)
 {
     std::wstring_convert<std::codecvt_utf8<wchar_t>> converter;
 
     return converter.to_bytes(ptr);
 }
+
+std::wstring UTF8ToWide(const std::string& str)
+{
+    std::wstring_convert<std::codecvt_utf8<wchar_t>> converter;
+
+    return converter.from_bytes(str);
+}
+
+} // namespace Sar
