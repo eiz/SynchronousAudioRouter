@@ -26,8 +26,8 @@ struct PropertySheetPage: public PROPSHEETPAGE
     PropertySheetPage();
 
 protected:
-    virtual INT_PTR dialogProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
-        = 0;
+    virtual INT_PTR dialogProc(
+        HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) = 0;
 
     HWND _hwnd;
 
@@ -52,8 +52,8 @@ struct EndpointsPropertySheetPage: public PropertySheetPage
     EndpointsPropertySheetPage();
 
 protected:
-    virtual INT_PTR dialogProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
-        override;
+    virtual INT_PTR dialogProc(
+        HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) override;
 
 private:
     void initControls();
@@ -71,8 +71,8 @@ struct ApplicationsPropertySheetPage: public PropertySheetPage
     ApplicationsPropertySheetPage();
 
 protected:
-    virtual INT_PTR dialogProc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
-        override;
+    virtual INT_PTR dialogProc(
+        HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) override;
 };
 
 struct ConfigurationPropertyDialog: public PropertyDialog

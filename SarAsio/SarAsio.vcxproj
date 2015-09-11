@@ -150,8 +150,10 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClInclude Include="config.h" />
     <ClInclude Include="configui.h" />
     <ClInclude Include="dllmain.h" />
+    <ClInclude Include="picojson.h" />
     <ClInclude Include="tinyasio.h" />
     <ClInclude Include="resource.h" />
     <ClInclude Include="stdafx.h" />
@@ -160,6 +162,7 @@
     <ClInclude Include="wrapper.h" />
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="config.cpp" />
     <ClCompile Include="configui.cpp" />
     <ClCompile Include="dllmain.cpp">
       <CompileAsManaged Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">false</CompileAsManaged>
