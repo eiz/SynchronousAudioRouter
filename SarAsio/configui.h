@@ -17,6 +17,7 @@
 #ifndef _SAR_ASIO_CONFIGUI_H
 #define _SAR_ASIO_CONFIGUI_H
 
+#include "config.h"
 #include "tinyasio.h"
 
 namespace Sar {
@@ -49,7 +50,7 @@ private:
 
 struct EndpointsPropertySheetPage: public PropertySheetPage
 {
-    EndpointsPropertySheetPage();
+    EndpointsPropertySheetPage(DriverConfig& config);
 
 protected:
     virtual INT_PTR dialogProc(
@@ -57,7 +58,11 @@ protected:
 
 private:
     void initControls();
+    void updateEnabled();
+    void onHardwareInterfaceChanged();
+    void onConfigureHardwareInterface();
 
+    DriverConfig& _config;
     std::vector<AsioDriver> _drivers;
     HWND _hardwareInterfaceDropdown;
     HWND _hardwareInterfaceConfigButton;
@@ -77,9 +82,12 @@ protected:
 
 struct ConfigurationPropertyDialog: public PropertyDialog
 {
-    ConfigurationPropertyDialog();
+    ConfigurationPropertyDialog(DriverConfig& config);
+    DriverConfig newConfig() { return _newConfig; }
 
 private:
+    DriverConfig& _originalConfig;
+    DriverConfig _newConfig;
     std::shared_ptr<EndpointsPropertySheetPage> _endpoints;
     std::shared_ptr<ApplicationsPropertySheetPage> _applications;
 };

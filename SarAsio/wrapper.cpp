@@ -28,8 +28,6 @@ SarAsioWrapper::SarAsioWrapper()
     OutputDebugString(L"SarAsioWrapper::SarAsioWrapper");
     // TODO: path this properly
     _config = DriverConfig::fromFile("C:\\Users\\eiz\\sar.json");
-    // TODO: move to test
-    _config.writeFile("C:\\Users\\eiz\\sar.json");
 }
 
 bool SarAsioWrapper::init(void *sysHandle)
@@ -153,9 +151,14 @@ long SarAsioWrapper::controlPanel()
         OutputDebugStringA(driver.name.c_str());
     }
 
-    auto sheet = std::make_shared<ConfigurationPropertyDialog>();
+    auto sheet = std::make_shared<ConfigurationPropertyDialog>(_config);
 
-    sheet->show(_hwnd);
+    if (sheet->show(_hwnd) > 0) {
+        _config = sheet->newConfig();
+        // TODO: path this properly
+        _config.writeFile("C:\\Users\\eiz\\sar.json");
+    }
+
     return 0;
 }
 

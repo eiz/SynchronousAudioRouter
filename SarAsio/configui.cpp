@@ -78,7 +78,8 @@ INT_PTR PropertyDialog::show(HWND parent)
     return ::PropertySheet(this);
 }
 
-EndpointsPropertySheetPage::EndpointsPropertySheetPage()
+EndpointsPropertySheetPage::EndpointsPropertySheetPage(DriverConfig& config)
+    : _config(config)
 {
     pszTemplate = MAKEINTRESOURCE(IDD_CONFIG_ENDPOINTS);
 
@@ -97,9 +98,55 @@ INT_PTR EndpointsPropertySheetPage::dialogProc(
         case WM_INITDIALOG:
             initControls();
             break;
+        case WM_COMMAND:
+            switch (LOWORD(wparam)) {
+                case 1001:
+                    if (HIWORD(wparam) == CBN_SELCHANGE) {
+                        onHardwareInterfaceChanged();
+                    }
+
+                    break;
+                case 1002:
+                    if (HIWORD(wparam) == BN_CLICKED) {
+                        onConfigureHardwareInterface();
+                    }
+
+                    break;
+            }
+
+            break;
     }
 
     return 0;
+}
+
+void EndpointsPropertySheetPage::onHardwareInterfaceChanged()
+{
+    auto index = ComboBox_GetCurSel(_hardwareInterfaceDropdown) - 1;
+
+    if (index >= 0 && index < _drivers.size()) {
+        _config.driverClsid = _drivers[index].clsid;
+    } else {
+        _config.driverClsid = "";
+    }
+
+    updateEnabled();
+}
+
+void EndpointsPropertySheetPage::onConfigureHardwareInterface()
+{
+    for (auto& driver : _drivers) {
+        if (driver.clsid == _config.driverClsid) {
+            CComPtr<IASIO> asio;
+
+            if (SUCCEEDED(driver.open(&asio))) {
+                // TODO: init driver
+                asio->controlPanel();
+            }
+
+            break;
+        }
+    }
 }
 
 void EndpointsPropertySheetPage::initControls()
@@ -119,6 +166,13 @@ void EndpointsPropertySheetPage::initControls()
     }
 
     ComboBox_SetCurSel(_hardwareInterfaceDropdown, 0);
+    updateEnabled();
+}
+
+void EndpointsPropertySheetPage::updateEnabled()
+{
+    Button_Enable(_hardwareInterfaceConfigButton,
+        ComboBox_GetCurSel(_hardwareInterfaceDropdown) > 0);
 }
 
 ApplicationsPropertySheetPage::ApplicationsPropertySheetPage()
@@ -132,8 +186,10 @@ INT_PTR ApplicationsPropertySheetPage::dialogProc(
     return 0;
 }
 
-ConfigurationPropertyDialog::ConfigurationPropertyDialog()
-    : _endpoints(std::make_shared<EndpointsPropertySheetPage>()),
+ConfigurationPropertyDialog::ConfigurationPropertyDialog(DriverConfig& config)
+    : _originalConfig(config),
+      _newConfig(_originalConfig),
+      _endpoints(std::make_shared<EndpointsPropertySheetPage>(_newConfig)),
       _applications(std::make_shared<ApplicationsPropertySheetPage>())
 {
     pszCaption = TEXT("Synchronous Audio Router");
