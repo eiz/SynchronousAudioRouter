@@ -33,4 +33,19 @@ std::wstring UTF8ToWide(const std::string& str)
     return converter.from_bytes(str);
 }
 
+std::string ConfigurationPath(const std::string& name)
+{
+    TCHAR path[MAX_PATH];
+
+    if (SUCCEEDED(SHGetFolderPath(
+        nullptr, CSIDL_APPDATA, nullptr, 0, path))) {
+
+        PathAppend(path, TEXT("\\SynchronousAudioRouter\\"));
+        CreateDirectory(path, nullptr);
+        PathAppend(path, UTF8ToWide(name).c_str());
+    }
+
+    return TCHARToUTF8(path);
+}
+
 } // namespace Sar

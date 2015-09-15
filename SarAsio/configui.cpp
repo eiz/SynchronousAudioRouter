@@ -51,6 +51,11 @@ INT_PTR CALLBACK PropertySheetPage::dialogProcStub(
     return 0;
 }
 
+void PropertySheetPage::changed()
+{
+    PropSheet_Changed(GetParent(_hwnd), _hwnd);
+}
+
 PropertyDialog::PropertyDialog()
 {
     ZeroMemory(static_cast<PROPSHEETHEADER *>(this), sizeof(PROPSHEETHEADER));
@@ -100,15 +105,29 @@ INT_PTR EndpointsPropertySheetPage::dialogProc(
             break;
         case WM_COMMAND:
             switch (LOWORD(wparam)) {
-                case 1001:
+                case 1001: // _hardwareInterfaceDropdown
                     if (HIWORD(wparam) == CBN_SELCHANGE) {
                         onHardwareInterfaceChanged();
                     }
 
                     break;
-                case 1002:
+                case 1002: // _hardwareInterfaceConfigButton
                     if (HIWORD(wparam) == BN_CLICKED) {
                         onConfigureHardwareInterface();
+                    }
+
+                    break;
+                case 1004: // _listView
+                    break;
+                case 1005: // _addButton
+                    if (HIWORD(wparam) == BN_CLICKED) {
+                        onAddEndpoint();
+                    }
+
+                    break;
+                case 1006: // _removeButton
+                    if (HIWORD(wparam) == BN_CLICKED) {
+                        onRemoveEndpoint();
                     }
 
                     break;
@@ -131,6 +150,7 @@ void EndpointsPropertySheetPage::onHardwareInterfaceChanged()
     }
 
     updateEnabled();
+    changed();
 }
 
 void EndpointsPropertySheetPage::onConfigureHardwareInterface()
@@ -140,13 +160,35 @@ void EndpointsPropertySheetPage::onConfigureHardwareInterface()
             CComPtr<IASIO> asio;
 
             if (SUCCEEDED(driver.open(&asio))) {
-                // TODO: init driver
-                asio->controlPanel();
+                if (!asio->init(_hwnd)) {
+                    MessageBox(_hwnd,
+                        TEXT("Failed to initialize ASIO driver."),
+                        TEXT("Error"),
+                        MB_OK | MB_ICONERROR);
+                } else {
+                    asio->controlPanel();
+                }
+            } else {
+                MessageBox(_hwnd,
+                    TEXT("Failed to open ASIO driver."),
+                    TEXT("Error"),
+                    MB_OK | MB_ICONERROR);
             }
 
             break;
         }
     }
+}
+
+void EndpointsPropertySheetPage::onAddEndpoint()
+{
+    MessageBox(_hwnd,
+        TEXT("Add endpoint is not yet implemented."), TEXT("Error"),
+        MB_OK | MB_ICONERROR);
+}
+
+void EndpointsPropertySheetPage::onRemoveEndpoint()
+{
 }
 
 void EndpointsPropertySheetPage::initControls()
@@ -159,13 +201,21 @@ void EndpointsPropertySheetPage::initControls()
 
     ComboBox_AddString(_hardwareInterfaceDropdown, TEXT("None"));
 
+    int index = 1, selectIndex = 0;
+
     for (auto& driver : _drivers) {
         auto wstr = UTF8ToWide(driver.name);
 
         ComboBox_AddString(_hardwareInterfaceDropdown, wstr.c_str());
+
+        if (driver.clsid == _config.driverClsid) {
+            selectIndex = index;
+        }
+
+        index++;
     }
 
-    ComboBox_SetCurSel(_hardwareInterfaceDropdown, 0);
+    ComboBox_SetCurSel(_hardwareInterfaceDropdown, selectIndex);
     updateEnabled();
 }
 
@@ -173,6 +223,8 @@ void EndpointsPropertySheetPage::updateEnabled()
 {
     Button_Enable(_hardwareInterfaceConfigButton,
         ComboBox_GetCurSel(_hardwareInterfaceDropdown) > 0);
+    Button_Enable(_removeButton,
+        ListView_GetSelectedCount(_listView) > 0);
 }
 
 ApplicationsPropertySheetPage::ApplicationsPropertySheetPage()

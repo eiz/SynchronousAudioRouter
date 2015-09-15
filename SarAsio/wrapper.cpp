@@ -20,14 +20,14 @@
 #include "dllmain.h"
 #include "tinyasio.h"
 #include "wrapper.h"
+#include "utility.h"
 
 using namespace Sar;
 
 SarAsioWrapper::SarAsioWrapper()
 {
     OutputDebugString(L"SarAsioWrapper::SarAsioWrapper");
-    // TODO: path this properly
-    _config = DriverConfig::fromFile("C:\\Users\\eiz\\sar.json");
+    _config = DriverConfig::fromFile(ConfigurationPath("default.json"));
 }
 
 bool SarAsioWrapper::init(void *sysHandle)
@@ -155,8 +155,7 @@ long SarAsioWrapper::controlPanel()
 
     if (sheet->show(_hwnd) > 0) {
         _config = sheet->newConfig();
-        // TODO: path this properly
-        _config.writeFile("C:\\Users\\eiz\\sar.json");
+        _config.writeFile(ConfigurationPath("default.json"));
     }
 
     return 0;

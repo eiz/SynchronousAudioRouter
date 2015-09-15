@@ -23,6 +23,8 @@
 #include <CommCtrl.h>
 #include <prsht.h>
 #include <windowsx.h>
+#include <ShlObj.h>
+#include <Shlwapi.h>
 
 #define _ATL_CSTRING_EXPLICIT_CONSTRUCTORS
 

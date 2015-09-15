@@ -29,6 +29,7 @@ struct PropertySheetPage: public PROPSHEETPAGE
 protected:
     virtual INT_PTR dialogProc(
         HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) = 0;
+    void changed();
 
     HWND _hwnd;
 
@@ -61,6 +62,8 @@ private:
     void updateEnabled();
     void onHardwareInterfaceChanged();
     void onConfigureHardwareInterface();
+    void onAddEndpoint();
+    void onRemoveEndpoint();
 
     DriverConfig& _config;
     std::vector<AsioDriver> _drivers;
