@@ -17,6 +17,7 @@
 #ifndef _SAR_ASIO_WRAPPER_H
 #define _SAR_ASIO_WRAPPER_H
 
+#include "config.h"
 #include "tinyasio.h"
 
 namespace Sar {
@@ -69,6 +70,7 @@ struct ATL_NO_VTABLE SarAsioWrapper:
 
 private:
     HWND _hwnd;
+    DriverConfig _config;
 };
 
 OBJECT_ENTRY_AUTO(CLSID_SarAsioWrapper, SarAsioWrapper)

@@ -25,19 +25,41 @@ bool EndpointConfig::load(picojson::object& obj)
 {
     auto poId = obj.find("id");
     auto poDescription = obj.find("description");
+    auto poType = obj.find("type");
 
-    if (poId == obj.end() || poDescription == obj.end()) {
+    if (poId == obj.end() || poDescription == obj.end() ||
+        poType == obj.end()) {
         return false;
     }
 
     if (!poId->second.is<std::string>() ||
-        !poDescription->second.is<std::string>()) {
+        !poDescription->second.is<std::string>() ||
+        !poType->second.is<std::string>()) {
         return false;
+    }
+
+    auto strType = poType->second.get<std::string>();
+
+    if (strType == "recording") {
+        type = EndpointType::Recording;
+    } else {
+        type = EndpointType::Playback;
     }
 
     id = poId->second.get<std::string>();
     description = poDescription->second.get<std::string>();
     return true;
+}
+
+picojson::object EndpointConfig::save()
+{
+    picojson::object result;
+
+    result.insert(std::make_pair("id", picojson::value(id)));
+    result.insert(std::make_pair("description", picojson::value(description)));
+    result.insert(std::make_pair("type", picojson::value(
+        type == EndpointType::Recording ? "recording" : "playback")));
+    return result;
 }
 
 bool ApplicationConfig::load(picojson::object& obj)
@@ -57,6 +79,13 @@ bool ApplicationConfig::load(picojson::object& obj)
     processName = poProcessName->second.get<std::string>();
     defaultEndpointId = poDefaultEndpointId->second.get<std::string>();
     return true;
+}
+
+picojson::object ApplicationConfig::save()
+{
+    picojson::object result;
+
+    return result;
 }
 
 void DriverConfig::load(picojson::object& obj)
@@ -97,6 +126,47 @@ void DriverConfig::load(picojson::object& obj)
             applications.emplace_back(application);
         }
     }
+}
+
+picojson::object DriverConfig::save()
+{
+    picojson::object result;
+
+    result.insert(std::make_pair("driverClsid", picojson::value(driverClsid)));
+
+    if (endpoints.size()) {
+        picojson::array arr;
+
+        for (auto& endpoint : endpoints) {
+            arr.emplace_back(endpoint.save());
+        }
+
+        result.insert(std::make_pair("endpoints", picojson::value(arr)));
+    }
+
+    if (applications.size()) {
+        picojson::array arr;
+
+        for (auto& application : applications) {
+            arr.emplace_back(application.save());
+        }
+
+        result.insert(std::make_pair("applications", picojson::value(arr)));
+    }
+
+    return result;
+}
+
+bool DriverConfig::writeFile(const std::string& path)
+{
+    std::ofstream fp(path);
+
+    if (fp.bad()) {
+        return false;
+    }
+
+    fp << picojson::value(save());
+    return true;
 }
 
 DriverConfig DriverConfig::fromFile(const std::string& path)

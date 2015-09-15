@@ -23,16 +23,18 @@ namespace Sar {
 
 enum class EndpointType
 {
-    Recording,
-    Playback
+    Playback,
+    Recording
 };
 
 struct EndpointConfig
 {
     std::string id;
     std::string description;
+    EndpointType type;
 
     bool load(picojson::object& obj);
+    picojson::object save();
 };
 
 struct ApplicationConfig
@@ -42,6 +44,7 @@ struct ApplicationConfig
     bool startAutomatically;
 
     bool load(picojson::object& obj);
+    picojson::object save();
 };
 
 struct DriverConfig
@@ -51,6 +54,8 @@ struct DriverConfig
     std::vector<ApplicationConfig> applications;
 
     void load(picojson::object& obj);
+    picojson::object save();
+    bool writeFile(const std::string& path);
     static DriverConfig fromFile(const std::string& path);
 };
 

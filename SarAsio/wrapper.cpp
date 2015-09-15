@@ -26,6 +26,10 @@ using namespace Sar;
 SarAsioWrapper::SarAsioWrapper()
 {
     OutputDebugString(L"SarAsioWrapper::SarAsioWrapper");
+    // TODO: path this properly
+    _config = DriverConfig::fromFile("C:\\Users\\eiz\\sar.json");
+    // TODO: move to test
+    _config.writeFile("C:\\Users\\eiz\\sar.json");
 }
 
 bool SarAsioWrapper::init(void *sysHandle)
