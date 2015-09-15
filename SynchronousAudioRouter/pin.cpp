@@ -100,6 +100,10 @@ NTSTATUS SarKsPinClose(PKSPIN pin, PIRP irp)
 
     // TODO: what if process is recycled before we check this?
     if (endpoint->activeProcess == PsGetCurrentProcess()) {
+        if (!NT_SUCCESS(SarIncrementEndpointGeneration(endpoint))) {
+            SAR_LOG("Couldn't increment endpoint generation");
+        }
+
         if (!NT_SUCCESS(SarWriteEndpointRegisters(&regs, endpoint))) {
             SAR_LOG("Couldn't clear endpoint registers");
         }
@@ -388,7 +392,7 @@ NTSTATUS SarKsPinProposeDataFormat(
 
     if (format->WaveFormatEx.nChannels != endpoint->channelCount ||
         (format->WaveFormatEx.wBitsPerSample !=
-         endpoint->owner->sampleDepth * 8) ||
+         endpoint->owner->sampleSize * 8) ||
         (format->WaveFormatEx.wFormatTag != WAVE_FORMAT_PCM &&
          format->WaveFormatEx.wFormatTag != WAVE_FORMAT_EXTENSIBLE) ||
         format->WaveFormatEx.nSamplesPerSec != endpoint->owner->sampleRate) {

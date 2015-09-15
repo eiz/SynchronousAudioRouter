@@ -46,6 +46,19 @@ struct Callbacks
 {
 };
 
+enum class AsioStatus : long
+{
+    OK = 0,
+    Success = 0x3f4847a0,
+    NotPresent = -1000,
+    HardwareMalfunction,
+    InvalidParameter,
+    InvalidMode,
+    SPNotAdvancing,
+    NoClock,
+    NoMemory
+};
+
 #define CLSID_STR_SynchronousAudioRouter \
     "{0569D852-1F6A-44A7-B7B5-EFB78B66BE21}"
 
@@ -56,30 +69,30 @@ struct __declspec(uuid(CLSID_STR_SynchronousAudioRouter)) IASIO:
     virtual void getDriverName(char name[32]) = 0;
     virtual long getDriverVersion() = 0;
     virtual void getErrorMessage(char str[124]) = 0;
-    virtual long start() = 0;
-    virtual long stop() = 0;
-    virtual long getChannels(
+    virtual AsioStatus start() = 0;
+    virtual AsioStatus stop() = 0;
+    virtual AsioStatus getChannels(
         long *inputCount, long *outputCount) = 0;
-    virtual long getLatencies(
+    virtual AsioStatus getLatencies(
         long *inputLatency, long *outputLatency) = 0;
-    virtual long getBufferSize(
+    virtual AsioStatus getBufferSize(
         long *minSize, long *maxSize,
         long *preferredSize, long *granularity) = 0;
-    virtual long canSampleRate(double sampleRate) = 0;
-    virtual long getSampleRate(double *sampleRate) = 0;
-    virtual long setSampleRate(double sampleRate) = 0;
-    virtual long getClockSources(
+    virtual AsioStatus canSampleRate(double sampleRate) = 0;
+    virtual AsioStatus getSampleRate(double *sampleRate) = 0;
+    virtual AsioStatus setSampleRate(double sampleRate) = 0;
+    virtual AsioStatus getClockSources(
         ClockSource *clocks, long *count) = 0;
-    virtual long setClockSource(long index) = 0;
-    virtual long getSamplePosition(int64_t *pos, int64_t *timestamp) = 0;
-    virtual long getChannelInfo(ChannelInfo *info) = 0;
-    virtual long createBuffers(
+    virtual AsioStatus setClockSource(long index) = 0;
+    virtual AsioStatus getSamplePosition(int64_t *pos, int64_t *timestamp) = 0;
+    virtual AsioStatus getChannelInfo(ChannelInfo *info) = 0;
+    virtual AsioStatus createBuffers(
         BufferInfo *infos, long channelCount, long bufferSize,
         Callbacks *callbacks) = 0;
-    virtual long disposeBuffers() = 0;
-    virtual long controlPanel() = 0;
-    virtual long future(long selector, void *opt) = 0;
-    virtual long outputReady() = 0;
+    virtual AsioStatus disposeBuffers() = 0;
+    virtual AsioStatus controlPanel() = 0;
+    virtual AsioStatus future(long selector, void *opt) = 0;
+    virtual AsioStatus outputReady() = 0;
 };
 
 struct AsioDriver

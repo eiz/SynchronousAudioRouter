@@ -35,6 +35,11 @@ bool SarAsioWrapper::init(void *sysHandle)
     OutputDebugString(L"SarAsioWrapper::init");
 
     _hwnd = (HWND)sysHandle;
+
+    if (!initInnerDriver()) {
+        _config.driverClsid = "";
+    }
+
     return true;
 }
 
@@ -56,101 +61,160 @@ void SarAsioWrapper::getErrorMessage(char str[124])
     strcpy_s(str, 124, "");
 }
 
-long SarAsioWrapper::start()
+AsioStatus SarAsioWrapper::start()
 {
     OutputDebugString(L"SarAsioWrapper::start");
-    return 0;
+    return AsioStatus::OK;
 }
 
-long SarAsioWrapper::stop()
+AsioStatus SarAsioWrapper::stop()
 {
     OutputDebugString(L"SarAsioWrapper::stop");
-    return 0;
+    return AsioStatus::OK;
 }
 
-long SarAsioWrapper::getChannels(long *inputCount, long *outputCount)
+AsioStatus SarAsioWrapper::getChannels(long *inputCount, long *outputCount)
 {
     OutputDebugString(L"SarAsioWrapper::getChannels");
-    return 0;
+
+    if (!_innerDriver) {
+        *inputCount = *outputCount = 0;
+        return AsioStatus::NotPresent;
+    }
+
+    return _innerDriver->getChannels(inputCount, outputCount);
 }
 
-long SarAsioWrapper::getLatencies(long *inputLatency, long *outputLatency)
+AsioStatus SarAsioWrapper::getLatencies(long *inputLatency, long *outputLatency)
 {
     OutputDebugString(L"SarAsioWrapper::getLatencies");
-    return 0;
+
+    if (!_innerDriver) {
+        *inputLatency = *outputLatency = 0;
+        return AsioStatus::NotPresent;
+    }
+
+    return _innerDriver->getLatencies(inputLatency, outputLatency);
 }
 
-long SarAsioWrapper::getBufferSize(
+AsioStatus SarAsioWrapper::getBufferSize(
     long *minSize, long *maxSize, long *preferredSize, long *granularity)
 {
     OutputDebugString(L"SarAsioWrapper::getBufferSize");
-    return 0;
+
+    if (!_innerDriver) {
+        return AsioStatus::NotPresent;
+    }
+
+    return _innerDriver->getBufferSize(
+        minSize, maxSize, preferredSize, granularity);
 }
 
-long SarAsioWrapper::canSampleRate(double sampleRate)
+AsioStatus SarAsioWrapper::canSampleRate(double sampleRate)
 {
     OutputDebugString(L"SarAsioWrapper::canSampleRate");
-    return 0;
+
+    if (!_innerDriver) {
+        return AsioStatus::NotPresent;
+    }
+
+    return _innerDriver->canSampleRate(sampleRate);
 }
 
-long SarAsioWrapper::getSampleRate(double *sampleRate)
+AsioStatus SarAsioWrapper::getSampleRate(double *sampleRate)
 {
     OutputDebugString(L"SarAsioWrapper::getSampleRate");
-    return 0;
+
+    if (!_innerDriver) {
+        return AsioStatus::NotPresent;
+    }
+
+    return _innerDriver->getSampleRate(sampleRate);
 }
 
-long SarAsioWrapper::setSampleRate(double sampleRate)
+AsioStatus SarAsioWrapper::setSampleRate(double sampleRate)
 {
     OutputDebugString(L"SarAsioWrapper::setSampleRate");
-    return 0;
+
+    if (!_innerDriver) {
+        return AsioStatus::NotPresent;
+    }
+
+    return _innerDriver->setSampleRate(sampleRate);
 }
 
-long SarAsioWrapper::getClockSources(ClockSource *clocks, long *count)
+AsioStatus SarAsioWrapper::getClockSources(ClockSource *clocks, long *count)
 {
     OutputDebugString(L"SarAsioWrapper::getClockSources");
-    return 0;
+
+    if (!_innerDriver) {
+        return AsioStatus::NotPresent;
+    }
+
+    return _innerDriver->getClockSources(clocks, count);
 }
 
-long SarAsioWrapper::setClockSource(long index)
+AsioStatus SarAsioWrapper::setClockSource(long index)
 {
     OutputDebugString(L"SarAsioWrapper::setClockSource");
-    return 0;
+
+    if (!_innerDriver) {
+        return AsioStatus::NotPresent;
+    }
+
+    return _innerDriver->setClockSource(index);
 }
 
-long SarAsioWrapper::getSamplePosition(int64_t *pos, int64_t *timestamp)
+AsioStatus SarAsioWrapper::getSamplePosition(int64_t *pos, int64_t *timestamp)
 {
     OutputDebugString(L"SarAsioWrapper::getSamplePosition");
-    return 0;
+
+    if (!_innerDriver) {
+        return AsioStatus::NotPresent;
+    }
+
+    return _innerDriver->getSamplePosition(pos, timestamp);
 }
 
-long SarAsioWrapper::getChannelInfo(ChannelInfo *info)
+AsioStatus SarAsioWrapper::getChannelInfo(ChannelInfo *info)
 {
     OutputDebugString(L"SarAsioWrapper::getChannelInfo");
-    return 0;
+
+    if (!_innerDriver) {
+        return AsioStatus::NotPresent;
+    }
+
+    return _innerDriver->getChannelInfo(info);
 }
 
-long SarAsioWrapper::createBuffers(
+AsioStatus SarAsioWrapper::createBuffers(
     BufferInfo *infos, long channelCount, long bufferSize,
     Callbacks *callbacks)
 {
     OutputDebugString(L"SarAsioWrapper::createBuffers");
-    return 0;
-}
 
-long SarAsioWrapper::disposeBuffers()
-{
-    OutputDebugString(L"SarAsioWrapper::disposeBuffers");
-    return 0;
-}
-
-long SarAsioWrapper::controlPanel()
-{
-    OutputDebugString(L"SarAsioWrapper::controlPanel");
-
-    for (auto driver : InstalledAsioDrivers()) {
-        OutputDebugStringA(driver.name.c_str());
+    if (!_innerDriver) {
+        return AsioStatus::NotPresent;
     }
 
+    return _innerDriver->createBuffers(
+        infos, channelCount, bufferSize, callbacks);
+}
+
+AsioStatus SarAsioWrapper::disposeBuffers()
+{
+    OutputDebugString(L"SarAsioWrapper::disposeBuffers");
+
+    if (!_innerDriver) {
+        return AsioStatus::NotPresent;
+    }
+
+    return _innerDriver->disposeBuffers();
+}
+
+AsioStatus SarAsioWrapper::controlPanel()
+{
+    OutputDebugString(L"SarAsioWrapper::controlPanel");
     auto sheet = std::make_shared<ConfigurationPropertyDialog>(_config);
 
     if (sheet->show(_hwnd) > 0) {
@@ -158,17 +222,48 @@ long SarAsioWrapper::controlPanel()
         _config.writeFile(ConfigurationPath("default.json"));
     }
 
-    return 0;
+    return AsioStatus::OK;
 }
 
-long SarAsioWrapper::future(long selector, void *opt)
+AsioStatus SarAsioWrapper::future(long selector, void *opt)
 {
     OutputDebugString(L"SarAsioWrapper::future");
-    return 0;
+
+    if (!_innerDriver) {
+        return AsioStatus::NotPresent;
+    }
+
+    return _innerDriver->future(selector, opt);
 }
 
-long SarAsioWrapper::outputReady()
+AsioStatus SarAsioWrapper::outputReady()
 {
     OutputDebugString(L"SarAsioWrapper::outputReady");
-    return 0;
+
+    if (!_innerDriver) {
+        return AsioStatus::NotPresent;
+    }
+
+    return _innerDriver->outputReady();
+}
+
+bool SarAsioWrapper::initInnerDriver()
+{
+    _innerDriver = nullptr;
+
+    for (auto driver : InstalledAsioDrivers()) {
+        if (driver.clsid == _config.driverClsid) {
+            if (!SUCCEEDED(driver.open(&_innerDriver))) {
+                return false;
+            }
+
+            if (!_innerDriver->init(_hwnd)) {
+                return false;
+            }
+
+            return true;
+        }
+    }
+
+    return false;
 }

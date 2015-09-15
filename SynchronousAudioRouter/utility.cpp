@@ -110,6 +110,7 @@ NTSTATUS SarReadEndpointRegisters(
         ProbeForRead(
             source, sizeof(SarEndpointRegisters), TYPE_ALIGNMENT(ULONG));
         RtlCopyMemory(regs, source, sizeof(SarEndpointRegisters));
+
     } __except(EXCEPTION_EXECUTE_HANDLER) {
         return GetExceptionCode();
     }
@@ -123,12 +124,30 @@ NTSTATUS SarWriteEndpointRegisters(
     ASSERT(endpoint->activeRegisterFileUVA);
 
     __try {
+        PVOID dest =
+            (LONG *)(&endpoint->activeRegisterFileUVA[endpoint->index]) + 1;
+        SIZE_T length = sizeof(SarEndpointRegisters) - sizeof(LONG);
+
+        ProbeForWrite(dest, length, TYPE_ALIGNMENT(ULONG));
+        RtlCopyMemory(dest, ((LONG *)regs) + 1, length);
+    } __except(EXCEPTION_EXECUTE_HANDLER) {
+        return GetExceptionCode();
+    }
+
+    return STATUS_SUCCESS;
+}
+
+NTSTATUS SarIncrementEndpointGeneration(SarEndpoint *endpoint)
+{
+    ASSERT(endpoint->activeRegisterFileUVA);
+
+    __try {
         SarEndpointRegisters *dest =
             &endpoint->activeRegisterFileUVA[endpoint->index];
 
         ProbeForWrite(
             dest, sizeof(SarEndpointRegisters), TYPE_ALIGNMENT(ULONG));
-        RtlCopyMemory(dest, regs, sizeof(SarEndpointRegisters));
+        InterlockedIncrement(&dest->generation);
     } __except(EXCEPTION_EXECUTE_HANDLER) {
         return GetExceptionCode();
     }

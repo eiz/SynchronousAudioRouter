@@ -42,7 +42,7 @@ BOOL createEndpoint(
 
 BOOL setBufferLayout(
     HANDLE device, DWORD bufferSize,
-    DWORD sampleRate, DWORD sampleDepth,
+    DWORD sampleRate, DWORD sampleSize,
     SarEndpointRegisters **regsOut,
     LPVOID *bufferOut,
     DWORD *bufferSizeOut)
@@ -52,7 +52,7 @@ BOOL setBufferLayout(
 
     request.bufferSize = bufferSize;
     request.sampleRate = sampleRate;
-    request.sampleDepth = sampleDepth;
+    request.sampleSize = sampleSize;
 
     if (!DeviceIoControl(device, SAR_REQUEST_SET_BUFFER_LAYOUT,
         (LPVOID)&request, sizeof(request), (LPVOID)&response, sizeof(response),

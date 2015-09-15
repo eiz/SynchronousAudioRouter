@@ -207,8 +207,8 @@ NTSTATUS SarSetBufferLayout(
     PVOID baseAddress = nullptr;
 
     if (request->bufferSize > SAR_MAX_BUFFER_SIZE ||
-        request->sampleDepth < SAR_MIN_SAMPLE_DEPTH ||
-        request->sampleDepth > SAR_MAX_SAMPLE_DEPTH ||
+        request->sampleSize < SAR_MIN_SAMPLE_SIZE ||
+        request->sampleSize > SAR_MAX_SAMPLE_SIZE ||
         request->sampleRate < SAR_MIN_SAMPLE_RATE ||
         request->sampleRate > SAR_MAX_SAMPLE_RATE) {
         return STATUS_INVALID_PARAMETER;
@@ -222,7 +222,7 @@ NTSTATUS SarSetBufferLayout(
     }
 
     fileContext->bufferSize = ROUND_TO_PAGES(request->bufferSize);
-    fileContext->sampleDepth = request->sampleDepth;
+    fileContext->sampleSize = request->sampleSize;
     fileContext->sampleRate = request->sampleRate;
     ExReleaseFastMutex(&fileContext->mutex);
 
@@ -279,7 +279,7 @@ err_out:
 
     ExAcquireFastMutex(&fileContext->mutex);
     fileContext->bufferSize =
-        fileContext->sampleDepth = fileContext->sampleRate = 0;
+        fileContext->sampleSize = fileContext->sampleRate = 0;
     ExReleaseFastMutex(&fileContext->mutex);
     return status;
 }
@@ -574,8 +574,8 @@ NTSTATUS SarCreateEndpoint(
     endpoint->dataRange->DataRange.SubFormat = KSDATAFORMAT_SUBTYPE_PCM;
     endpoint->dataRange->DataRange.Specifier =
         KSDATAFORMAT_SPECIFIER_WAVEFORMATEX;
-    endpoint->dataRange->MaximumBitsPerSample = fileContext->sampleDepth * 8;
-    endpoint->dataRange->MinimumBitsPerSample = fileContext->sampleDepth * 8;
+    endpoint->dataRange->MaximumBitsPerSample = fileContext->sampleSize * 8;
+    endpoint->dataRange->MinimumBitsPerSample = fileContext->sampleSize * 8;
     endpoint->dataRange->MaximumSampleFrequency = fileContext->sampleRate;
     endpoint->dataRange->MinimumSampleFrequency = fileContext->sampleRate;
     endpoint->dataRange->MaximumChannels = request->channelCount;

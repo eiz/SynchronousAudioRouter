@@ -78,8 +78,8 @@ DEFINE_GUID(GUID_DEVINTERFACE_SYNCHRONOUSAUDIOROUTER,
     FILE_DEVICE_UNKNOWN, 2, METHOD_NEITHER, FILE_READ_DATA | FILE_WRITE_DATA)
 
 #define SAR_MAX_BUFFER_SIZE 1024 * 1024 * 128
-#define SAR_MIN_SAMPLE_DEPTH 1
-#define SAR_MAX_SAMPLE_DEPTH 3
+#define SAR_MIN_SAMPLE_SIZE 1
+#define SAR_MAX_SAMPLE_SIZE 3
 #define SAR_MIN_SAMPLE_RATE 8000
 #define SAR_MAX_SAMPLE_RATE 192000
 #define SAR_MAX_CHANNEL_COUNT 32
@@ -99,7 +99,7 @@ typedef struct SarSetBufferLayoutRequest
 {
     DWORD bufferSize;
     DWORD sampleRate;
-    DWORD sampleDepth;
+    DWORD sampleSize;
 } SarSetBufferLayoutRequest;
 
 typedef struct SarSetBufferLayoutResponse
@@ -111,6 +111,7 @@ typedef struct SarSetBufferLayoutResponse
 
 typedef struct SarEndpointRegisters
 {
+    LONG generation;
     BOOL isActive;
     DWORD positionRegister;
     DWORD clockRegister;
@@ -152,7 +153,7 @@ typedef struct SarFileContext
     RTL_BITMAP bufferMap;
     DWORD bufferSize;
     DWORD sampleRate;
-    DWORD sampleDepth;
+    DWORD sampleSize;
 } SarFileContext;
 
 #define SarBufferMapEntryCount(fileContext) \
@@ -296,6 +297,7 @@ NTSTATUS SarReadEndpointRegisters(
     SarEndpointRegisters *regs, SarEndpoint *endpoint);
 NTSTATUS SarWriteEndpointRegisters(
     SarEndpointRegisters *regs, SarEndpoint *endpoint);
+NTSTATUS SarIncrementEndpointGeneration(SarEndpoint *endpoint);
 NTSTATUS SarStringDuplicate(PUNICODE_STRING str, PUNICODE_STRING src);
 VOID SarStringFree(PUNICODE_STRING str);
 

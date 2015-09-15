@@ -273,7 +273,7 @@ NTSTATUS SarInitializeFileContext(SarFileContext *fileContext)
     InitializeListHead(&fileContext->endpointList);
     InitializeListHead(&fileContext->pendingEndpointList);
     fileContext->sampleRate = 0;
-    fileContext->sampleDepth = 0;
+    fileContext->sampleSize = 0;
     fileContext->bufferSize = 0;
 
     fileContext->workItem = IoAllocateWorkItem(

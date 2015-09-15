@@ -18,6 +18,7 @@
 #define _SAR_ASIO_WRAPPER_H
 
 #include "config.h"
+#include "sarclient.h"
 #include "tinyasio.h"
 
 namespace Sar {
@@ -43,34 +44,40 @@ struct ATL_NO_VTABLE SarAsioWrapper:
     virtual void getDriverName(char name[32]) override;
     virtual long getDriverVersion() override;
     virtual void getErrorMessage(char str[124]) override;
-    virtual long start() override;
-    virtual long stop() override;
-    virtual long getChannels(
+    virtual AsioStatus start() override;
+    virtual AsioStatus stop() override;
+    virtual AsioStatus getChannels(
         long *inputCount, long *outputCount) override;
-    virtual long getLatencies(
+    virtual AsioStatus getLatencies(
         long *inputLatency, long *outputLatency) override;
-    virtual long getBufferSize(
+    virtual AsioStatus getBufferSize(
         long *minSize, long *maxSize,
         long *preferredSize, long *granularity) override;
-    virtual long canSampleRate(double sampleRate) override;
-    virtual long getSampleRate(double *sampleRate) override;
-    virtual long setSampleRate(double sampleRate) override;
-    virtual long getClockSources(
+    virtual AsioStatus canSampleRate(double sampleRate) override;
+    virtual AsioStatus getSampleRate(double *sampleRate) override;
+    virtual AsioStatus setSampleRate(double sampleRate) override;
+    virtual AsioStatus getClockSources(
         ClockSource *clocks, long *count) override;
-    virtual long setClockSource(long index) override;
-    virtual long getSamplePosition(int64_t *pos, int64_t *timestamp) override;
-    virtual long getChannelInfo(ChannelInfo *info) override;
-    virtual long createBuffers(
+    virtual AsioStatus setClockSource(long index) override;
+    virtual AsioStatus getSamplePosition(
+        int64_t *pos, int64_t *timestamp) override;
+    virtual AsioStatus getChannelInfo(ChannelInfo *info) override;
+    virtual AsioStatus createBuffers(
         BufferInfo *infos, long channelCount, long bufferSize,
         Callbacks *callbacks) override;
-    virtual long disposeBuffers() override;
-    virtual long controlPanel() override;
-    virtual long future(long selector, void *opt) override;
-    virtual long outputReady() override;
+    virtual AsioStatus disposeBuffers() override;
+    virtual AsioStatus controlPanel() override;
+    virtual AsioStatus future(long selector, void *opt) override;
+    virtual AsioStatus outputReady() override;
 
 private:
+    bool initInnerDriver();
+
     HWND _hwnd;
     DriverConfig _config;
+    std::unique_ptr<SarClient> _sar;
+    CComPtr<IASIO> _innerDriver;
+    void *_asioFrameBuffer;
 };
 
 OBJECT_ENTRY_AUTO(CLSID_SarAsioWrapper, SarAsioWrapper)
