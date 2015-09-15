@@ -107,7 +107,8 @@ NTSTATUS SarReadEndpointRegisters(
         SarEndpointRegisters *source =
             &endpoint->activeRegisterFileUVA[endpoint->index];
 
-        ProbeForRead(source, sizeof(SarEndpointRegisters), TYPE_ALIGNMENT(ULONG));
+        ProbeForRead(
+            source, sizeof(SarEndpointRegisters), TYPE_ALIGNMENT(ULONG));
         RtlCopyMemory(regs, source, sizeof(SarEndpointRegisters));
     } __except(EXCEPTION_EXECUTE_HANDLER) {
         return GetExceptionCode();
@@ -125,7 +126,8 @@ NTSTATUS SarWriteEndpointRegisters(
         SarEndpointRegisters *dest =
             &endpoint->activeRegisterFileUVA[endpoint->index];
 
-        ProbeForWrite(dest, sizeof(SarEndpointRegisters), TYPE_ALIGNMENT(ULONG));
+        ProbeForWrite(
+            dest, sizeof(SarEndpointRegisters), TYPE_ALIGNMENT(ULONG));
         RtlCopyMemory(dest, regs, sizeof(SarEndpointRegisters));
     } __except(EXCEPTION_EXECUTE_HANDLER) {
         return GetExceptionCode();
@@ -148,7 +150,8 @@ NTSTATUS SarReadUserBuffer(PVOID dest, PIRP irp, ULONG size)
     }
 
     __try {
-        ProbeForRead(irpStack->Parameters.DeviceIoControl.Type3InputBuffer, size,
+        ProbeForRead(
+            irpStack->Parameters.DeviceIoControl.Type3InputBuffer, size,
             TYPE_ALIGNMENT(ULONG));
         RtlCopyMemory(
             dest, irpStack->Parameters.DeviceIoControl.Type3InputBuffer, size);

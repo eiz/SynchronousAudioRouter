@@ -66,7 +66,8 @@ NTSTATUS SarKsPinRtGetBuffer(
 
     sectionOffset.QuadPart = cellIndex * SAR_BUFFER_CELL_SIZE;
     SAR_LOG("Mapping %08X %016llX", viewSize, sectionOffset.QuadPart);
-    status = ZwMapViewOfSection(endpoint->owner->bufferSection, ZwCurrentProcess(),
+    status = ZwMapViewOfSection(
+        endpoint->owner->bufferSection, ZwCurrentProcess(),
         &mappedAddress, 0, 0, &sectionOffset, &viewSize, ViewUnmap,
         0, PAGE_READWRITE);
 

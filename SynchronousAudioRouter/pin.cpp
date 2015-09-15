@@ -27,7 +27,8 @@ NTSTATUS SarKsPinGetName(
     }
 
     PIO_STACK_LOCATION irpStack = IoGetCurrentIrpStackLocation(irp);
-    ULONG outputLength = irpStack->Parameters.DeviceIoControl.OutputBufferLength;
+    ULONG outputLength =
+        irpStack->Parameters.DeviceIoControl.OutputBufferLength;
 
     irp->IoStatus.Information = endpoint->deviceName.MaximumLength;
 
@@ -108,7 +109,8 @@ NTSTATUS SarKsPinClose(PKSPIN pin, PIRP irp)
                 ZwCurrentProcess(), endpoint->activeBufferVirtualAddress);
         }
 
-        ZwUnmapViewOfSection(ZwCurrentProcess(), endpoint->activeRegisterFileUVA);
+        ZwUnmapViewOfSection(
+            ZwCurrentProcess(), endpoint->activeRegisterFileUVA);
     } else {
         SAR_LOG("Pin closed in a different process than the one that created it.");
     }
@@ -157,7 +159,9 @@ NTSTATUS SarKsPinSetDataFormat(
     PKSDATAFORMAT_WAVEFORMATEX waveFormat =
         (PKSDATAFORMAT_WAVEFORMATEX)pin->ConnectionFormat;
 
-    if (waveFormat->DataFormat.FormatSize != sizeof(KSDATAFORMAT_WAVEFORMATEX)) {
+    if (waveFormat->DataFormat.FormatSize !=
+        sizeof(KSDATAFORMAT_WAVEFORMATEX)) {
+
         return STATUS_NO_MATCH;
     }
 
@@ -247,8 +251,10 @@ NTSTATUS SarKsPinIntersectHandler(
 
     if (callerFormat->MaximumBitsPerSample < myFormat->MinimumBitsPerSample ||
         callerFormat->MinimumBitsPerSample > myFormat->MaximumBitsPerSample ||
-        callerFormat->MaximumSampleFrequency < myFormat->MinimumSampleFrequency ||
-        callerFormat->MinimumSampleFrequency > myFormat->MaximumSampleFrequency ||
+        (callerFormat->MaximumSampleFrequency <
+         myFormat->MinimumSampleFrequency) ||
+        (callerFormat->MinimumSampleFrequency >
+         myFormat->MaximumSampleFrequency) ||
         callerFormat->MaximumChannels < myFormat->MaximumChannels) {
         return STATUS_NO_MATCH;
     }
@@ -260,9 +266,11 @@ NTSTATUS SarKsPinIntersectHandler(
     waveFormat->WaveFormatEx.wFormatTag = WAVE_FORMAT_PCM;
     waveFormat->WaveFormatEx.nChannels = (WORD)myFormat->MaximumChannels;
     waveFormat->WaveFormatEx.nSamplesPerSec = myFormat->MaximumSampleFrequency;
-    waveFormat->WaveFormatEx.wBitsPerSample = (WORD)myFormat->MaximumBitsPerSample;
+    waveFormat->WaveFormatEx.wBitsPerSample =
+        (WORD)myFormat->MaximumBitsPerSample;
     waveFormat->WaveFormatEx.nBlockAlign =
-        (WORD)myFormat->MaximumBitsPerSample / 8 * (WORD)myFormat->MaximumChannels;
+        ((WORD)myFormat->MaximumBitsPerSample / 8) *
+        (WORD)myFormat->MaximumChannels;
     waveFormat->WaveFormatEx.nAvgBytesPerSec =
         waveFormat->WaveFormatEx.nBlockAlign *
         waveFormat->WaveFormatEx.nSamplesPerSec;
@@ -301,7 +309,8 @@ NTSTATUS SarKsPinGetDefaultDataFormat(
 
     SarEndpoint *endpoint = SarGetEndpointFromIrp(irp);
     PIO_STACK_LOCATION irpStack = IoGetCurrentIrpStackLocation(irp);
-    ULONG outputLength = irpStack->Parameters.DeviceIoControl.OutputBufferLength;
+    ULONG outputLength =
+        irpStack->Parameters.DeviceIoControl.OutputBufferLength;
 
     if (!endpoint) {
         return STATUS_NOT_FOUND;
@@ -321,9 +330,11 @@ NTSTATUS SarKsPinGetDefaultDataFormat(
     waveFormat->WaveFormatEx.wFormatTag = WAVE_FORMAT_PCM;
     waveFormat->WaveFormatEx.nChannels = (WORD)myFormat->MaximumChannels;
     waveFormat->WaveFormatEx.nSamplesPerSec = myFormat->MaximumSampleFrequency;
-    waveFormat->WaveFormatEx.wBitsPerSample = (WORD)myFormat->MaximumBitsPerSample;
+    waveFormat->WaveFormatEx.wBitsPerSample =
+        (WORD)myFormat->MaximumBitsPerSample;
     waveFormat->WaveFormatEx.nBlockAlign =
-        (WORD)myFormat->MaximumBitsPerSample / 8 * (WORD)myFormat->MaximumChannels;
+        ((WORD)myFormat->MaximumBitsPerSample / 8) *
+        (WORD)myFormat->MaximumChannels;
     waveFormat->WaveFormatEx.nAvgBytesPerSec =
         waveFormat->WaveFormatEx.nBlockAlign *
         waveFormat->WaveFormatEx.nSamplesPerSec;
@@ -338,7 +349,8 @@ NTSTATUS SarKsPinProposeDataFormat(
 {
     PKSP_PIN pinRequest = (PKSP_PIN)request;
     PIO_STACK_LOCATION irpStack = IoGetCurrentIrpStackLocation(irp);
-    ULONG outputLength = irpStack->Parameters.DeviceIoControl.OutputBufferLength;
+    ULONG outputLength =
+        irpStack->Parameters.DeviceIoControl.OutputBufferLength;
 
     if (pinRequest->PinId != 0) {
         return STATUS_NOT_FOUND;
@@ -375,7 +387,8 @@ NTSTATUS SarKsPinProposeDataFormat(
     }
 
     if (format->WaveFormatEx.nChannels != endpoint->channelCount ||
-        format->WaveFormatEx.wBitsPerSample != endpoint->owner->sampleDepth * 8 ||
+        (format->WaveFormatEx.wBitsPerSample !=
+         endpoint->owner->sampleDepth * 8) ||
         (format->WaveFormatEx.wFormatTag != WAVE_FORMAT_PCM &&
          format->WaveFormatEx.wFormatTag != WAVE_FORMAT_EXTENSIBLE) ||
         format->WaveFormatEx.nSamplesPerSec != endpoint->owner->sampleRate) {

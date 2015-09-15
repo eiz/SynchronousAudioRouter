@@ -135,6 +135,7 @@ BOOLEAN SarDeleteFileContext(SarDriverExtension *extension, PIRP irp)
             //    CONTAINING_RECORD(entry, SarEndpoint, listEntry);
 
             entry = entry->Flink;
+            // TODO: destroy ks filters when sar control device is closed
             SAR_LOG("This should delete filters but the locking is tricky");
         }
 

@@ -44,7 +44,8 @@ DEFINE_KSPROPERTY_TABLE(gPinRtAudioProperties) {
     DEFINE_KSPROPERTY_GETTER(
         KSPROPERTY_RTAUDIO_CLOCKREGISTER, SarKsPinRtGetClockRegister,
         KSRTAUDIO_HWREGISTER_PROPERTY, KSRTAUDIO_HWREGISTER),
-    DEFINE_KSPROPERTY_GETTER(KSPROPERTY_RTAUDIO_HWLATENCY, SarKsPinRtGetHwLatency,
+    DEFINE_KSPROPERTY_GETTER(
+        KSPROPERTY_RTAUDIO_HWLATENCY, SarKsPinRtGetHwLatency,
         KSPROPERTY, KSRTAUDIO_HWLATENCY),
     DEFINE_KSPROPERTY_GETTER(
         KSPROPERTY_RTAUDIO_PACKETCOUNT, SarKsPinRtGetPacketCount,
@@ -366,7 +367,8 @@ retry:
     PLIST_ENTRY entry = fileContext->pendingEndpointList.Flink;
 
     while (entry != &fileContext->pendingEndpointList) {
-        SarEndpoint *endpoint = CONTAINING_RECORD(entry, SarEndpoint, listEntry);
+        SarEndpoint *endpoint =
+            CONTAINING_RECORD(entry, SarEndpoint, listEntry);
         PUNICODE_STRING symlink =
             KsFilterFactoryGetSymbolicLink(endpoint->filterFactory);
         PLIST_ENTRY current = entry;
@@ -472,7 +474,8 @@ NTSTATUS SarCreateEndpoint(
     endpoint->owner = fileContext;
 
     endpoint->filterDesc = (PKSFILTER_DESCRIPTOR)
-        ExAllocatePoolWithTag(NonPagedPool, sizeof(KSFILTER_DESCRIPTOR), SAR_TAG);
+        ExAllocatePoolWithTag(
+            NonPagedPool, sizeof(KSFILTER_DESCRIPTOR), SAR_TAG);
 
     if (!endpoint->filterDesc) {
         goto err_out;
@@ -582,8 +585,10 @@ NTSTATUS SarCreateEndpoint(
     endpoint->analogDataRange->DataRange.SampleSize = 0;
     endpoint->analogDataRange->DataRange.Reserved = 0;
     endpoint->analogDataRange->DataRange.MajorFormat = KSDATAFORMAT_TYPE_AUDIO;
-    endpoint->analogDataRange->DataRange.SubFormat = KSDATAFORMAT_SUBTYPE_ANALOG;
-    endpoint->analogDataRange->DataRange.Specifier = KSDATAFORMAT_SPECIFIER_NONE;
+    endpoint->analogDataRange->DataRange.SubFormat =
+        KSDATAFORMAT_SUBTYPE_ANALOG;
+    endpoint->analogDataRange->DataRange.Specifier =
+        KSDATAFORMAT_SPECIFIER_NONE;
     endpoint->analogDataRange->MaximumBitsPerSample = 0;
     endpoint->analogDataRange->MinimumBitsPerSample = 0;
     endpoint->analogDataRange->MaximumSampleFrequency = 0;

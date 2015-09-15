@@ -90,7 +90,7 @@ EndpointsPropertySheetPage::EndpointsPropertySheetPage(DriverConfig& config)
 
     for (auto driver : InstalledAsioDrivers()) {
         // Skip our own driver.
-        if (driver.clsid != "{0569D852-1F6A-44A7-B7B5-EFB78B66BE21}") {
+        if (driver.clsid != CLSID_STR_SynchronousAudioRouter) {
             _drivers.emplace_back(driver);
         }
     }

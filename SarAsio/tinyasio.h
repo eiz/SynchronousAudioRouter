@@ -46,7 +46,10 @@ struct Callbacks
 {
 };
 
-struct __declspec(uuid("{0569D852-1F6A-44A7-B7B5-EFB78B66BE21}")) IASIO:
+#define CLSID_STR_SynchronousAudioRouter \
+    "{0569D852-1F6A-44A7-B7B5-EFB78B66BE21}"
+
+struct __declspec(uuid(CLSID_STR_SynchronousAudioRouter)) IASIO:
     public IUnknown
 {
     virtual bool init(void *sysHandle) = 0;
@@ -60,7 +63,8 @@ struct __declspec(uuid("{0569D852-1F6A-44A7-B7B5-EFB78B66BE21}")) IASIO:
     virtual long getLatencies(
         long *inputLatency, long *outputLatency) = 0;
     virtual long getBufferSize(
-        long *minSize, long *maxSize, long *preferredSize, long *granularity) = 0;
+        long *minSize, long *maxSize,
+        long *preferredSize, long *granularity) = 0;
     virtual long canSampleRate(double sampleRate) = 0;
     virtual long getSampleRate(double *sampleRate) = 0;
     virtual long setSampleRate(double sampleRate) = 0;
