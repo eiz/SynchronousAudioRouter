@@ -26,15 +26,17 @@ bool EndpointConfig::load(picojson::object& obj)
     auto poId = obj.find("id");
     auto poDescription = obj.find("description");
     auto poType = obj.find("type");
+    auto poChannelCount = obj.find("channelCount");
 
     if (poId == obj.end() || poDescription == obj.end() ||
-        poType == obj.end()) {
+        poType == obj.end() || poChannelCount == obj.end()) {
         return false;
     }
 
     if (!poId->second.is<std::string>() ||
         !poDescription->second.is<std::string>() ||
-        !poType->second.is<std::string>()) {
+        !poType->second.is<std::string>() ||
+        !poChannelCount->second.is<double>()) {
         return false;
     }
 
@@ -48,6 +50,7 @@ bool EndpointConfig::load(picojson::object& obj)
 
     id = poId->second.get<std::string>();
     description = poDescription->second.get<std::string>();
+    channelCount = (int)poChannelCount->second.get<double>();
     return true;
 }
 

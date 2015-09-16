@@ -40,6 +40,7 @@ bool SarAsioWrapper::init(void *sysHandle)
         _config.driverClsid = "";
     }
 
+    initVirtualChannels();
     return true;
 }
 
@@ -82,7 +83,15 @@ AsioStatus SarAsioWrapper::getChannels(long *inputCount, long *outputCount)
         return AsioStatus::NotPresent;
     }
 
-    return _innerDriver->getChannels(inputCount, outputCount);
+    auto status = _innerDriver->getChannels(inputCount, outputCount);
+
+    if (status != AsioStatus::OK) {
+        return status;
+    }
+
+    *inputCount += (long)_virtualInputs.size();
+    *outputCount += (long)_virtualOutputs.size();
+    return AsioStatus::OK;
 }
 
 AsioStatus SarAsioWrapper::getLatencies(long *inputLatency, long *outputLatency)
@@ -184,7 +193,31 @@ AsioStatus SarAsioWrapper::getChannelInfo(ChannelInfo *info)
         return AsioStatus::NotPresent;
     }
 
-    return _innerDriver->getChannelInfo(info);
+    long inputChannels = 0, outputChannels = 0;
+    auto status = _innerDriver->getChannels(&inputChannels, &outputChannels);
+
+    if (status != AsioStatus::OK) {
+        return status;
+    }
+
+    auto innerCount = info->isInput ? inputChannels : outputChannels;
+
+    if (info->index < innerCount) {
+        return _innerDriver->getChannelInfo(info);
+    }
+
+    auto& channels = info->isInput ? _virtualInputs : _virtualOutputs;
+    auto index = info->index - innerCount;
+
+    if (index < channels.size()) {
+        info->group = 0;
+        info->sampleType = 1; // TODO: proper sample types
+        info->isActive = FALSE; // TODO
+        strcpy_s(info->name, channels[index].name.c_str());
+        return AsioStatus::OK;
+    }
+
+    return AsioStatus::NotPresent;
 }
 
 AsioStatus SarAsioWrapper::createBuffers(
@@ -266,4 +299,25 @@ bool SarAsioWrapper::initInnerDriver()
     }
 
     return false;
+}
+
+void SarAsioWrapper::initVirtualChannels()
+{
+    for (auto& endpoint : _config.endpoints) {
+        for (int i = 0; i < endpoint.channelCount; ++i) {
+            VirtualChannel chan;
+            std::ostringstream os;
+
+            os << endpoint.description << " " << (i + 1);
+            chan.endpoint = &endpoint;
+            chan.index = i;
+            chan.name = os.str();
+
+            if (endpoint.type == EndpointType::Recording) {
+                _virtualOutputs.emplace_back(chan);
+            } else {
+                _virtualInputs.emplace_back(chan);
+            }
+        }
+    }
 }

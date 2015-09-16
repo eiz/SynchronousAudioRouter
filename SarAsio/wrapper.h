@@ -71,12 +71,22 @@ struct ATL_NO_VTABLE SarAsioWrapper:
     virtual AsioStatus outputReady() override;
 
 private:
+    struct VirtualChannel
+    {
+        EndpointConfig *endpoint;
+        int index;
+        std::string name;
+    };
+
     bool initInnerDriver();
+    void initVirtualChannels();
 
     HWND _hwnd;
     DriverConfig _config;
     std::unique_ptr<SarClient> _sar;
     CComPtr<IASIO> _innerDriver;
+    std::vector<VirtualChannel> _virtualInputs;
+    std::vector<VirtualChannel> _virtualOutputs;
     void *_asioFrameBuffer;
 };
 

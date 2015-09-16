@@ -32,6 +32,7 @@ struct EndpointConfig
     std::string id;
     std::string description;
     EndpointType type;
+    int channelCount;
 
     bool load(picojson::object& obj);
     picojson::object save();

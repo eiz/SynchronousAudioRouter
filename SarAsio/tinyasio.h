@@ -31,8 +31,8 @@ struct ClockSource
 struct ChannelInfo
 {
     long index;
-    bool isInput;
-    bool isActive;
+    long isInput;
+    long isActive;
     long group;
     long sampleType;
     char name[32];

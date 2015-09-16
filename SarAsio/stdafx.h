@@ -37,6 +37,7 @@
 #include <cstdint>
 #include <locale>
 #include <memory>
+#include <sstream>
 #include <string>
 #include <vector>
 
