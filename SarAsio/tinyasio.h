@@ -19,32 +19,7 @@
 
 namespace Sar {
 
-struct ClockSource
-{
-    long index;
-    long channel;
-    long group;
-    bool isCurrentSource;
-    char name[32];
-};
-
-struct ChannelInfo
-{
-    long index;
-    long isInput;
-    long isActive;
-    long group;
-    long sampleType;
-    char name[32];
-};
-
-struct BufferInfo
-{
-};
-
-struct Callbacks
-{
-};
+enum class AsioBool : long { False, True };
 
 enum class AsioStatus : long
 {
@@ -59,13 +34,77 @@ enum class AsioStatus : long
     NoMemory
 };
 
+struct AsioClockSource
+{
+    long index;
+    long channel;
+    long group;
+    AsioBool isCurrentSource;
+    char name[32];
+};
+
+struct AsioChannelInfo
+{
+    long index;
+    AsioBool isInput;
+    AsioBool isActive;
+    long group;
+    long sampleType;
+    char name[32];
+};
+
+struct AsioBufferInfo
+{
+    AsioBool isInput;
+    long index;
+    void *buffers[2];
+};
+
+struct AsioTimeCode
+{
+    double speed;
+    int64_t sampleIndex;
+    unsigned flags;
+    char future[64];
+};
+
+struct AsioTimeInfo
+{
+    double speed;
+    int64_t systemTime;
+    int64_t samplePosition;
+    double sampleRate;
+    unsigned flags;
+    char reserved[12];
+};
+
+struct AsioTime
+{
+    long reserved[4];
+    AsioTimeInfo timeInfo;
+    AsioTimeCode timeCode;
+};
+
+struct AsioCallbacks
+{
+    void (*tick)(long bufferIndex, AsioBool directProcess);
+    void (*sampleRateDidChange)(double sampleRate);
+    long (*asioMessage)(long selector, long value, void *message, double *opt);
+    AsioTime *(*bufferSwitchTimeInfo)(
+        AsioTime *params, long bufferIndex, AsioBool directProcess);
+};
+
 #define CLSID_STR_SynchronousAudioRouter \
     "{0569D852-1F6A-44A7-B7B5-EFB78B66BE21}"
 
-struct __declspec(uuid(CLSID_STR_SynchronousAudioRouter)) IASIO:
+#ifndef IID_STR_IASIO
+#define IID_STR_IASIO CLSID_STR_SynchronousAudioRouter
+#endif
+
+struct __declspec(uuid(IID_STR_IASIO)) IASIO:
     public IUnknown
 {
-    virtual bool init(void *sysHandle) = 0;
+    virtual AsioBool init(void *sysHandle) = 0;
     virtual void getDriverName(char name[32]) = 0;
     virtual long getDriverVersion() = 0;
     virtual void getErrorMessage(char str[124]) = 0;
@@ -82,13 +121,13 @@ struct __declspec(uuid(CLSID_STR_SynchronousAudioRouter)) IASIO:
     virtual AsioStatus getSampleRate(double *sampleRate) = 0;
     virtual AsioStatus setSampleRate(double sampleRate) = 0;
     virtual AsioStatus getClockSources(
-        ClockSource *clocks, long *count) = 0;
+        AsioClockSource *clocks, long *count) = 0;
     virtual AsioStatus setClockSource(long index) = 0;
     virtual AsioStatus getSamplePosition(int64_t *pos, int64_t *timestamp) = 0;
-    virtual AsioStatus getChannelInfo(ChannelInfo *info) = 0;
+    virtual AsioStatus getChannelInfo(AsioChannelInfo *info) = 0;
     virtual AsioStatus createBuffers(
-        BufferInfo *infos, long channelCount, long bufferSize,
-        Callbacks *callbacks) = 0;
+        AsioBufferInfo *infos, long channelCount, long bufferSize,
+        AsioCallbacks *callbacks) = 0;
     virtual AsioStatus disposeBuffers() = 0;
     virtual AsioStatus controlPanel() = 0;
     virtual AsioStatus future(long selector, void *opt) = 0;

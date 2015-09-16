@@ -160,7 +160,7 @@ void EndpointsPropertySheetPage::onConfigureHardwareInterface()
             CComPtr<IASIO> asio;
 
             if (SUCCEEDED(driver.open(&asio))) {
-                if (!asio->init(_hwnd)) {
+                if (asio->init(_hwnd) != AsioBool::True) {
                     MessageBox(_hwnd,
                         TEXT("Failed to initialize ASIO driver."),
                         TEXT("Error"),

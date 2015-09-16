@@ -40,7 +40,7 @@ struct ATL_NO_VTABLE SarAsioWrapper:
 
     SarAsioWrapper();
 
-    virtual bool init(void *sysHandle) override;
+    virtual AsioBool init(void *sysHandle) override;
     virtual void getDriverName(char name[32]) override;
     virtual long getDriverVersion() override;
     virtual void getErrorMessage(char str[124]) override;
@@ -57,14 +57,14 @@ struct ATL_NO_VTABLE SarAsioWrapper:
     virtual AsioStatus getSampleRate(double *sampleRate) override;
     virtual AsioStatus setSampleRate(double sampleRate) override;
     virtual AsioStatus getClockSources(
-        ClockSource *clocks, long *count) override;
+        AsioClockSource *clocks, long *count) override;
     virtual AsioStatus setClockSource(long index) override;
     virtual AsioStatus getSamplePosition(
         int64_t *pos, int64_t *timestamp) override;
-    virtual AsioStatus getChannelInfo(ChannelInfo *info) override;
+    virtual AsioStatus getChannelInfo(AsioChannelInfo *info) override;
     virtual AsioStatus createBuffers(
-        BufferInfo *infos, long channelCount, long bufferSize,
-        Callbacks *callbacks) override;
+        AsioBufferInfo *infos, long channelCount, long bufferSize,
+        AsioCallbacks *callbacks) override;
     virtual AsioStatus disposeBuffers() override;
     virtual AsioStatus controlPanel() override;
     virtual AsioStatus future(long selector, void *opt) override;

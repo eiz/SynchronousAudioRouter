@@ -30,7 +30,7 @@ SarAsioWrapper::SarAsioWrapper()
     _config = DriverConfig::fromFile(ConfigurationPath("default.json"));
 }
 
-bool SarAsioWrapper::init(void *sysHandle)
+AsioBool SarAsioWrapper::init(void *sysHandle)
 {
     OutputDebugString(L"SarAsioWrapper::init");
 
@@ -41,7 +41,7 @@ bool SarAsioWrapper::init(void *sysHandle)
     }
 
     initVirtualChannels();
-    return true;
+    return AsioBool::True;
 }
 
 void SarAsioWrapper::getDriverName(char name[32])
@@ -152,7 +152,7 @@ AsioStatus SarAsioWrapper::setSampleRate(double sampleRate)
     return _innerDriver->setSampleRate(sampleRate);
 }
 
-AsioStatus SarAsioWrapper::getClockSources(ClockSource *clocks, long *count)
+AsioStatus SarAsioWrapper::getClockSources(AsioClockSource *clocks, long *count)
 {
     OutputDebugString(L"SarAsioWrapper::getClockSources");
 
@@ -185,7 +185,7 @@ AsioStatus SarAsioWrapper::getSamplePosition(int64_t *pos, int64_t *timestamp)
     return _innerDriver->getSamplePosition(pos, timestamp);
 }
 
-AsioStatus SarAsioWrapper::getChannelInfo(ChannelInfo *info)
+AsioStatus SarAsioWrapper::getChannelInfo(AsioChannelInfo *info)
 {
     OutputDebugString(L"SarAsioWrapper::getChannelInfo");
 
@@ -200,19 +200,21 @@ AsioStatus SarAsioWrapper::getChannelInfo(ChannelInfo *info)
         return status;
     }
 
-    auto innerCount = info->isInput ? inputChannels : outputChannels;
+    auto innerCount = info->isInput == AsioBool::True ?
+        inputChannels : outputChannels;
 
     if (info->index < innerCount) {
         return _innerDriver->getChannelInfo(info);
     }
 
-    auto& channels = info->isInput ? _virtualInputs : _virtualOutputs;
+    auto& channels = info->isInput == AsioBool::True ?
+        _virtualInputs : _virtualOutputs;
     auto index = info->index - innerCount;
 
     if (index < channels.size()) {
         info->group = 0;
         info->sampleType = 1; // TODO: proper sample types
-        info->isActive = FALSE; // TODO
+        info->isActive = AsioBool::False; // TODO
         strcpy_s(info->name, channels[index].name.c_str());
         return AsioStatus::OK;
     }
@@ -221,8 +223,8 @@ AsioStatus SarAsioWrapper::getChannelInfo(ChannelInfo *info)
 }
 
 AsioStatus SarAsioWrapper::createBuffers(
-    BufferInfo *infos, long channelCount, long bufferSize,
-    Callbacks *callbacks)
+    AsioBufferInfo *infos, long channelCount, long bufferSize,
+    AsioCallbacks *callbacks)
 {
     OutputDebugString(L"SarAsioWrapper::createBuffers");
 
@@ -290,7 +292,7 @@ bool SarAsioWrapper::initInnerDriver()
                 return false;
             }
 
-            if (!_innerDriver->init(_hwnd)) {
+            if (_innerDriver->init(_hwnd) != AsioBool::True) {
                 return false;
             }
 
