@@ -76,6 +76,7 @@ private:
         EndpointConfig *endpoint;
         int index;
         std::string name;
+        void *buffers[2];
     };
 
     bool initInnerDriver();
@@ -87,7 +88,6 @@ private:
     CComPtr<IASIO> _innerDriver;
     std::vector<VirtualChannel> _virtualInputs;
     std::vector<VirtualChannel> _virtualOutputs;
-    void *_asioFrameBuffer;
 };
 
 OBJECT_ENTRY_AUTO(CLSID_SarAsioWrapper, SarAsioWrapper)

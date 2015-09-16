@@ -65,13 +65,25 @@ void SarAsioWrapper::getErrorMessage(char str[124])
 AsioStatus SarAsioWrapper::start()
 {
     OutputDebugString(L"SarAsioWrapper::start");
-    return AsioStatus::OK;
+
+    if (!_innerDriver) {
+        return AsioStatus::NotPresent;
+    }
+
+    _sar->start();
+    return _innerDriver->start();
 }
 
 AsioStatus SarAsioWrapper::stop()
 {
     OutputDebugString(L"SarAsioWrapper::stop");
-    return AsioStatus::OK;
+
+    if (!_innerDriver) {
+        return AsioStatus::NotPresent;
+    }
+
+    _sar->stop();
+    return _innerDriver->stop();
 }
 
 AsioStatus SarAsioWrapper::getChannels(long *inputCount, long *outputCount)
@@ -195,6 +207,23 @@ AsioStatus SarAsioWrapper::getChannelInfo(AsioChannelInfo *info)
 
     long inputChannels = 0, outputChannels = 0;
     auto status = _innerDriver->getChannels(&inputChannels, &outputChannels);
+    AsioChannelInfo query;
+
+    if (status != AsioStatus::OK) {
+        return status;
+    }
+
+    // TODO: for now, we require at least one physical channel of the same kind
+    // as the virtual to exist, so we can mimic the sample type of the
+    // underlying hardware.
+    if ((info->isInput == AsioBool::True && inputChannels == 0) ||
+        (info->isInput == AsioBool::False && outputChannels == 0)) {
+        return AsioStatus::NotPresent;
+    }
+
+    query.index = 0;
+    query.isInput = info->isInput;
+    status = _innerDriver->getChannelInfo(&query);
 
     if (status != AsioStatus::OK) {
         return status;
@@ -213,7 +242,7 @@ AsioStatus SarAsioWrapper::getChannelInfo(AsioChannelInfo *info)
 
     if (index < channels.size()) {
         info->group = 0;
-        info->sampleType = 1; // TODO: proper sample types
+        info->sampleType = query.sampleType; // TODO: proper sample types
         info->isActive = AsioBool::False; // TODO
         strcpy_s(info->name, channels[index].name.c_str());
         return AsioStatus::OK;
@@ -226,14 +255,74 @@ AsioStatus SarAsioWrapper::createBuffers(
     AsioBufferInfo *infos, long channelCount, long bufferSize,
     AsioCallbacks *callbacks)
 {
-    OutputDebugString(L"SarAsioWrapper::createBuffers");
+    std::ostringstream os;
+
+    os << "SarAsioWrapper::createBuffers(infos, " << channelCount
+       << ", " << bufferSize << ", callbacks)";
+    OutputDebugStringA(os.str().c_str());
+
+    std::vector<AsioBufferInfo> physicalChannelBuffers;
+    std::vector<int> physicalChannelIndices;
+    std::vector<int> virtualChannelIndices;
+    long physicalInputCount = 0, physicalOutputCount = 0;
+    AsioStatus status;
 
     if (!_innerDriver) {
         return AsioStatus::NotPresent;
     }
 
-    return _innerDriver->createBuffers(
-        infos, channelCount, bufferSize, callbacks);
+    status = _innerDriver->getChannels(
+        &physicalInputCount, &physicalOutputCount);
+
+    if (status != AsioStatus::OK) {
+        OutputDebugStringA("getChannels nope");
+        return status;
+    }
+
+    for (long i = 0; i < channelCount; ++i) {
+        auto count = infos[i].isInput == AsioBool::True ?
+            physicalInputCount : physicalOutputCount;
+        auto& channels = infos[i].isInput == AsioBool::True ?
+            _virtualInputs : _virtualOutputs;
+
+        if (infos[i].index >= count) {
+            if (infos[i].index >= count + channels.size()) {
+                OutputDebugStringA("out of range nope");
+                return AsioStatus::NotPresent;
+            }
+
+            virtualChannelIndices.emplace_back(i);
+        } else {
+            physicalChannelBuffers.emplace_back(infos[i]);
+            physicalChannelIndices.emplace_back(i);
+        }
+    }
+
+    status = _innerDriver->createBuffers(
+        physicalChannelBuffers.data(), (long)physicalChannelBuffers.size(),
+        bufferSize, callbacks);
+
+    if (status != AsioStatus::OK) {
+        OutputDebugStringA("inner driver nope");
+        return status;
+    }
+
+    for (long i = 0; i < physicalChannelBuffers.size(); ++i) {
+        infos[physicalChannelIndices[i]] = physicalChannelBuffers[i];
+    }
+
+    for (auto i : virtualChannelIndices) {
+        auto count = infos[i].isInput == AsioBool::True ?
+            physicalInputCount : physicalOutputCount;
+        auto& channels = infos[i].isInput == AsioBool::True ?
+            _virtualInputs : _virtualOutputs;
+        auto& channel = channels[infos[i].index - count];
+
+        channel.buffers[0] = infos[i].buffers[0] = calloc(bufferSize, 4);
+        channel.buffers[1] = infos[i].buffers[1] = calloc(bufferSize, 4);
+    }
+
+    return AsioStatus::OK;
 }
 
 AsioStatus SarAsioWrapper::disposeBuffers()
