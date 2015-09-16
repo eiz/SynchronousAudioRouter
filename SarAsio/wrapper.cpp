@@ -275,7 +275,6 @@ AsioStatus SarAsioWrapper::createBuffers(
         &physicalInputCount, &physicalOutputCount);
 
     if (status != AsioStatus::OK) {
-        OutputDebugStringA("getChannels nope");
         return status;
     }
 
@@ -287,7 +286,6 @@ AsioStatus SarAsioWrapper::createBuffers(
 
         if (infos[i].index >= count) {
             if (infos[i].index >= count + channels.size()) {
-                OutputDebugStringA("out of range nope");
                 return AsioStatus::NotPresent;
             }
 
@@ -303,7 +301,6 @@ AsioStatus SarAsioWrapper::createBuffers(
         bufferSize, callbacks);
 
     if (status != AsioStatus::OK) {
-        OutputDebugStringA("inner driver nope");
         return status;
     }
 
