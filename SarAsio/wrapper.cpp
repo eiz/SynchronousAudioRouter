@@ -244,8 +244,8 @@ AsioStatus SarAsioWrapper::getChannelInfo(AsioChannelInfo *info)
 
     if (index < channels.size()) {
         info->group = 0;
-        info->sampleType = query.sampleType; // TODO: proper sample types
-        info->isActive = AsioBool::False; // TODO
+        info->sampleType = query.sampleType;
+        info->isActive = AsioBool::False; // TODO: when is this true?
         strcpy_s(info->name, channels[index].name.c_str());
         return AsioStatus::OK;
     }
@@ -319,6 +319,7 @@ AsioStatus SarAsioWrapper::createBuffers(
             _virtualInputs : _virtualOutputs;
         auto& channel = channels[infos[i].index - count];
 
+        // TODO: size buffers based on sample type
         channel.buffers[0] = infos[i].buffers[0] = calloc(bufferSize, 4);
         channel.buffers[1] = infos[i].buffers[1] = calloc(bufferSize, 4);
     }
@@ -344,6 +345,7 @@ AsioStatus SarAsioWrapper::disposeBuffers()
         return AsioStatus::NotPresent;
     }
 
+    InterlockedExchangePointer((PVOID *)&gActiveWrapper, nullptr);
     return _innerDriver->disposeBuffers();
 }
 
@@ -428,7 +430,9 @@ void SarAsioWrapper::onTick(long bufferIndex, AsioBool directProcess)
 {
     std::ostringstream os;
 
-    os << "onTick " << (void *)this;
+    os << "onTick " << (void *)this <<
+        (directProcess == AsioBool::True ?
+         " directProcess" : " no directProcess");
     OutputDebugStringA(os.str().c_str());
 }
 
