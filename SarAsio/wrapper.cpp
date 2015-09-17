@@ -24,6 +24,8 @@
 
 using namespace Sar;
 
+SarAsioWrapper *gActiveWrapper;
+
 SarAsioWrapper::SarAsioWrapper()
 {
     OutputDebugString(L"SarAsioWrapper::SarAsioWrapper");
@@ -296,6 +298,8 @@ AsioStatus SarAsioWrapper::createBuffers(
         }
     }
 
+    _userTick = callbacks->tick;
+    callbacks->tick = &SarAsioWrapper::onTickStub;
     status = _innerDriver->createBuffers(
         physicalChannelBuffers.data(), (long)physicalChannelBuffers.size(),
         bufferSize, callbacks);
@@ -317,6 +321,16 @@ AsioStatus SarAsioWrapper::createBuffers(
 
         channel.buffers[0] = infos[i].buffers[0] = calloc(bufferSize, 4);
         channel.buffers[1] = infos[i].buffers[1] = calloc(bufferSize, 4);
+    }
+
+    InterlockedCompareExchangePointer((PVOID *)&gActiveWrapper, this, nullptr);
+
+    // We need a thiscall thunk to support multiple active instances, and
+    // there doesn't seem to be any reasonable use case for that, so for now
+    // just use a global reference to our wrapper.
+    if (gActiveWrapper != this) {
+        disposeBuffers();
+        return AsioStatus::HardwareMalfunction; // TODO: error code?
     }
 
     return AsioStatus::OK;
@@ -407,5 +421,22 @@ void SarAsioWrapper::initVirtualChannels()
                 _virtualInputs.emplace_back(chan);
             }
         }
+    }
+}
+
+void SarAsioWrapper::onTick(long bufferIndex, AsioBool directProcess)
+{
+    std::ostringstream os;
+
+    os << "onTick " << (void *)this;
+    OutputDebugStringA(os.str().c_str());
+}
+
+void SarAsioWrapper::onTickStub(long bufferIndex, AsioBool directProcess)
+{
+    auto wrapper = gActiveWrapper;
+
+    if (wrapper) {
+        wrapper->onTick(bufferIndex, directProcess);
     }
 }

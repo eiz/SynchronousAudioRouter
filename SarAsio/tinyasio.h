@@ -85,9 +85,11 @@ struct AsioTime
     AsioTimeCode timeCode;
 };
 
+typedef void AsioTickCallback(long bufferIndex, AsioBool directProcess);
+
 struct AsioCallbacks
 {
-    void (*tick)(long bufferIndex, AsioBool directProcess);
+    AsioTickCallback *tick;
     void (*sampleRateDidChange)(double sampleRate);
     long (*asioMessage)(long selector, long value, void *message, double *opt);
     AsioTime *(*bufferSwitchTimeInfo)(

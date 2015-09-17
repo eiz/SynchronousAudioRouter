@@ -73,6 +73,13 @@ struct ATL_NO_VTABLE SarAsioWrapper:
 private:
     struct VirtualChannel
     {
+        VirtualChannel()
+            : endpoint(nullptr), index(0), name("")
+        {
+            buffers[0] = nullptr;
+            buffers[1] = nullptr;
+        }
+
         EndpointConfig *endpoint;
         int index;
         std::string name;
@@ -81,6 +88,8 @@ private:
 
     bool initInnerDriver();
     void initVirtualChannels();
+    void onTick(long bufferIndex, AsioBool directProcess);
+    static void onTickStub(long bufferIndex, AsioBool directProcess);
 
     HWND _hwnd;
     DriverConfig _config;
@@ -88,6 +97,7 @@ private:
     CComPtr<IASIO> _innerDriver;
     std::vector<VirtualChannel> _virtualInputs;
     std::vector<VirtualChannel> _virtualOutputs;
+    AsioTickCallback *_userTick;
 };
 
 OBJECT_ENTRY_AUTO(CLSID_SarAsioWrapper, SarAsioWrapper)
