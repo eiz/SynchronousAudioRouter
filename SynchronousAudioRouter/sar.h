@@ -98,6 +98,7 @@ typedef struct SarCreateEndpointRequest
 typedef struct SarSetBufferLayoutRequest
 {
     DWORD bufferSize;
+    DWORD frameSize;
     DWORD sampleRate;
     DWORD sampleSize;
 } SarSetBufferLayoutRequest;
@@ -152,6 +153,7 @@ typedef struct SarFileContext
     HANDLE bufferSection;
     RTL_BITMAP bufferMap;
     DWORD bufferSize;
+    DWORD frameSize;
     DWORD sampleRate;
     DWORD sampleSize;
 } SarFileContext;

@@ -42,6 +42,8 @@ struct SarClient
 
 private:
     bool openControlDevice();
+    bool setBufferLayout();
+    bool createEndpoints();
 
     DriverConfig _driverConfig;
     BufferConfig _bufferConfig;

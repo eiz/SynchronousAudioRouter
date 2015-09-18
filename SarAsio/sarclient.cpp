@@ -43,8 +43,21 @@ void SarClient::tick(long bufferIndex)
 
 bool SarClient::start()
 {
-    return openControlDevice();
-    // TODO: create endpoints
+    if (!openControlDevice()) {
+        return false;
+    }
+
+    if (!setBufferLayout()) {
+        stop();
+        return false;
+    }
+
+    if (!createEndpoints()) {
+        stop();
+        return false;
+    }
+
+    return true;
 }
 
 void SarClient::stop()
@@ -102,6 +115,16 @@ bool SarClient::openControlDevice()
         return false;
     }
 
+    return true;
+}
+
+bool SarClient::setBufferLayout()
+{
+    return true;
+}
+
+bool SarClient::createEndpoints()
+{
     return true;
 }
 

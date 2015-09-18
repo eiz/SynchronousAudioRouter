@@ -210,7 +210,9 @@ NTSTATUS SarSetBufferLayout(
         request->sampleSize < SAR_MIN_SAMPLE_SIZE ||
         request->sampleSize > SAR_MAX_SAMPLE_SIZE ||
         request->sampleRate < SAR_MIN_SAMPLE_RATE ||
-        request->sampleRate > SAR_MAX_SAMPLE_RATE) {
+        request->sampleRate > SAR_MAX_SAMPLE_RATE ||
+        request->frameSize > request->bufferSize ||
+        request->frameSize == 0) {
         return STATUS_INVALID_PARAMETER;
     }
 
@@ -222,6 +224,7 @@ NTSTATUS SarSetBufferLayout(
     }
 
     fileContext->bufferSize = ROUND_TO_PAGES(request->bufferSize);
+    fileContext->frameSize = request->frameSize;
     fileContext->sampleSize = request->sampleSize;
     fileContext->sampleRate = request->sampleRate;
     ExReleaseFastMutex(&fileContext->mutex);

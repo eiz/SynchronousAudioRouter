@@ -41,7 +41,9 @@ NTSTATUS SarKsPinRtGetBuffer(
         return STATUS_ACCESS_DENIED;
     }
 
-    SIZE_T viewSize = ROUND_UP(prop->RequestedBufferSize, SAR_BUFFER_CELL_SIZE);
+    ULONG requestedSize =
+        ROUND_UP(prop->RequestedBufferSize, fileContext->frameSize);
+    SIZE_T viewSize = ROUND_UP(requestedSize, SAR_BUFFER_CELL_SIZE);
 
     ExAcquireFastMutex(&fileContext->mutex);
 
@@ -80,7 +82,7 @@ NTSTATUS SarKsPinRtGetBuffer(
 
     regs.isActive = TRUE;
     regs.bufferOffset = cellIndex * SAR_BUFFER_CELL_SIZE;
-    regs.bufferSize = prop->RequestedBufferSize;
+    regs.bufferSize = requestedSize;
     regs.clockRegister = 0;
     regs.positionRegister = 0;
     status = SarWriteEndpointRegisters(&regs, endpoint);
@@ -91,7 +93,7 @@ NTSTATUS SarKsPinRtGetBuffer(
         return status; // TODO: goto err_out
     }
 
-    buffer->ActualBufferSize = prop->RequestedBufferSize;
+    buffer->ActualBufferSize = requestedSize;
     buffer->BufferAddress = mappedAddress;
     buffer->CallMemoryBarrier = FALSE;
     return STATUS_SUCCESS;
