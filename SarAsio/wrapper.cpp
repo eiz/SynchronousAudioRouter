@@ -334,12 +334,12 @@ AsioStatus SarAsioWrapper::createBuffers(
         // TODO: size buffers based on sample type
         channel.buffers[0] = infos[i].buffers[0] = calloc(bufferSize, 4);
         channel.buffers[1] = infos[i].buffers[1] = calloc(bufferSize, 4);
-        _bufferConfig.buffers
-            [channel.endpointIndex][channel.channelIndex * 2] =
+        _bufferConfig
+            .buffers[channel.endpointIndex][channel.channelIndex * 2] =
                 channel.buffers[0];
-        _bufferConfig.buffers
-            [channel.endpointIndex][channel.channelIndex * 2 + 1] =
-                channel.buffers[0];
+        _bufferConfig
+            .buffers[channel.endpointIndex][channel.channelIndex * 2 + 1] =
+                channel.buffers[1];
     }
 
     InterlockedCompareExchangePointer((PVOID *)&gActiveWrapper, this, nullptr);
