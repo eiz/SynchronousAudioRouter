@@ -269,13 +269,13 @@ VOID SarUnload(PDRIVER_OBJECT driverObject)
 
 NTSTATUS SarInitializeFileContext(SarFileContext *fileContext)
 {
+    PFILE_OBJECT fileObject = fileContext->fileObject;
+
+    RtlZeroMemory(fileContext, sizeof(SarFileContext));
+    fileContext->fileObject = fileObject;
     ExInitializeFastMutex(&fileContext->mutex);
     InitializeListHead(&fileContext->endpointList);
     InitializeListHead(&fileContext->pendingEndpointList);
-    fileContext->sampleRate = 0;
-    fileContext->sampleSize = 0;
-    fileContext->bufferSize = 0;
-
     fileContext->workItem = IoAllocateWorkItem(
         fileContext->fileObject->DeviceObject);
 
