@@ -41,6 +41,8 @@ struct SarClient
     void stop();
 
 private:
+    bool openControlDevice();
+
     DriverConfig _driverConfig;
     BufferConfig _bufferConfig;
     HANDLE _device;

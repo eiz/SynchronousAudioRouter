@@ -22,7 +22,8 @@ namespace Sar {
 SarClient::SarClient(
     const DriverConfig& driverConfig,
     const BufferConfig& bufferConfig)
-    : _driverConfig(driverConfig), _bufferConfig(bufferConfig)
+    : _driverConfig(driverConfig), _bufferConfig(bufferConfig),
+      _device(INVALID_HANDLE_VALUE)
 {
 }
 
@@ -42,11 +43,66 @@ void SarClient::tick(long bufferIndex)
 
 bool SarClient::start()
 {
-    return true;
+    return openControlDevice();
+    // TODO: create endpoints
 }
 
 void SarClient::stop()
 {
+    if (_device != INVALID_HANDLE_VALUE) {
+        CloseHandle(_device);
+        _device = INVALID_HANDLE_VALUE;
+    }
+}
+
+bool SarClient::openControlDevice()
+{
+    HDEVINFO devinfo;
+    SP_DEVICE_INTERFACE_DATA interfaceData;
+    PSP_DEVICE_INTERFACE_DETAIL_DATA interfaceDetail;
+    DWORD requiredSize;
+
+    interfaceData.cbSize = sizeof(SP_DEVICE_INTERFACE_DATA);
+    devinfo = SetupDiGetClassDevs(
+        &GUID_DEVINTERFACE_SYNCHRONOUSAUDIOROUTER, nullptr, nullptr,
+        DIGCF_DEVICEINTERFACE | DIGCF_PRESENT);
+
+    if (devinfo == INVALID_HANDLE_VALUE) {
+        return false;
+    }
+
+    if (!SetupDiEnumDeviceInterfaces(devinfo, NULL,
+        &GUID_DEVINTERFACE_SYNCHRONOUSAUDIOROUTER, 0, &interfaceData)) {
+
+        return false;
+    }
+
+    SetLastError(0);
+    SetupDiGetDeviceInterfaceDetail(
+        devinfo, &interfaceData, nullptr, 0, &requiredSize, nullptr);
+
+    if (GetLastError() != ERROR_INSUFFICIENT_BUFFER) {
+        return false;
+    }
+
+    interfaceDetail = (PSP_DEVICE_INTERFACE_DETAIL_DATA)malloc(requiredSize);
+    interfaceDetail->cbSize = sizeof(SP_DEVICE_INTERFACE_DETAIL_DATA);
+
+    if (!SetupDiGetDeviceInterfaceDetail(
+        devinfo, &interfaceData, interfaceDetail,
+        requiredSize, nullptr, nullptr)) {
+
+        return false;
+    }
+
+    _device = CreateFile(interfaceDetail->DevicePath,
+        GENERIC_ALL, 0, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+
+    if (_device == INVALID_HANDLE_VALUE) {
+        return false;
+    }
+
+    return true;
 }
 
 } // namespace Sar

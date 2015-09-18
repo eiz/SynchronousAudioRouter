@@ -25,6 +25,7 @@
 #include <windowsx.h>
 #include <ShlObj.h>
 #include <Shlwapi.h>
+#include <SetupAPI.h>
 
 #define _ATL_CSTRING_EXPLICIT_CONSTRUCTORS
 
