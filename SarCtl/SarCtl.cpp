@@ -51,7 +51,7 @@ BOOL setBufferLayout(
     SarSetBufferLayoutResponse response = {};
 
     request.bufferSize = bufferSize;
-    request.frameSize = 1;
+    request.frameSize = 512;
     request.sampleRate = sampleRate;
     request.sampleSize = sampleSize;
 

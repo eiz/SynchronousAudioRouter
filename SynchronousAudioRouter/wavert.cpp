@@ -41,8 +41,9 @@ NTSTATUS SarKsPinRtGetBuffer(
         return STATUS_ACCESS_DENIED;
     }
 
-    ULONG requestedSize =
-        ROUND_UP(prop->RequestedBufferSize, fileContext->frameSize);
+    ULONG requestedSize = ROUND_UP(
+        prop->RequestedBufferSize,
+        fileContext->frameSize * endpoint->channelCount);
     SIZE_T viewSize = ROUND_UP(requestedSize, SAR_BUFFER_CELL_SIZE);
 
     ExAcquireFastMutex(&fileContext->mutex);
