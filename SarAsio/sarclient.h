@@ -28,7 +28,7 @@ struct BufferConfig
     int sampleRate;
     int sampleSize;
     int bufferSize;
-    std::vector<std::vector<void *>> asioFrames;
+    std::vector<std::vector<void *>> buffers;
 };
 
 struct SarClient
@@ -36,8 +36,8 @@ struct SarClient
     SarClient(
         const DriverConfig& driverConfig,
         const BufferConfig& bufferConfig);
-    void tick(bool high);
-    void start();
+    void tick(long bufferIndex);
+    bool start();
     void stop();
 
 private:

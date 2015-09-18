@@ -26,7 +26,7 @@ SarClient::SarClient(
 {
 }
 
-void SarClient::tick(bool high)
+void SarClient::tick(long bufferIndex)
 {
     // for each endpoint
     // read isActive, generation and buffer offset/size
@@ -40,8 +40,9 @@ void SarClient::tick(bool high)
     // else increment position register
 }
 
-void SarClient::start()
+bool SarClient::start()
 {
+    return true;
 }
 
 void SarClient::stop()

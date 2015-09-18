@@ -74,14 +74,14 @@ private:
     struct VirtualChannel
     {
         VirtualChannel()
-            : endpoint(nullptr), index(0), name("")
+            : endpointIndex(-1), channelIndex(-1), name("")
         {
             buffers[0] = nullptr;
             buffers[1] = nullptr;
         }
 
-        EndpointConfig *endpoint;
-        int index;
+        int endpointIndex;
+        int channelIndex;
         std::string name;
         void *buffers[2];
     };
@@ -93,6 +93,7 @@ private:
 
     HWND _hwnd;
     DriverConfig _config;
+    BufferConfig _bufferConfig;
     std::unique_ptr<SarClient> _sar;
     CComPtr<IASIO> _innerDriver;
     std::vector<VirtualChannel> _virtualInputs;

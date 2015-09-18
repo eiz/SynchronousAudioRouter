@@ -72,7 +72,12 @@ AsioStatus SarAsioWrapper::start()
         return AsioStatus::NotPresent;
     }
 
-    _sar->start();
+    _sar = std::make_unique<SarClient>(_config, _bufferConfig);
+
+    if (!_sar->start()) {
+        return AsioStatus::HardwareMalfunction;
+    }
+
     return _innerDriver->start();
 }
 
@@ -312,6 +317,13 @@ AsioStatus SarAsioWrapper::createBuffers(
         infos[physicalChannelIndices[i]] = physicalChannelBuffers[i];
     }
 
+    _bufferConfig.buffers.clear();
+    _bufferConfig.buffers.resize(_config.endpoints.size());
+
+    for (int i = 0; i < _config.endpoints.size(); ++i) {
+        _bufferConfig.buffers[i].resize(_config.endpoints[i].channelCount * 2);
+    }
+
     for (auto i : virtualChannelIndices) {
         auto count = infos[i].isInput == AsioBool::True ?
             physicalInputCount : physicalOutputCount;
@@ -322,6 +334,12 @@ AsioStatus SarAsioWrapper::createBuffers(
         // TODO: size buffers based on sample type
         channel.buffers[0] = infos[i].buffers[0] = calloc(bufferSize, 4);
         channel.buffers[1] = infos[i].buffers[1] = calloc(bufferSize, 4);
+        _bufferConfig.buffers
+            [channel.endpointIndex][channel.channelIndex * 2] =
+                channel.buffers[0];
+        _bufferConfig.buffers
+            [channel.endpointIndex][channel.channelIndex * 2 + 1] =
+                channel.buffers[0];
     }
 
     InterlockedCompareExchangePointer((PVOID *)&gActiveWrapper, this, nullptr);
@@ -407,14 +425,19 @@ bool SarAsioWrapper::initInnerDriver()
 
 void SarAsioWrapper::initVirtualChannels()
 {
+    _virtualInputs.clear();
+    _virtualOutputs.clear();
+
+    int endpointIndex = 0;
+
     for (auto& endpoint : _config.endpoints) {
         for (int i = 0; i < endpoint.channelCount; ++i) {
             VirtualChannel chan;
             std::ostringstream os;
 
             os << endpoint.description << " " << (i + 1);
-            chan.endpoint = &endpoint;
-            chan.index = i;
+            chan.endpointIndex = endpointIndex;
+            chan.channelIndex = i;
             chan.name = os.str();
 
             if (endpoint.type == EndpointType::Recording) {
@@ -423,6 +446,8 @@ void SarAsioWrapper::initVirtualChannels()
                 _virtualInputs.emplace_back(chan);
             }
         }
+
+        endpointIndex++;
     }
 }
 
@@ -430,10 +455,10 @@ void SarAsioWrapper::onTick(long bufferIndex, AsioBool directProcess)
 {
     std::ostringstream os;
 
-    os << "onTick " << (void *)this <<
-        (directProcess == AsioBool::True ?
-         " directProcess" : " no directProcess");
+    os << "onTick " << bufferIndex;
     OutputDebugStringA(os.str().c_str());
+    _sar->tick(bufferIndex);
+    _userTick(bufferIndex, directProcess);
 }
 
 void SarAsioWrapper::onTickStub(long bufferIndex, AsioBool directProcess)
