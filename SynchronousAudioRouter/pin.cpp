@@ -292,7 +292,7 @@ NTSTATUS SarKsPinGetGlobalInstancesCount(
     SarEndpoint *endpoint = SarGetEndpointFromIrp(irp);
 
     if (pinRequest->PinId == 0) {
-        instances->CurrentCount = endpoint->activePin ? 1 : 0;
+        instances->CurrentCount = (endpoint && endpoint->activePin) ? 1 : 0;
         instances->PossibleCount = 1;
     } else {
         instances->CurrentCount = 0;
