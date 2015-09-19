@@ -16,6 +16,7 @@
 
 #include "stdafx.h"
 #include "sarclient.h"
+#include "utility.h"
 
 namespace Sar {
 
@@ -133,7 +134,6 @@ bool SarClient::setBufferLayout()
         (LPVOID)&request, sizeof(request), (LPVOID)&response, sizeof(response),
         nullptr, nullptr)) {
 
-        OutputDebugStringA("Nope =(");
         return false;
     }
 
@@ -141,12 +141,34 @@ bool SarClient::setBufferLayout()
     _bufferSize = response.actualSize;
     _registers = (SarEndpointRegisters *)
         ((char *)response.virtualAddress + response.registerBase);
-
     return true;
 }
 
 bool SarClient::createEndpoints()
 {
+    int i = 0;
+
+    for (auto& endpoint : _driverConfig.endpoints) {
+        SarCreateEndpointRequest request = {};
+
+        request.type = endpoint.type == EndpointType::Playback ?
+            SAR_ENDPOINT_TYPE_PLAYBACK : SAR_ENDPOINT_TYPE_RECORDING;
+        request.channelCount = endpoint.channelCount;
+        request.index = i++;
+        wcscpy_s(request.name, UTF8ToWide(endpoint.description).c_str());
+
+        if (!DeviceIoControl(_device, SAR_REQUEST_CREATE_ENDPOINT,
+            (LPVOID)&request, sizeof(request), nullptr, 0, nullptr, nullptr)) {
+
+            std::ostringstream os;
+
+            os << "Endpoint creation for " << endpoint.description
+               << " failed.";
+            OutputDebugStringA(os.str().c_str());
+            return false;
+        }
+    }
+
     return true;
 }
 

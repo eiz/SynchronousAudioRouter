@@ -195,8 +195,6 @@ AsioStatus SarAsioWrapper::setClockSource(long index)
 
 AsioStatus SarAsioWrapper::getSamplePosition(int64_t *pos, int64_t *timestamp)
 {
-    OutputDebugString(L"SarAsioWrapper::getSamplePosition");
-
     if (!_innerDriver) {
         return AsioStatus::NotPresent;
     }
@@ -467,10 +465,6 @@ void SarAsioWrapper::initVirtualChannels()
 
 void SarAsioWrapper::onTick(long bufferIndex, AsioBool directProcess)
 {
-    std::ostringstream os;
-
-    os << "onTick " << bufferIndex;
-    OutputDebugStringA(os.str().c_str());
     _sar->tick(bufferIndex);
     _userTick(bufferIndex, directProcess);
 }
