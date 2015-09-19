@@ -30,8 +30,10 @@ SarClient::SarClient(
 
 void SarClient::tick(long bufferIndex)
 {
+    ATLASSERT(bufferIndex == 0 || bufferIndex == 1);
+
     // for each endpoint
-    // read isActive, generation and buffer offset/size
+    // read isActive, generation and buffer offset/size/position
     //   if offset/size invalid, skip endpoint (fill asio buffers with 0)
     // if playback device:
     //   consume frameSampleCount * channelCount samples, demux to asio frames
@@ -40,6 +42,60 @@ void SarClient::tick(long bufferIndex)
     // read isActive, generation
     //   if conflicted, skip endpoint and fill asio frames with 0
     // else increment position register
+    for (int i = 0; i < _driverConfig.endpoints.size(); ++i) {
+        auto& endpoint = _driverConfig.endpoints[i];
+        auto& asioBuffers = _bufferConfig.asioBuffers[i];
+        auto asioBufferSize =
+            _bufferConfig.frameSampleCount * _bufferConfig.sampleSize;
+        auto isActive = _registers[i].isActive;
+        auto generation = _registers[i].generation;
+        auto endpointBufferOffset = _registers[i].bufferOffset;
+        auto endpointBufferSize = _registers[i].bufferSize;
+        auto positionRegister = _registers[i].positionRegister;
+        auto position = positionRegister + endpointBufferOffset;
+        void *endpointData = ((char *)_sharedBuffer) + position;
+        auto ntargets = (int)(asioBuffers.size() / 2);
+        void **targetBuffers = (void **)alloca(sizeof(void *) * ntargets);
+
+        if (!isActive) {
+            continue;
+        }
+
+        if (endpointBufferOffset + endpointBufferSize > _sharedBufferSize ||
+            position + asioBufferSize > _sharedBufferSize ||
+            positionRegister + asioBufferSize > endpointBufferSize) {
+            continue;
+        }
+
+        for (int bi = bufferIndex, ti = 0; bi < asioBuffers.size(); bi += 2) {
+            targetBuffers[ti++] = asioBuffers[bi];
+        }
+
+        if (endpoint.type == EndpointType::Playback) {
+            demux(
+                endpointData, targetBuffers, ntargets,
+                asioBufferSize, _bufferConfig.sampleSize);
+        } else {
+            mux(
+                endpointData, targetBuffers, ntargets,
+                asioBufferSize, _bufferConfig.sampleSize);
+        }
+
+        auto lateIsActive = _registers[i].isActive;
+        auto lateGeneration = _registers[i].generation;
+
+        if (!lateIsActive || generation != lateGeneration) {
+            for (int ti = 0; ti < ntargets; ++ti) {
+                ZeroMemory(targetBuffers[ti], asioBufferSize);
+            }
+        } else {
+            // TODO: this can still race if the endpoint is stopped and started
+            // while we're updating the position register. Maybe use DCAS on the
+            // generation+position?
+            _registers[i].positionRegister =
+                (positionRegister + asioBufferSize) % endpointBufferSize;
+        }
+    }
 }
 
 bool SarClient::start()
@@ -138,7 +194,7 @@ bool SarClient::setBufferLayout()
     }
 
     _sharedBuffer = response.virtualAddress;
-    _bufferSize = response.actualSize;
+    _sharedBufferSize = response.actualSize;
     _registers = (SarEndpointRegisters *)
         ((char *)response.virtualAddress + response.registerBase);
     return true;
@@ -170,6 +226,27 @@ bool SarClient::createEndpoints()
     }
 
     return true;
+}
+
+void SarClient::demux(
+    void *muxBuffer, void **targetBuffers, int ntargets,
+    size_t targetSize, int sampleSize)
+{
+    // TODO: gotta go fast
+    for (int i = 0; i < ntargets; ++i) {
+        auto buf = ((char *)muxBuffer) + sampleSize * i;
+
+        for (int j = 0; j < targetSize; j += sampleSize) {
+            memcpy((char *)(targetBuffers[i]) + j, buf, sampleSize);
+            buf += sampleSize * ntargets;
+        }
+    }
+}
+
+void SarClient::mux(
+    void *muxBuffer, void **targetBuffers, int ntargets,
+    size_t targetSize, int sampleSize)
+{
 }
 
 } // namespace Sar

@@ -43,13 +43,19 @@ private:
     bool openControlDevice();
     bool setBufferLayout();
     bool createEndpoints();
+    void demux(
+        void *muxBuffer, void **targetBuffers, int ntargets,
+        size_t targetSize, int sampleSize);
+    void mux(
+        void *muxBuffer, void **targetBuffers, int ntargets,
+        size_t targetSize, int sampleSize);
 
     DriverConfig _driverConfig;
     BufferConfig _bufferConfig;
     HANDLE _device;
     void *_sharedBuffer;
-    DWORD _bufferSize;
-    SarEndpointRegisters *_registers;
+    DWORD _sharedBufferSize;
+    volatile SarEndpointRegisters *_registers;
 };
 
 } // namespace Sar
