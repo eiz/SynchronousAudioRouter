@@ -27,8 +27,7 @@ struct BufferConfig
     int frameSampleCount;
     int sampleRate;
     int sampleSize;
-    int bufferSize;
-    std::vector<std::vector<void *>> buffers;
+    std::vector<std::vector<void *>> asioBuffers;
 };
 
 struct SarClient
@@ -48,6 +47,9 @@ private:
     DriverConfig _driverConfig;
     BufferConfig _bufferConfig;
     HANDLE _device;
+    void *_sharedBuffer;
+    DWORD _bufferSize;
+    SarEndpointRegisters *_registers;
 };
 
 } // namespace Sar

@@ -272,6 +272,7 @@ AsioStatus SarAsioWrapper::createBuffers(
     std::vector<int> physicalChannelIndices;
     std::vector<int> virtualChannelIndices;
     long physicalInputCount = 0, physicalOutputCount = 0;
+    double sampleRate = 0;
     AsioStatus status;
 
     if (!_innerDriver) {
@@ -280,6 +281,12 @@ AsioStatus SarAsioWrapper::createBuffers(
 
     status = _innerDriver->getChannels(
         &physicalInputCount, &physicalOutputCount);
+
+    if (status != AsioStatus::OK) {
+        return status;
+    }
+
+    status = _innerDriver->getSampleRate(&sampleRate);
 
     if (status != AsioStatus::OK) {
         return status;
@@ -317,11 +324,16 @@ AsioStatus SarAsioWrapper::createBuffers(
         infos[physicalChannelIndices[i]] = physicalChannelBuffers[i];
     }
 
-    _bufferConfig.buffers.clear();
-    _bufferConfig.buffers.resize(_config.endpoints.size());
+    _bufferConfig.frameSampleCount = bufferSize;
+    _bufferConfig.sampleSize = 4; // TODO: handle sample types properly.
+    // TODO: asio can report non-integer sample rates. do we need to care?
+    _bufferConfig.sampleRate = (int)sampleRate;
+    _bufferConfig.asioBuffers.clear();
+    _bufferConfig.asioBuffers.resize(_config.endpoints.size());
 
     for (int i = 0; i < _config.endpoints.size(); ++i) {
-        _bufferConfig.buffers[i].resize(_config.endpoints[i].channelCount * 2);
+        _bufferConfig.asioBuffers[i].resize(
+            _config.endpoints[i].channelCount * 2);
     }
 
     for (auto i : virtualChannelIndices) {
@@ -332,14 +344,16 @@ AsioStatus SarAsioWrapper::createBuffers(
         auto& channel = channels[infos[i].index - count];
 
         // TODO: size buffers based on sample type
-        channel.buffers[0] = infos[i].buffers[0] = calloc(bufferSize, 4);
-        channel.buffers[1] = infos[i].buffers[1] = calloc(bufferSize, 4);
+        channel.asioBuffers[0] =
+            infos[i].asioBuffers[0] = calloc(bufferSize, 4);
+        channel.asioBuffers[1] =
+            infos[i].asioBuffers[1] = calloc(bufferSize, 4);
         _bufferConfig
-            .buffers[channel.endpointIndex][channel.channelIndex * 2] =
-                channel.buffers[0];
+            .asioBuffers[channel.endpointIndex][channel.channelIndex * 2] =
+                channel.asioBuffers[0];
         _bufferConfig
-            .buffers[channel.endpointIndex][channel.channelIndex * 2 + 1] =
-                channel.buffers[1];
+            .asioBuffers[channel.endpointIndex][channel.channelIndex * 2 + 1] =
+                channel.asioBuffers[1];
     }
 
     InterlockedCompareExchangePointer((PVOID *)&gActiveWrapper, this, nullptr);

@@ -120,6 +120,28 @@ bool SarClient::openControlDevice()
 
 bool SarClient::setBufferLayout()
 {
+    SarSetBufferLayoutRequest request = {};
+    SarSetBufferLayoutResponse response = {};
+
+    request.bufferSize = 1024 * 1024; // TODO: size based on endpoint config
+    request.frameSize =
+        _bufferConfig.frameSampleCount * _bufferConfig.sampleSize;
+    request.sampleRate = _bufferConfig.sampleRate;
+    request.sampleSize = _bufferConfig.sampleSize;
+
+    if (!DeviceIoControl(_device, SAR_REQUEST_SET_BUFFER_LAYOUT,
+        (LPVOID)&request, sizeof(request), (LPVOID)&response, sizeof(response),
+        nullptr, nullptr)) {
+
+        OutputDebugStringA("Nope =(");
+        return false;
+    }
+
+    _sharedBuffer = response.virtualAddress;
+    _bufferSize = response.actualSize;
+    _registers = (SarEndpointRegisters *)
+        ((char *)response.virtualAddress + response.registerBase);
+
     return true;
 }
 

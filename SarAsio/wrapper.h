@@ -76,14 +76,14 @@ private:
         VirtualChannel()
             : endpointIndex(-1), channelIndex(-1), name("")
         {
-            buffers[0] = nullptr;
-            buffers[1] = nullptr;
+            asioBuffers[0] = nullptr;
+            asioBuffers[1] = nullptr;
         }
 
         int endpointIndex;
         int channelIndex;
         std::string name;
-        void *buffers[2];
+        void *asioBuffers[2];
     };
 
     bool initInnerDriver();

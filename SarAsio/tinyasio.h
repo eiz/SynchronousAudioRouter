@@ -57,7 +57,7 @@ struct AsioBufferInfo
 {
     AsioBool isInput;
     long index;
-    void *buffers[2];
+    void *asioBuffers[2];
 };
 
 struct AsioTimeCode
