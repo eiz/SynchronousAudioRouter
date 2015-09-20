@@ -57,7 +57,15 @@ void SarClient::tick(long bufferIndex)
         auto ntargets = (int)(asioBuffers.size() / 2);
         void **targetBuffers = (void **)alloca(sizeof(void *) * ntargets);
 
+        for (int bi = bufferIndex, ti = 0; bi < asioBuffers.size(); bi += 2) {
+            targetBuffers[ti++] = asioBuffers[bi];
+        }
+
         if (!isActive) {
+            for (int ti = 0; ti < ntargets; ++ti) {
+                ZeroMemory(targetBuffers[ti], asioBufferSize);
+            }
+
             continue;
         }
 
@@ -65,10 +73,6 @@ void SarClient::tick(long bufferIndex)
             position + asioBufferSize > _sharedBufferSize ||
             positionRegister + asioBufferSize > endpointBufferSize) {
             continue;
-        }
-
-        for (int bi = bufferIndex, ti = 0; bi < asioBuffers.size(); bi += 2) {
-            targetBuffers[ti++] = asioBuffers[bi];
         }
 
         if (endpoint.type == EndpointType::Playback) {
@@ -93,7 +97,8 @@ void SarClient::tick(long bufferIndex)
             // while we're updating the position register. Maybe use DCAS on the
             // generation+position?
             _registers[i].positionRegister =
-                (positionRegister + asioBufferSize) % endpointBufferSize;
+                (positionRegister + asioBufferSize * ntargets) %
+                endpointBufferSize;
         }
     }
 }
