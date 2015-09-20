@@ -79,6 +79,8 @@ NTSTATUS SarKsPinCreate(PKSPIN pin, PIRP irp)
     endpoint->activeProcess = PsGetCurrentProcess();
     endpoint->activeBufferVirtualAddress = nullptr;
     endpoint->activeRegisterFileUVA = nullptr;
+    endpoint->activeCellIndex = 0;
+    endpoint->activeViewSize = 0;
     registerFileOffset.QuadPart = endpoint->owner->bufferSize;
     status = ZwMapViewOfSection(endpoint->owner->bufferSection,
         ZwCurrentProcess(), (PVOID *)&endpoint->activeRegisterFileUVA, 0, 0,
@@ -98,7 +100,8 @@ NTSTATUS SarKsPinClose(PKSPIN pin, PIRP irp)
     SarEndpoint *endpoint = (SarEndpoint *)pin->Context;
     SarEndpointRegisters regs = {};
 
-    // TODO: what if process is recycled before we check this?
+    // TODO: what if process is recycled before we check this? need to ref the
+    // process handle to ensure it can't go away.
     if (endpoint->activeProcess == PsGetCurrentProcess()) {
         if (!NT_SUCCESS(SarIncrementEndpointGeneration(endpoint))) {
             SAR_LOG("Couldn't increment endpoint generation");
@@ -119,9 +122,19 @@ NTSTATUS SarKsPinClose(PKSPIN pin, PIRP irp)
         SAR_LOG("Pin closed in a different process than the one that created it.");
     }
 
+    if (endpoint->activeViewSize) {
+        ExAcquireFastMutex(&endpoint->owner->mutex);
+        RtlClearBits(&endpoint->owner->bufferMap,
+            endpoint->activeCellIndex,
+            (ULONG)endpoint->activeViewSize / SAR_BUFFER_CELL_SIZE);
+        ExReleaseFastMutex(&endpoint->owner->mutex);
+    }
+
     endpoint->activeProcess = nullptr;
     endpoint->activeBufferVirtualAddress = nullptr;
     endpoint->activeRegisterFileUVA = nullptr;
+    endpoint->activeCellIndex = 0;
+    endpoint->activeViewSize = 0;
     InterlockedExchangePointer((PVOID *)&endpoint->activePin, nullptr);
     return STATUS_SUCCESS;
 }

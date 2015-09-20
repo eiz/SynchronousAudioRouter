@@ -175,6 +175,8 @@ typedef struct SarEndpoint
     PEPROCESS activeProcess;
     SarEndpointRegisters *activeRegisterFileUVA;
     PVOID activeBufferVirtualAddress;
+    DWORD activeCellIndex;
+    SIZE_T activeViewSize;
     PKSFILTERFACTORY filterFactory;
     PKSFILTER_DESCRIPTOR filterDesc;
     PKSPIN_DESCRIPTOR_EX pinDesc;

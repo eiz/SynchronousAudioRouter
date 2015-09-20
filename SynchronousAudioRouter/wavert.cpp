@@ -62,6 +62,8 @@ NTSTATUS SarKsPinRtGetBuffer(
         return STATUS_INSUFFICIENT_RESOURCES;
     }
 
+    endpoint->activeCellIndex = cellIndex;
+    endpoint->activeViewSize = viewSize;
     ExReleaseFastMutex(&fileContext->mutex);
 
     PVOID mappedAddress = nullptr;
@@ -81,6 +83,7 @@ NTSTATUS SarKsPinRtGetBuffer(
 
     SarEndpointRegisters regs;
 
+    endpoint->activeBufferVirtualAddress = mappedAddress;
     regs.isActive = TRUE;
     regs.bufferOffset = cellIndex * SAR_BUFFER_CELL_SIZE;
     regs.bufferSize = requestedSize;
