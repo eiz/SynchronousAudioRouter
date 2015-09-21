@@ -470,6 +470,8 @@ NTSTATUS SarCreateEndpoint(
     }
 
     RtlZeroMemory(endpoint, sizeof(SarEndpoint));
+    ExInitializeFastMutex(&endpoint->mutex);
+    InitializeListHead(&endpoint->activeProcessList);
     endpoint->pendingIrp = irp;
     endpoint->channelCount = request->channelCount;
     endpoint->type = request->type;

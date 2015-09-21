@@ -22,6 +22,7 @@ extern "C" {
 #endif
 
 #if defined(KERNEL)
+#include <ntifs.h>
 #include <ntddk.h>
 #include <ntstrsafe.h>
 #include <windef.h>
@@ -164,19 +165,22 @@ typedef struct SarFileContext
     SarBufferMapEntryCount(fileContext) / sizeof(DWORD) + \
     ((SarBufferMapEntryCount(fileContext) % sizeof(DWORD)) != 0) ? 1 : 0)
 
+
+typedef struct SarEndpointProcessContext
+{
+    LIST_ENTRY listEntry;
+    PEPROCESS process;
+    HANDLE processHandle;
+    SarEndpointRegisters *registerFileUVA;
+    PVOID bufferUVA;
+} SarEndpointProcessContext;
+
 typedef struct SarEndpoint
 {
     LIST_ENTRY listEntry;
     PIRP pendingIrp;
     UNICODE_STRING deviceName;
     SarFileContext *owner;
-    // TODO: lock pin instance data
-    PKSPIN activePin;
-    PEPROCESS activeProcess;
-    SarEndpointRegisters *activeRegisterFileUVA;
-    PVOID activeBufferVirtualAddress;
-    DWORD activeCellIndex;
-    SIZE_T activeViewSize;
     PKSFILTERFACTORY filterFactory;
     PKSFILTER_DESCRIPTOR filterDesc;
     PKSPIN_DESCRIPTOR_EX pinDesc;
@@ -187,6 +191,12 @@ typedef struct SarEndpoint
     DWORD type;
     DWORD index;
     DWORD channelCount;
+
+    FAST_MUTEX mutex;
+    PKSPIN activePin;
+    DWORD activeCellIndex;
+    SIZE_T activeViewSize;
+    LIST_ENTRY activeProcessList;
 } SarEndpoint;
 
 typedef struct SarFreeBuffer
@@ -260,6 +270,11 @@ NTSTATUS SarKsPinRtRegisterNotificationEvent(
     PIRP irp, PKSIDENTIFIER request, PVOID data);
 NTSTATUS SarKsPinRtUnregisterNotificationEvent(
     PIRP irp, PKSIDENTIFIER request, PVOID data);
+NTSTATUS SarGetOrCreateEndpointProcessContext(
+    SarEndpoint *endpoint,
+    PEPROCESS process,
+    SarEndpointProcessContext **outContext);
+NTSTATUS SarDeleteEndpointProcessContext(SarEndpointProcessContext *context);
 
 // Init
 NTSTATUS SarInitializeFileContext(SarFileContext *fileContext);

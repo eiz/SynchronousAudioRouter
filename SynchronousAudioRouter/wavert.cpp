@@ -24,6 +24,7 @@ NTSTATUS SarKsPinRtGetBuffer(
     PKSRTAUDIO_BUFFER buffer = (PKSRTAUDIO_BUFFER)data;
     SarEndpoint *endpoint = SarGetEndpointFromIrp(irp);
     SarFileContext *fileContext = endpoint->owner;
+    SarEndpointProcessContext *processContext;
     NTSTATUS status;
 
     if (!endpoint) {
@@ -36,9 +37,11 @@ NTSTATUS SarKsPinRtGetBuffer(
         return STATUS_NOT_IMPLEMENTED;
     }
 
-    if (endpoint->activeProcess != PsGetCurrentProcess()) {
-        SAR_LOG("Process didn't create the active pin");
-        return STATUS_ACCESS_DENIED;
+    status = SarGetOrCreateEndpointProcessContext(
+        endpoint, PsGetCurrentProcess(), &processContext);
+
+    if (!NT_SUCCESS(status)) {
+        return status;
     }
 
     ULONG requestedSize = ROUND_UP(
@@ -83,7 +86,7 @@ NTSTATUS SarKsPinRtGetBuffer(
 
     SarEndpointRegisters regs;
 
-    endpoint->activeBufferVirtualAddress = mappedAddress;
+    processContext->bufferUVA = mappedAddress;
     regs.isActive = TRUE;
     regs.bufferOffset = cellIndex * SAR_BUFFER_CELL_SIZE;
     regs.bufferSize = requestedSize;
@@ -93,7 +96,7 @@ NTSTATUS SarKsPinRtGetBuffer(
 
     if (!NT_SUCCESS(status)) {
         SAR_LOG("Couldn't write endpoint registers: %08X %p %p", status,
-            endpoint->activeProcess, PsGetCurrentProcess());
+            processContext->process, PsGetCurrentProcess());
         return status; // TODO: goto err_out
     }
 
@@ -119,16 +122,24 @@ NTSTATUS SarKsPinRtGetClockRegister(
     UNREFERENCED_PARAMETER(request);
     SAR_LOG("SarKsPinRtGetClockRegister");
 
+    NTSTATUS status;
     PKSRTAUDIO_HWREGISTER reg = (PKSRTAUDIO_HWREGISTER)data;
     SarEndpoint *endpoint = SarGetEndpointFromIrp(irp);
+    SarEndpointProcessContext *context;
 
-    if (endpoint->activeProcess != PsGetCurrentProcess()) {
-        SAR_LOG("Process didn't create the active pin");
-        return STATUS_ACCESS_DENIED;
+    if (!endpoint) {
+        return STATUS_UNSUCCESSFUL;
+    }
+
+    status = SarGetOrCreateEndpointProcessContext(
+        endpoint, PsGetCurrentProcess(), &context);
+
+    if (!NT_SUCCESS(status)) {
+        return status;
     }
 
     reg->Register =
-        &endpoint->activeRegisterFileUVA[endpoint->index].clockRegister;
+        &context->registerFileUVA[endpoint->index].clockRegister;
     reg->Width = 32;
     reg->Accuracy = 0;
     reg->Numerator = endpoint->owner->sampleRate;
@@ -166,16 +177,25 @@ NTSTATUS SarKsPinRtGetPositionRegister(
 {
     UNREFERENCED_PARAMETER(request);
     SAR_LOG("SarKsPinRtGetPositionRegister");
+
+    NTSTATUS status;
     PKSRTAUDIO_HWREGISTER reg = (PKSRTAUDIO_HWREGISTER)data;
     SarEndpoint *endpoint = SarGetEndpointFromIrp(irp);
+    SarEndpointProcessContext *context;
 
-    if (endpoint->activeProcess != PsGetCurrentProcess()) {
-        SAR_LOG("Process didn't create the active pin");
-        return STATUS_ACCESS_DENIED;
+    if (!endpoint) {
+        return STATUS_UNSUCCESSFUL;
+    }
+
+    status = SarGetOrCreateEndpointProcessContext(
+        endpoint, PsGetCurrentProcess(), &context);
+
+    if (!NT_SUCCESS(status)) {
+        return status;
     }
 
     reg->Register =
-        &endpoint->activeRegisterFileUVA[endpoint->index].positionRegister;
+        &context->registerFileUVA[endpoint->index].positionRegister;
     reg->Width = 32;
     reg->Accuracy = 0;
     reg->Numerator = 0;

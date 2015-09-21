@@ -58,8 +58,6 @@ NTSTATUS SarKsPinCreate(PKSPIN pin, PIRP irp)
     UNREFERENCED_PARAMETER(irp);
     SAR_LOG("SarKsPinCreate");
     SarEndpoint *endpoint = SarGetEndpointFromIrp(irp);
-    SIZE_T viewSize = SAR_BUFFER_CELL_SIZE;
-    LARGE_INTEGER registerFileOffset;
     NTSTATUS status;
 
     pin->Context = endpoint;
@@ -76,18 +74,100 @@ NTSTATUS SarKsPinCreate(PKSPIN pin, PIRP irp)
         return STATUS_RESOURCE_IN_USE;
     }
 
-    endpoint->activeProcess = PsGetCurrentProcess();
-    endpoint->activeBufferVirtualAddress = nullptr;
-    endpoint->activeRegisterFileUVA = nullptr;
+    status = SarGetOrCreateEndpointProcessContext(
+        endpoint, PsGetCurrentProcess(), nullptr);
+
+    if (!NT_SUCCESS(status)) {
+        endpoint->activePin = nullptr;
+        return status;
+    }
+
     endpoint->activeCellIndex = 0;
     endpoint->activeViewSize = 0;
+    return status;
+}
+
+NTSTATUS SarGetOrCreateEndpointProcessContext(
+    SarEndpoint *endpoint,
+    PEPROCESS process,
+    SarEndpointProcessContext **outContext)
+{
+    NTSTATUS status;
+    SarEndpointProcessContext *newContext = nullptr;
+    SIZE_T viewSize = SAR_BUFFER_CELL_SIZE;
+    LARGE_INTEGER registerFileOffset = {};
+
+    ExAcquireFastMutex(&endpoint->mutex);
+
+    PLIST_ENTRY entry = endpoint->activeProcessList.Flink;
+    SarEndpointProcessContext *foundContext = nullptr;
+
+    while (entry != &endpoint->activeProcessList) {
+        SarEndpointProcessContext *existingContext =
+            CONTAINING_RECORD(entry, SarEndpointProcessContext, listEntry);
+        entry = entry->Flink;
+
+        if (existingContext->process == process) {
+            foundContext = existingContext;
+            break;
+        }
+    }
+
+    ExReleaseFastMutex(&endpoint->mutex);
+
+    if (foundContext) {
+        if (outContext) {
+            *outContext = foundContext;
+        }
+
+        return STATUS_SUCCESS;
+    }
+
+    newContext = (SarEndpointProcessContext *)ExAllocatePoolWithTag(
+        NonPagedPool, sizeof(SarEndpointProcessContext), SAR_TAG);
+
+    if (!newContext) {
+        return STATUS_INSUFFICIENT_RESOURCES;
+    }
+
+    RtlZeroMemory(newContext, sizeof(SarEndpointProcessContext));
+    newContext->process = process;
+    status = ObOpenObjectByPointerWithTag(
+        newContext->process, OBJ_KERNEL_HANDLE,
+        nullptr, GENERIC_ALL, nullptr,
+        KernelMode, SAR_TAG, &newContext->processHandle);
+
+    if (!NT_SUCCESS(status)) {
+        goto err_out;
+    }
+
     registerFileOffset.QuadPart = endpoint->owner->bufferSize;
     status = ZwMapViewOfSection(endpoint->owner->bufferSection,
-        ZwCurrentProcess(), (PVOID *)&endpoint->activeRegisterFileUVA, 0, 0,
+        ZwCurrentProcess(), (PVOID *)&newContext->registerFileUVA, 0, 0,
         &registerFileOffset, &viewSize, ViewUnmap, 0, PAGE_READWRITE);
 
     if (!NT_SUCCESS(status)) {
         SAR_LOG("Failed to map register file to userspace %08X", status);
+        goto err_out;
+    }
+
+    ExAcquireFastMutex(&endpoint->mutex);
+    InsertHeadList(&endpoint->activeProcessList, &newContext->listEntry);
+    ExReleaseFastMutex(&endpoint->mutex);
+
+    if (outContext) {
+        *outContext = newContext;
+    }
+
+    return STATUS_SUCCESS;
+
+err_out:
+    if (newContext != nullptr) {
+        if (newContext->processHandle) {
+            ZwClose(newContext->processHandle);
+        }
+
+        ExFreePoolWithTag(newContext, SAR_TAG);
     }
 
     return status;
@@ -99,27 +179,37 @@ NTSTATUS SarKsPinClose(PKSPIN pin, PIRP irp)
     SAR_LOG("SarKsPinClose");
     SarEndpoint *endpoint = (SarEndpoint *)pin->Context;
     SarEndpointRegisters regs = {};
+    LIST_ENTRY toRemoveList;
 
-    // TODO: what if process is recycled before we check this? need to ref the
-    // process handle to ensure it can't go away.
-    if (endpoint->activeProcess == PsGetCurrentProcess()) {
-        if (!NT_SUCCESS(SarIncrementEndpointGeneration(endpoint))) {
-            SAR_LOG("Couldn't increment endpoint generation");
-        }
+    if (!NT_SUCCESS(SarIncrementEndpointGeneration(endpoint))) {
+        SAR_LOG("Couldn't increment endpoint generation");
+    }
 
-        if (!NT_SUCCESS(SarWriteEndpointRegisters(&regs, endpoint))) {
-            SAR_LOG("Couldn't clear endpoint registers");
-        }
+    if (!NT_SUCCESS(SarWriteEndpointRegisters(&regs, endpoint))) {
+        SAR_LOG("Couldn't clear endpoint registers");
+    }
 
-        if (endpoint->activeBufferVirtualAddress) {
-            ZwUnmapViewOfSection(
-                ZwCurrentProcess(), endpoint->activeBufferVirtualAddress);
-        }
+    InitializeListHead(&toRemoveList);
+    ExAcquireFastMutex(&endpoint->mutex);
 
-        ZwUnmapViewOfSection(
-            ZwCurrentProcess(), endpoint->activeRegisterFileUVA);
-    } else {
-        SAR_LOG("Pin closed in a different process than the one that created it.");
+    if (!IsListEmpty(&endpoint->activeProcessList)) {
+        PLIST_ENTRY entry = endpoint->activeProcessList.Flink;
+
+        RemoveEntryList(&endpoint->activeProcessList);
+        InitializeListHead(&endpoint->activeProcessList);
+        AppendTailList(&toRemoveList, entry);
+    }
+
+    ExReleaseFastMutex(&endpoint->mutex);
+
+    PLIST_ENTRY entry = toRemoveList.Flink;
+
+    while (entry != &toRemoveList) {
+        SarEndpointProcessContext *context =
+            CONTAINING_RECORD(entry, SarEndpointProcessContext, listEntry);
+
+        entry = entry->Flink;
+        SarDeleteEndpointProcessContext(context);
     }
 
     if (endpoint->activeViewSize) {
@@ -130,12 +220,22 @@ NTSTATUS SarKsPinClose(PKSPIN pin, PIRP irp)
         ExReleaseFastMutex(&endpoint->owner->mutex);
     }
 
-    endpoint->activeProcess = nullptr;
-    endpoint->activeBufferVirtualAddress = nullptr;
-    endpoint->activeRegisterFileUVA = nullptr;
     endpoint->activeCellIndex = 0;
     endpoint->activeViewSize = 0;
     InterlockedExchangePointer((PVOID *)&endpoint->activePin, nullptr);
+    return STATUS_SUCCESS;
+}
+
+NTSTATUS SarDeleteEndpointProcessContext(SarEndpointProcessContext *context)
+{
+    if (context->bufferUVA) {
+        ZwUnmapViewOfSection(context->processHandle, context->bufferUVA);
+    }
+
+    ZwUnmapViewOfSection(context->processHandle, context->registerFileUVA);
+    ZwClose(context->processHandle);
+    ExFreePoolWithTag(context, SAR_TAG);
+
     return STATUS_SUCCESS;
 }
 

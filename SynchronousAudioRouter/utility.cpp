@@ -101,11 +101,19 @@ NTSTATUS SarStringDuplicate(PUNICODE_STRING str, PUNICODE_STRING src)
 NTSTATUS SarReadEndpointRegisters(
     SarEndpointRegisters *regs, SarEndpoint *endpoint)
 {
-    ASSERT(endpoint->activeRegisterFileUVA);
+    SarEndpointProcessContext *context;
+    NTSTATUS status;
+
+    status = SarGetOrCreateEndpointProcessContext(
+        endpoint, PsGetCurrentProcess(), &context);
+
+    if (!NT_SUCCESS(status)) {
+        return status;
+    }
 
     __try {
         SarEndpointRegisters *source =
-            &endpoint->activeRegisterFileUVA[endpoint->index];
+            &context->registerFileUVA[endpoint->index];
 
         ProbeForRead(
             source, sizeof(SarEndpointRegisters), TYPE_ALIGNMENT(ULONG));
@@ -121,11 +129,19 @@ NTSTATUS SarReadEndpointRegisters(
 NTSTATUS SarWriteEndpointRegisters(
     SarEndpointRegisters *regs, SarEndpoint *endpoint)
 {
-    ASSERT(endpoint->activeRegisterFileUVA);
+    SarEndpointProcessContext *context;
+    NTSTATUS status;
+
+    status = SarGetOrCreateEndpointProcessContext(
+        endpoint, PsGetCurrentProcess(), &context);
+
+    if (!NT_SUCCESS(status)) {
+        return status;
+    }
 
     __try {
         PVOID dest =
-            (LONG *)(&endpoint->activeRegisterFileUVA[endpoint->index]) + 1;
+            (LONG *)(&context->registerFileUVA[endpoint->index]) + 1;
         SIZE_T length = sizeof(SarEndpointRegisters) - sizeof(LONG);
 
         ProbeForWrite(dest, length, TYPE_ALIGNMENT(ULONG));
@@ -139,11 +155,19 @@ NTSTATUS SarWriteEndpointRegisters(
 
 NTSTATUS SarIncrementEndpointGeneration(SarEndpoint *endpoint)
 {
-    ASSERT(endpoint->activeRegisterFileUVA);
+    SarEndpointProcessContext *context;
+    NTSTATUS status;
+
+    status = SarGetOrCreateEndpointProcessContext(
+        endpoint, PsGetCurrentProcess(), &context);
+
+    if (!NT_SUCCESS(status)) {
+        return status;
+    }
 
     __try {
         SarEndpointRegisters *dest =
-            &endpoint->activeRegisterFileUVA[endpoint->index];
+            &context->registerFileUVA[endpoint->index];
 
         ProbeForWrite(
             dest, sizeof(SarEndpointRegisters), TYPE_ALIGNMENT(ULONG));
