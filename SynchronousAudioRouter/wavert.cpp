@@ -84,14 +84,18 @@ NTSTATUS SarKsPinRtGetBuffer(
         return status;
     }
 
-    SarEndpointRegisters regs;
+    SarEndpointRegisters regs = {};
 
     processContext->bufferUVA = mappedAddress;
+    status = SarReadEndpointRegisters(&regs, endpoint);
+
+    if (!NT_SUCCESS(status)) {
+        return status;
+    }
+
     regs.isActive = TRUE;
     regs.bufferOffset = cellIndex * SAR_BUFFER_CELL_SIZE;
     regs.bufferSize = requestedSize;
-    regs.clockRegister = 0;
-    regs.positionRegister = 0;
     status = SarWriteEndpointRegisters(&regs, endpoint);
 
     if (!NT_SUCCESS(status)) {
@@ -143,7 +147,7 @@ NTSTATUS SarKsPinRtGetClockRegister(
     reg->Width = 32;
     reg->Accuracy = 0;
     reg->Numerator = endpoint->owner->sampleRate;
-    reg->Denominator = 1;
+    reg->Denominator = endpoint->owner->frameSize;
     return STATUS_NOT_IMPLEMENTED;
 }
 
@@ -155,8 +159,10 @@ NTSTATUS SarKsPinRtGetHwLatency(
     UNREFERENCED_PARAMETER(data);
     SAR_LOG("SarKsPinRtGetHwLatency");
     PKSRTAUDIO_HWLATENCY latency = (PKSRTAUDIO_HWLATENCY)data;
+    SarEndpoint *endpoint = SarGetEndpointFromIrp(irp);
 
-    latency->FifoSize = 0;
+    latency->FifoSize =
+        endpoint->owner->frameSize * endpoint->owner->sampleSize;
     latency->ChipsetDelay = 0;
     latency->CodecDelay = 0;
     return STATUS_SUCCESS;
@@ -197,7 +203,7 @@ NTSTATUS SarKsPinRtGetPositionRegister(
     reg->Register =
         &context->registerFileUVA[endpoint->index].positionRegister;
     reg->Width = 32;
-    reg->Accuracy = 0;
+    reg->Accuracy = endpoint->owner->frameSize * endpoint->owner->sampleSize;
     reg->Numerator = 0;
     reg->Denominator = 0;
     return STATUS_SUCCESS;

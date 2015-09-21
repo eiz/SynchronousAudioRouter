@@ -298,9 +298,36 @@ NTSTATUS SarKsPinSetDataFormat(
 NTSTATUS SarKsPinSetDeviceState(PKSPIN pin, KSSTATE toState, KSSTATE fromState)
 {
     SAR_LOG("SarKsPinSetDeviceState %d %d", toState, fromState);
-    UNREFERENCED_PARAMETER(pin);
-    UNREFERENCED_PARAMETER(toState);
-    UNREFERENCED_PARAMETER(fromState);
+
+    NTSTATUS status;
+    SarEndpoint *endpoint = (SarEndpoint *)pin->Context;
+    BOOL isActive = FALSE, needsChange = FALSE;
+
+    if (toState == KSSTATE_RUN && fromState != KSSTATE_RUN) {
+        isActive = TRUE;
+        needsChange = TRUE;
+    } else if (fromState == KSSTATE_RUN && toState != KSSTATE_RUN) {
+        isActive = FALSE;
+        needsChange = TRUE;
+    }
+
+    if (needsChange) {
+        SarEndpointRegisters regs = {};
+
+        status = SarReadEndpointRegisters(&regs, endpoint);
+
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+
+        regs.isActive = isActive;
+        status = SarWriteEndpointRegisters(&regs, endpoint);
+
+        if (!NT_SUCCESS(status)) {
+            return status;
+        }
+    }
+
     return STATUS_SUCCESS;
 }
 
