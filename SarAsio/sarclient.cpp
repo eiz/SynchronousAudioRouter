@@ -106,15 +106,18 @@ void SarClient::tick(long bufferIndex)
 bool SarClient::start()
 {
     if (!openControlDevice()) {
+        OutputDebugString(_T("Couldn't open control device"));
         return false;
     }
 
     if (!setBufferLayout()) {
+        OutputDebugString(_T("Couldn't set layout"));
         stop();
         return false;
     }
 
     if (!createEndpoints()) {
+        OutputDebugString(_T("Couldn't create endpoints"));
         stop();
         return false;
     }

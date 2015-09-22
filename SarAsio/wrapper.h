@@ -89,7 +89,11 @@ private:
     bool initInnerDriver();
     void initVirtualChannels();
     void onTick(long bufferIndex, AsioBool directProcess);
+    AsioTime *onTickWithTime(
+        AsioTime *time, long bufferIndex, AsioBool directProcess);
     static void onTickStub(long bufferIndex, AsioBool directProcess);
+    static AsioTime *onTickWithTimeStub(
+        AsioTime *time, long bufferIndex, AsioBool directProcess);
 
     HWND _hwnd;
     DriverConfig _config;
@@ -99,6 +103,7 @@ private:
     std::vector<VirtualChannel> _virtualInputs;
     std::vector<VirtualChannel> _virtualOutputs;
     AsioTickCallback *_userTick;
+    AsioTickWithTimeCallback *_userTickWithTime;
 };
 
 OBJECT_ENTRY_AUTO(CLSID_SarAsioWrapper, SarAsioWrapper)

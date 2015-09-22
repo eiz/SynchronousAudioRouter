@@ -34,6 +34,25 @@ enum class AsioStatus : long
     NoMemory
 };
 
+enum class AsioMessage : long
+{
+    SelectorSupported = 1,
+    EngineVersion,
+    ResetRequest,
+    BufferSizeChange,
+    ResyncRequest,
+    LatenciesChanged,
+    SupportsTimeInfo,
+    SupportsTimeCode,
+    MMCCommand,
+    SupportsInputMonitor,
+    SupportsInputGain,
+    SupportsInputMeter,
+    SupportsOutputGain,
+    SupportsOutputMeter,
+    Overload
+};
+
 struct AsioClockSource
 {
     long index;
@@ -86,14 +105,16 @@ struct AsioTime
 };
 
 typedef void AsioTickCallback(long bufferIndex, AsioBool directProcess);
+typedef AsioTime *AsioTickWithTimeCallback(
+    AsioTime *time, long bufferIndex, AsioBool directProcess);
 
 struct AsioCallbacks
 {
     AsioTickCallback *tick;
     void (*sampleRateDidChange)(double sampleRate);
-    long (*asioMessage)(long selector, long value, void *message, double *opt);
-    AsioTime *(*bufferSwitchTimeInfo)(
-        AsioTime *params, long bufferIndex, AsioBool directProcess);
+    long (*asioMessage)(
+        AsioMessage selector, long value, void *message, double *opt);
+    AsioTickWithTimeCallback *tickWithTime;
 };
 
 #define CLSID_STR_SynchronousAudioRouter \

@@ -75,6 +75,7 @@ AsioStatus SarAsioWrapper::start()
     _sar = std::make_unique<SarClient>(_config, _bufferConfig);
 
     if (!_sar->start()) {
+        OutputDebugString(_T("Failed to start SAR"));
         return AsioStatus::HardwareMalfunction;
     }
 
@@ -310,6 +311,16 @@ AsioStatus SarAsioWrapper::createBuffers(
 
     _userTick = callbacks->tick;
     callbacks->tick = &SarAsioWrapper::onTickStub;
+
+    if (callbacks->asioMessage(AsioMessage::SelectorSupported,
+            (int)AsioMessage::SupportsTimeInfo, nullptr, nullptr) &&
+        callbacks->asioMessage(AsioMessage::SupportsTimeInfo,
+            0, nullptr, nullptr)) {
+
+        _userTickWithTime = callbacks->tickWithTime;
+        callbacks->tickWithTime = &SarAsioWrapper::onTickWithTimeStub;
+    }
+
     status = _innerDriver->createBuffers(
         physicalChannelBuffers.data(), (long)physicalChannelBuffers.size(),
         bufferSize, callbacks);
@@ -476,4 +487,23 @@ void SarAsioWrapper::onTickStub(long bufferIndex, AsioBool directProcess)
     if (wrapper) {
         wrapper->onTick(bufferIndex, directProcess);
     }
+}
+
+AsioTime *SarAsioWrapper::onTickWithTime(
+    AsioTime *time, long bufferIndex, AsioBool directProcess)
+{
+    _sar->tick(bufferIndex);
+    return _userTickWithTime(time, bufferIndex, directProcess);
+}
+
+AsioTime *SarAsioWrapper::onTickWithTimeStub(
+    AsioTime *time, long bufferIndex, AsioBool directProcess)
+{
+    auto wrapper = gActiveWrapper;
+
+    if (wrapper) {
+        return wrapper->onTickWithTime(time, bufferIndex, directProcess);
+    }
+
+    return time;
 }
