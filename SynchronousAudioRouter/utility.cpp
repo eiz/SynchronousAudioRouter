@@ -65,6 +65,8 @@ SarEndpoint *SarGetEndpointFromIrp(PIRP irp)
             SarEndpoint *endpoint =
                 CONTAINING_RECORD(entry, SarEndpoint, listEntry);
 
+            entry = entry->Flink;
+
             if (endpoint->filterFactory == factory) {
                 found = endpoint;
                 break;
