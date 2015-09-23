@@ -36,6 +36,8 @@ AsioBool SarAsioWrapper::init(void *sysHandle)
 {
     OutputDebugString(L"SarAsioWrapper::init");
 
+    _userTick = nullptr;
+    _userTickWithTime = nullptr;
     _hwnd = (HWND)sysHandle;
 
     if (!initInnerDriver()) {
@@ -266,6 +268,10 @@ AsioStatus SarAsioWrapper::createBuffers(
     os << "SarAsioWrapper::createBuffers(infos, " << channelCount
        << ", " << bufferSize << ", callbacks)";
     OutputDebugStringA(os.str().c_str());
+    _callbacks.tick = &SarAsioWrapper::onTickStub;
+    _callbacks.tickWithTime = nullptr;
+    _callbacks.asioMessage = callbacks->asioMessage;
+    _callbacks.sampleRateDidChange = callbacks->sampleRateDidChange;
 
     std::vector<AsioBufferInfo> physicalChannelBuffers;
     std::vector<int> physicalChannelIndices;
@@ -310,20 +316,17 @@ AsioStatus SarAsioWrapper::createBuffers(
     }
 
     _userTick = callbacks->tick;
-    callbacks->tick = &SarAsioWrapper::onTickStub;
 
-    if (callbacks->asioMessage(AsioMessage::SelectorSupported,
-            (int)AsioMessage::SupportsTimeInfo, nullptr, nullptr) &&
-        callbacks->asioMessage(AsioMessage::SupportsTimeInfo,
-            0, nullptr, nullptr)) {
+    if (callbacks->asioMessage(AsioMessage::SupportsTimeInfo,
+        0, nullptr, nullptr)) {
 
         _userTickWithTime = callbacks->tickWithTime;
-        callbacks->tickWithTime = &SarAsioWrapper::onTickWithTimeStub;
+        _callbacks.tickWithTime = &SarAsioWrapper::onTickWithTimeStub;
     }
 
     status = _innerDriver->createBuffers(
         physicalChannelBuffers.data(), (long)physicalChannelBuffers.size(),
-        bufferSize, callbacks);
+        bufferSize, &_callbacks);
 
     if (status != AsioStatus::OK) {
         return status;

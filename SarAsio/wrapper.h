@@ -104,6 +104,7 @@ private:
     std::vector<VirtualChannel> _virtualOutputs;
     AsioTickCallback *_userTick;
     AsioTickWithTimeCallback *_userTickWithTime;
+    AsioCallbacks _callbacks;
 };
 
 OBJECT_ENTRY_AUTO(CLSID_SarAsioWrapper, SarAsioWrapper)
