@@ -62,6 +62,8 @@ picojson::object EndpointConfig::save()
     result.insert(std::make_pair("description", picojson::value(description)));
     result.insert(std::make_pair("type", picojson::value(
         type == EndpointType::Recording ? "recording" : "playback")));
+    result.insert(std::make_pair("channelCount",
+        picojson::value(double(channelCount))));
     return result;
 }
 
