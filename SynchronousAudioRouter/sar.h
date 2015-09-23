@@ -161,9 +161,9 @@ typedef struct SarFileContext
 
 #define SarBufferMapEntryCount(fileContext) \
     ((fileContext)->bufferSize / SAR_BUFFER_CELL_SIZE)
-#define SarBufferMapSize(fileContext) ( \
+#define SarBufferMapSize(fileContext) (sizeof(DWORD) * ( \
     SarBufferMapEntryCount(fileContext) / sizeof(DWORD) + \
-    ((SarBufferMapEntryCount(fileContext) % sizeof(DWORD)) != 0) ? 1 : 0)
+    (((SarBufferMapEntryCount(fileContext) % sizeof(DWORD)) != 0) ? 1 : 0)))
 
 
 typedef struct SarEndpointProcessContext
