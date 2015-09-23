@@ -63,7 +63,9 @@ void SarClient::tick(long bufferIndex)
 
         if (!isActive) {
             for (int ti = 0; ti < ntargets; ++ti) {
-                ZeroMemory(targetBuffers[ti], asioBufferSize);
+                if (targetBuffers[ti]) {
+                    ZeroMemory(targetBuffers[ti], asioBufferSize);
+                }
             }
 
             continue;
@@ -90,7 +92,9 @@ void SarClient::tick(long bufferIndex)
 
         if (!lateIsActive || generation != lateGeneration) {
             for (int ti = 0; ti < ntargets; ++ti) {
-                ZeroMemory(targetBuffers[ti], asioBufferSize);
+                if (targetBuffers[ti]) {
+                    ZeroMemory(targetBuffers[ti], asioBufferSize);
+                }
             }
         } else {
             // TODO: this can still race if the endpoint is stopped and started
@@ -243,6 +247,10 @@ void SarClient::demux(
     // TODO: gotta go fast
     for (int i = 0; i < ntargets; ++i) {
         auto buf = ((char *)muxBuffer) + sampleSize * i;
+
+        if (!targetBuffers[i]) {
+            continue;
+        }
 
         for (int j = 0; j < targetSize; j += sampleSize) {
             memcpy((char *)(targetBuffers[i]) + j, buf, sampleSize);
