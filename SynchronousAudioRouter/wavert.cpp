@@ -67,6 +67,7 @@ NTSTATUS SarKsPinRtGetBuffer(
 
     endpoint->activeCellIndex = cellIndex;
     endpoint->activeViewSize = viewSize;
+    endpoint->activeBufferSize = requestedSize;
     ExReleaseFastMutex(&fileContext->mutex);
 
     PVOID mappedAddress = nullptr;
@@ -93,7 +94,6 @@ NTSTATUS SarKsPinRtGetBuffer(
         return status;
     }
 
-    regs.isActive = TRUE;
     regs.bufferOffset = cellIndex * SAR_BUFFER_CELL_SIZE;
     regs.bufferSize = requestedSize;
     status = SarWriteEndpointRegisters(&regs, endpoint);
@@ -147,8 +147,8 @@ NTSTATUS SarKsPinRtGetClockRegister(
     reg->Width = 32;
     reg->Accuracy = 0;
     reg->Numerator = endpoint->owner->sampleRate;
-    reg->Denominator = endpoint->owner->frameSize;
-    return STATUS_NOT_IMPLEMENTED;
+    reg->Denominator = endpoint->owner->frameSize / endpoint->owner->sampleSize;
+    return STATUS_SUCCESS;
 }
 
 NTSTATUS SarKsPinRtGetHwLatency(
@@ -156,15 +156,20 @@ NTSTATUS SarKsPinRtGetHwLatency(
 {
     UNREFERENCED_PARAMETER(irp);
     UNREFERENCED_PARAMETER(request);
-    UNREFERENCED_PARAMETER(data);
     SAR_LOG("SarKsPinRtGetHwLatency");
     PKSRTAUDIO_HWLATENCY latency = (PKSRTAUDIO_HWLATENCY)data;
     SarEndpoint *endpoint = SarGetEndpointFromIrp(irp);
 
-    latency->FifoSize =
-        endpoint->owner->frameSize * endpoint->owner->sampleSize;
+    if (!endpoint) {
+        return STATUS_UNSUCCESSFUL;
+    }
+
+    ULONG unitsPerSample = 10000000 / endpoint->owner->sampleRate;
+
+    latency->FifoSize = endpoint->owner->frameSize * endpoint->channelCount;
     latency->ChipsetDelay = 0;
-    latency->CodecDelay = 0;
+    latency->CodecDelay = unitsPerSample *
+        (endpoint->owner->frameSize / endpoint->owner->sampleSize);
     return STATUS_SUCCESS;
 }
 
@@ -203,7 +208,9 @@ NTSTATUS SarKsPinRtGetPositionRegister(
     reg->Register =
         &context->registerFileUVA[endpoint->index].positionRegister;
     reg->Width = 32;
-    reg->Accuracy = endpoint->owner->frameSize * endpoint->owner->sampleSize;
+    reg->Accuracy =
+        endpoint->channelCount *
+        endpoint->owner->frameSize;
     reg->Numerator = 0;
     reg->Denominator = 0;
     return STATUS_SUCCESS;
@@ -224,9 +231,10 @@ NTSTATUS SarKsPinRtQueryNotificationSupport(
 {
     UNREFERENCED_PARAMETER(irp);
     UNREFERENCED_PARAMETER(request);
-    UNREFERENCED_PARAMETER(data);
     SAR_LOG("SarKsPinRtQueryNotificationSupport");
-    return STATUS_NOT_IMPLEMENTED;
+
+    *((BOOL *)data) = TRUE;
+    return STATUS_SUCCESS;
 }
 
 NTSTATUS SarKsPinRtRegisterNotificationEvent(

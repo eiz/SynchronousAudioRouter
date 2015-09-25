@@ -162,10 +162,10 @@ int main(int argc, char *argv[])
         DWORD sum = 0;
 
         RtlCopyMemory(&snap, regs, sizeof(SarEndpointRegisters));
-        std::cout << "Active: " << snap.isActive << " Offset: "
-                  << snap.bufferOffset << " Size: " << snap.bufferSize
-                  << " Clock: " << snap.clockRegister << " Position: "
-                  << snap.positionRegister << std::endl;
+        std::cout << "Active: " << GENERATION_IS_ACTIVE(snap.generation)
+                  << " Offset: " << snap.bufferOffset << " Size: "
+                  << snap.bufferSize << " Clock: " << snap.clockRegister
+                  << " Position: " << snap.positionRegister << std::endl;
 
         for (PCH p = buffer; p < buffer + bufferSize - SAR_BUFFER_CELL_SIZE; ++p) {
             if (*p) {

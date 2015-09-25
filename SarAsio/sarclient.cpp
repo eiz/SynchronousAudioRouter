@@ -47,21 +47,19 @@ void SarClient::tick(long bufferIndex)
         auto& asioBuffers = _bufferConfig.asioBuffers[i];
         auto asioBufferSize =
             _bufferConfig.frameSampleCount * _bufferConfig.sampleSize;
-        auto isActive = _registers[i].isActive;
         auto generation = _registers[i].generation;
         auto endpointBufferOffset = _registers[i].bufferOffset;
         auto endpointBufferSize = _registers[i].bufferSize;
         auto positionRegister = _registers[i].positionRegister;
-        auto position = positionRegister + endpointBufferOffset;
-        void *endpointData = ((char *)_sharedBuffer) + position;
         auto ntargets = (int)(asioBuffers.size() / 2);
+        auto frameSize = asioBufferSize * ntargets;
         void **targetBuffers = (void **)alloca(sizeof(void *) * ntargets);
 
         for (int bi = bufferIndex, ti = 0; bi < asioBuffers.size(); bi += 2) {
             targetBuffers[ti++] = asioBuffers[bi];
         }
 
-        if (!isActive) {
+        if (!GENERATION_IS_ACTIVE(generation) || !endpointBufferSize) {
             for (int ti = 0; ti < ntargets; ++ti) {
                 if (targetBuffers[ti]) {
                     ZeroMemory(targetBuffers[ti], asioBufferSize);
@@ -71,9 +69,18 @@ void SarClient::tick(long bufferIndex)
             continue;
         }
 
+        auto nextPositionRegister =
+            (positionRegister + frameSize) % endpointBufferSize;
+        auto previousPositionRegister = positionRegister > 0 ?
+            (positionRegister - frameSize) % endpointBufferSize :
+            endpointBufferSize - frameSize;
+        auto position = positionRegister + endpointBufferOffset;
+        void *endpointData = ((char *)_sharedBuffer) + position;
+
         if (endpointBufferOffset + endpointBufferSize > _sharedBufferSize ||
-            position + asioBufferSize > _sharedBufferSize ||
-            positionRegister + asioBufferSize > endpointBufferSize) {
+            position + frameSize > _sharedBufferSize ||
+            positionRegister + frameSize > endpointBufferSize) {
+
             continue;
         }
 
@@ -87,10 +94,12 @@ void SarClient::tick(long bufferIndex)
                 asioBufferSize, _bufferConfig.sampleSize);
         }
 
-        auto lateIsActive = _registers[i].isActive;
         auto lateGeneration = _registers[i].generation;
 
-        if (!lateIsActive || generation != lateGeneration) {
+        if (!GENERATION_IS_ACTIVE(lateGeneration) ||
+            (GENERATION_NUMBER(generation) !=
+             GENERATION_NUMBER(lateGeneration))) {
+
             for (int ti = 0; ti < ntargets; ++ti) {
                 if (targetBuffers[ti]) {
                     ZeroMemory(targetBuffers[ti], asioBufferSize);
@@ -99,10 +108,8 @@ void SarClient::tick(long bufferIndex)
         } else {
             // TODO: this can still race if the endpoint is stopped and started
             // while we're updating the position register. Maybe use DCAS on the
-            // generation+position?
-            _registers[i].positionRegister =
-                (positionRegister + asioBufferSize * ntargets) %
-                endpointBufferSize;
+            // generation+position? Does it actually matter?
+            _registers[i].positionRegister = nextPositionRegister;
         }
     }
 }
@@ -192,7 +199,7 @@ bool SarClient::setBufferLayout()
     SarSetBufferLayoutRequest request = {};
     SarSetBufferLayoutResponse response = {};
 
-    request.bufferSize = 1024 * 1024; // TODO: size based on endpoint config
+    request.bufferSize = 1024 * 1024 * 16; // TODO: size based on endpoint config
     request.frameSize =
         _bufferConfig.frameSampleCount * _bufferConfig.sampleSize;
     request.sampleRate = _bufferConfig.sampleRate;
@@ -259,10 +266,24 @@ void SarClient::demux(
     }
 }
 
+// TODO: copypasta
 void SarClient::mux(
     void *muxBuffer, void **targetBuffers, int ntargets,
     size_t targetSize, int sampleSize)
 {
+    // TODO: gotta go fast
+    for (int i = 0; i < ntargets; ++i) {
+        auto buf = ((char *)muxBuffer) + sampleSize * i;
+
+        if (!targetBuffers[i]) {
+            continue;
+        }
+
+        for (int j = 0; j < targetSize; j += sampleSize) {
+            memcpy(buf, (char *)(targetBuffers[i]) + j, sampleSize);
+            buf += sampleSize * ntargets;
+        }
+    }
 }
 
 } // namespace Sar

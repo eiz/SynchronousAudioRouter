@@ -294,7 +294,22 @@ NTSTATUS SarSetDeviceInterfaceProperties(
 {
     NTSTATUS status;
     HANDLE deviceInterfaceKey = nullptr;
+    HANDLE epSubKey = nullptr, zeroSubKey = nullptr;
     UNICODE_STRING clsidValue, clsidData = {}, aliasLink = {};
+    UNICODE_STRING epSubKeyStr, zeroSubKeyStr, supportsEventModeValue;
+    UNICODE_STRING associationValue, guidEmpty;
+    OBJECT_ATTRIBUTES oa;
+    DWORD one = 1;
+
+    RtlUnicodeStringInit(&clsidValue, L"CLSID");
+    RtlUnicodeStringInit(&epSubKeyStr, L"MSEP");
+    RtlUnicodeStringInit(&zeroSubKeyStr, L"0");
+    RtlUnicodeStringInit(
+        &supportsEventModeValue, L"{1DA5D803-D492-4EDD-8C23-E0C0FFEE7F0E},7");
+    RtlUnicodeStringInit(
+        &associationValue, L"{1DA5D803-D492-4EDD-8C23-E0C0FFEE7F0E},2");
+    RtlUnicodeStringInit(
+        &guidEmpty, L"{00000000-0000-0000-0000-000000000000}");
 
     status = IoGetDeviceInterfaceAlias(
         symbolicLinkName, aliasInterfaceClassGuid, &aliasLink);
@@ -325,7 +340,6 @@ NTSTATUS SarSetDeviceInterfaceProperties(
         goto out;
     }
 
-    RtlUnicodeStringInit(&clsidValue, L"CLSID");
     status = RtlStringFromGUID(CLSID_Proxy, &clsidData);
 
     if (!NT_SUCCESS(status)) {
@@ -342,9 +356,53 @@ NTSTATUS SarSetDeviceInterfaceProperties(
         goto out;
     }
 
+    InitializeObjectAttributes(
+        &oa, &epSubKeyStr, OBJ_KERNEL_HANDLE, deviceInterfaceKey, nullptr);
+    status = ZwCreateKey(
+        &epSubKey, KEY_ALL_ACCESS, &oa, 0, nullptr, 0, nullptr);
+
+    if (!NT_SUCCESS(status)) {
+        SAR_LOG("Couldn't open EP subkey");
+        goto out;
+    }
+
+    InitializeObjectAttributes(
+        &oa, &zeroSubKeyStr, OBJ_KERNEL_HANDLE, epSubKey, nullptr);
+    status = ZwCreateKey(
+        &zeroSubKey, KEY_ALL_ACCESS, &oa, 0, nullptr, 0, nullptr);
+
+    if (!NT_SUCCESS(status)) {
+        SAR_LOG("Couldn't open EP\\0 subkey");
+        goto out;
+    }
+
+    status = ZwSetValueKey(
+        zeroSubKey, &supportsEventModeValue, 0, REG_DWORD, &one, sizeof(DWORD));
+
+    if (!NT_SUCCESS(status)) {
+        SAR_LOG("Couldn't set registry value for evented mode support");
+        goto out;
+    }
+
+    status = ZwSetValueKey(
+        zeroSubKey, &associationValue, 0, REG_SZ, guidEmpty.Buffer,
+        guidEmpty.Length + sizeof(UNICODE_NULL));
+
+    if (!NT_SUCCESS(status)) {
+        SAR_LOG("Couldn't set kscategory association for endpoint");
+    }
+
 out:
     if (clsidData.Buffer) {
         RtlFreeUnicodeString(&clsidData);
+    }
+
+    if (zeroSubKey) {
+        ZwClose(zeroSubKey);
+    }
+
+    if (epSubKey) {
+        ZwClose(epSubKey);
     }
 
     if (deviceInterfaceKey) {

@@ -181,12 +181,15 @@ NTSTATUS SarKsPinClose(PKSPIN pin, PIRP irp)
     SarEndpointRegisters regs = {};
     LIST_ENTRY toRemoveList;
 
-    if (!NT_SUCCESS(SarIncrementEndpointGeneration(endpoint))) {
+    if (!NT_SUCCESS(SarReadEndpointRegisters(&regs, endpoint))) {
         SAR_LOG("Couldn't increment endpoint generation");
-    }
+    } else {
+        regs.generation =
+            MAKE_GENERATION(GENERATION_NUMBER(regs.generation + 1), FALSE);
 
-    if (!NT_SUCCESS(SarWriteEndpointRegisters(&regs, endpoint))) {
-        SAR_LOG("Couldn't clear endpoint registers");
+        if (!NT_SUCCESS(SarWriteEndpointRegisters(&regs, endpoint))) {
+            SAR_LOG("Couldn't clear endpoint registers");
+        }
     }
 
     InitializeListHead(&toRemoveList);
@@ -320,7 +323,8 @@ NTSTATUS SarKsPinSetDeviceState(PKSPIN pin, KSSTATE toState, KSSTATE fromState)
             return status;
         }
 
-        regs.isActive = isActive;
+        regs.generation =
+            MAKE_GENERATION(GENERATION_NUMBER(regs.generation), isActive);
         status = SarWriteEndpointRegisters(&regs, endpoint);
 
         if (!NT_SUCCESS(status)) {

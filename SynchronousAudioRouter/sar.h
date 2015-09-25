@@ -77,6 +77,8 @@ DEFINE_GUID(GUID_DEVINTERFACE_SYNCHRONOUSAUDIOROUTER,
     FILE_DEVICE_UNKNOWN, 1, METHOD_NEITHER, FILE_READ_DATA | FILE_WRITE_DATA)
 #define SAR_REQUEST_CREATE_ENDPOINT CTL_CODE( \
     FILE_DEVICE_UNKNOWN, 2, METHOD_NEITHER, FILE_READ_DATA | FILE_WRITE_DATA)
+#define SAR_REQUEST_GET_NOTIFICATION_EVENTS CTL_CODE( \
+    FILE_DEVICE_UNKNOWN, 3, METHOD_BUFFERED, FILE_READ_DATA | FILE_WRITE_DATA)
 
 #define SAR_MAX_BUFFER_SIZE 1024 * 1024 * 128
 #define SAR_MIN_SAMPLE_SIZE 1
@@ -111,26 +113,59 @@ typedef struct SarSetBufferLayoutResponse
     DWORD registerBase;
 } SarSetBufferLayoutResponse;
 
+typedef struct SarGetNotificationEventsResponse
+{
+    HANDLE handle;
+    ULONG_PTR associatedData;
+} SarGetNotificationEventsResponse;
+
+#define GENERATION_IS_ACTIVE(gen) ((gen) & 1)
+#define MAKE_GENERATION(gen, active) (((gen) << 1) | (active))
+#define GENERATION_NUMBER(gen) ((gen) >> 1)
+
 typedef struct SarEndpointRegisters
 {
-    LONG generation;
-    BOOL isActive;
+    ULONG generation;
     DWORD positionRegister;
     DWORD clockRegister;
     DWORD bufferOffset;
     DWORD bufferSize;
+    HANDLE eventHandle;
 } SarEndpointRegisters;
 
 #if defined(KERNEL)
+#ifndef SEC_NOCACHE
+#define SEC_NOCACHE      0x10000000
+#endif
+
 #define SAR_CONTROL_REFERENCE_STRING L"\\{0EB287D4-6C04-4926-AE19-3C066A4C3F3A}"
 #define SAR_TAG '1RAS'
 
 #ifdef NO_LOGGING
 #define SAR_LOG(...)
 #else
-#define SAR_LOG(...) \
-    DbgPrintEx(DPFLTR_DEFAULT_ID, DPFLTR_WARNING_LEVEL, __VA_ARGS__)
+#define SAR_LOG(fmt, ...) \
+    DbgPrintEx(DPFLTR_DEFAULT_ID, DPFLTR_WARNING_LEVEL, fmt "\n", __VA_ARGS__)
 #endif
+
+typedef struct SarHandleQueue
+{
+    FAST_MUTEX mutex;
+    LIST_ENTRY pendingItems;
+    LIST_ENTRY pendingIrps;
+} SarHandleQueue;
+
+typedef struct SarHandleQueueItem
+{
+    HANDLE kernelHandle;
+    ULONG_PTR associatedData;
+} SarHandleQueueItem;
+
+typedef struct SarEventQueueIrp
+{
+    HANDLE kernelProcessHandle;
+    PIRP irp;
+} SarEventQueueIrp;
 
 typedef struct SarDriverExtension
 {
@@ -152,6 +187,8 @@ typedef struct SarFileContext
     LIST_ENTRY endpointList;
     LIST_ENTRY pendingEndpointList;
     HANDLE bufferSection;
+    SarHandleQueue handleQueue;
+
     RTL_BITMAP bufferMap;
     DWORD bufferSize;
     DWORD frameSize;
@@ -164,7 +201,6 @@ typedef struct SarFileContext
 #define SarBufferMapSize(fileContext) (sizeof(DWORD) * ( \
     SarBufferMapEntryCount(fileContext) / sizeof(DWORD) + \
     (((SarBufferMapEntryCount(fileContext) % sizeof(DWORD)) != 0) ? 1 : 0)))
-
 
 typedef struct SarEndpointProcessContext
 {
@@ -196,14 +232,9 @@ typedef struct SarEndpoint
     PKSPIN activePin;
     DWORD activeCellIndex;
     SIZE_T activeViewSize;
+    ULONG activeBufferSize;
     LIST_ENTRY activeProcessList;
 } SarEndpoint;
-
-typedef struct SarFreeBuffer
-{
-    SarFreeBuffer *next;
-    DWORD size;
-} SarFreeBuffer;
 
 // Control
 NTSTATUS SarReadUserBuffer(PVOID src, PIRP irp, ULONG size);
@@ -316,8 +347,11 @@ NTSTATUS SarReadEndpointRegisters(
     SarEndpointRegisters *regs, SarEndpoint *endpoint);
 NTSTATUS SarWriteEndpointRegisters(
     SarEndpointRegisters *regs, SarEndpoint *endpoint);
-NTSTATUS SarIncrementEndpointGeneration(SarEndpoint *endpoint);
 NTSTATUS SarStringDuplicate(PUNICODE_STRING str, PUNICODE_STRING src);
+NTSTATUS SarInitializeHandleQueue(SarHandleQueue *queue);
+NTSTATUS SarPostHandleQueue(
+    SarHandleQueue *queue, HANDLE kernelHandle, ULONG_PTR associatedData);
+NTSTATUS SarWaitHandleQueue(SarHandleQueue *queue, PEPROCESS process, PIRP irp);
 VOID SarStringFree(PUNICODE_STRING str);
 
 #endif // KERNEL

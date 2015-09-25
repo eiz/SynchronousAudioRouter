@@ -120,7 +120,6 @@ NTSTATUS SarReadEndpointRegisters(
         ProbeForRead(
             source, sizeof(SarEndpointRegisters), TYPE_ALIGNMENT(ULONG));
         RtlCopyMemory(regs, source, sizeof(SarEndpointRegisters));
-
     } __except(EXCEPTION_EXECUTE_HANDLER) {
         return GetExceptionCode();
     }
@@ -142,38 +141,16 @@ NTSTATUS SarWriteEndpointRegisters(
     }
 
     __try {
-        PVOID dest =
-            (LONG *)(&context->registerFileUVA[endpoint->index]) + 1;
-        SIZE_T length = sizeof(SarEndpointRegisters) - sizeof(LONG);
+        SarEndpointRegisters *dest = &context->registerFileUVA[endpoint->index];
 
-        ProbeForWrite(dest, length, TYPE_ALIGNMENT(ULONG));
-        RtlCopyMemory(dest, ((LONG *)regs) + 1, length);
-    } __except(EXCEPTION_EXECUTE_HANDLER) {
-        return GetExceptionCode();
-    }
-
-    return STATUS_SUCCESS;
-}
-
-NTSTATUS SarIncrementEndpointGeneration(SarEndpoint *endpoint)
-{
-    SarEndpointProcessContext *context;
-    NTSTATUS status;
-
-    status = SarGetOrCreateEndpointProcessContext(
-        endpoint, PsGetCurrentProcess(), &context);
-
-    if (!NT_SUCCESS(status)) {
-        return status;
-    }
-
-    __try {
-        SarEndpointRegisters *dest =
-            &context->registerFileUVA[endpoint->index];
-
-        ProbeForWrite(
-            dest, sizeof(SarEndpointRegisters), TYPE_ALIGNMENT(ULONG));
-        InterlockedIncrement(&dest->generation);
+        ProbeForWrite(dest,
+            sizeof(SarEndpointRegisters), TYPE_ALIGNMENT(ULONG));
+        dest->positionRegister = regs->positionRegister;
+        dest->clockRegister = regs->clockRegister;
+        dest->bufferOffset = regs->bufferOffset;
+        dest->bufferSize = regs->bufferSize;
+        InterlockedExchangePointer(&dest->eventHandle, regs->eventHandle);
+        InterlockedExchange((LONG *)&dest->generation, (ULONG)regs->generation);
     } __except(EXCEPTION_EXECUTE_HANDLER) {
         return GetExceptionCode();
     }
