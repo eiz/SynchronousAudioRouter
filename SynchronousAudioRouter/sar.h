@@ -348,7 +348,7 @@ NTSTATUS SarReadEndpointRegisters(
 NTSTATUS SarWriteEndpointRegisters(
     SarEndpointRegisters *regs, SarEndpoint *endpoint);
 NTSTATUS SarStringDuplicate(PUNICODE_STRING str, PUNICODE_STRING src);
-NTSTATUS SarInitializeHandleQueue(SarHandleQueue *queue);
+void SarInitializeHandleQueue(SarHandleQueue *queue);
 NTSTATUS SarPostHandleQueue(
     SarHandleQueue *queue, HANDLE kernelHandle, ULONG_PTR associatedData);
 NTSTATUS SarWaitHandleQueue(SarHandleQueue *queue, PEPROCESS process, PIRP irp);

@@ -243,6 +243,11 @@ NTSTATUS SarIrpDeviceControl(PDEVICE_OBJECT deviceObject, PIRP irp)
                 deviceObject, irp, extension, fileContext, &request);
             break;
         }
+        case SAR_REQUEST_GET_NOTIFICATION_EVENTS: {
+            ntStatus = SarWaitHandleQueue(
+                &fileContext->handleQueue, PsGetCurrentProcess(), irp);
+            break;
+        }
         default:
             SAR_LOG("(SAR) Unknown ioctl %d", ioControlCode);
             break;
@@ -276,6 +281,7 @@ NTSTATUS SarInitializeFileContext(SarFileContext *fileContext)
     ExInitializeFastMutex(&fileContext->mutex);
     InitializeListHead(&fileContext->endpointList);
     InitializeListHead(&fileContext->pendingEndpointList);
+    SarInitializeHandleQueue(&fileContext->handleQueue);
     fileContext->workItem = IoAllocateWorkItem(
         fileContext->fileObject->DeviceObject);
 

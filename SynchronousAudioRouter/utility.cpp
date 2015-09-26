@@ -205,3 +205,27 @@ NTSTATUS SarWriteUserBuffer(PVOID src, PIRP irp, ULONG size)
         return GetExceptionCode();
     }
 }
+
+void SarInitializeHandleQueue(SarHandleQueue *queue)
+{
+    ExInitializeFastMutex(&queue->mutex);
+    InitializeListHead(&queue->pendingIrps);
+    InitializeListHead(&queue->pendingItems);
+}
+
+NTSTATUS SarPostHandleQueue(
+    SarHandleQueue *queue, HANDLE kernelHandle, ULONG_PTR associatedData)
+{
+    UNREFERENCED_PARAMETER(queue);
+    UNREFERENCED_PARAMETER(kernelHandle);
+    UNREFERENCED_PARAMETER(associatedData);
+    return STATUS_NOT_IMPLEMENTED;
+}
+
+NTSTATUS SarWaitHandleQueue(SarHandleQueue *queue, PEPROCESS process, PIRP irp)
+{
+    UNREFERENCED_PARAMETER(queue);
+    UNREFERENCED_PARAMETER(process);
+    UNREFERENCED_PARAMETER(irp);
+    return STATUS_NOT_IMPLEMENTED;
+}
