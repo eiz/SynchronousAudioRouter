@@ -16,12 +16,10 @@
 
 #include "sar.h"
 
-NTSTATUS SarKsPinRtGetBuffer(
-    PIRP irp, PKSIDENTIFIER request, PVOID data)
+NTSTATUS SarKsPinRtGetBufferCore(
+    PIRP irp, PVOID baseAddress, ULONG requestedBufferSize,
+    ULONG notificationCount, PKSRTAUDIO_BUFFER buffer)
 {
-    SAR_LOG("SarKsPinRtGetBuffer");
-    PKSRTAUDIO_BUFFER_PROPERTY prop = (PKSRTAUDIO_BUFFER_PROPERTY)request;
-    PKSRTAUDIO_BUFFER buffer = (PKSRTAUDIO_BUFFER)data;
     SarEndpoint *endpoint = SarGetEndpointFromIrp(irp);
     SarFileContext *fileContext = endpoint->owner;
     SarEndpointProcessContext *processContext;
@@ -32,7 +30,7 @@ NTSTATUS SarKsPinRtGetBuffer(
         return STATUS_NOT_FOUND;
     }
 
-    if (prop->BaseAddress != nullptr) {
+    if (baseAddress != nullptr) {
         SAR_LOG("It wants a specific address");
         return STATUS_NOT_IMPLEMENTED;
     }
@@ -44,10 +42,10 @@ NTSTATUS SarKsPinRtGetBuffer(
         return status;
     }
 
-    ULONG requestedSize = ROUND_UP(
-        prop->RequestedBufferSize,
+    ULONG actualSize = ROUND_UP(
+        requestedBufferSize,
         fileContext->frameSize * endpoint->channelCount);
-    SIZE_T viewSize = ROUND_UP(requestedSize, SAR_BUFFER_CELL_SIZE);
+    SIZE_T viewSize = ROUND_UP(actualSize, SAR_BUFFER_CELL_SIZE);
 
     ExAcquireFastMutex(&fileContext->mutex);
 
@@ -67,7 +65,7 @@ NTSTATUS SarKsPinRtGetBuffer(
 
     endpoint->activeCellIndex = cellIndex;
     endpoint->activeViewSize = viewSize;
-    endpoint->activeBufferSize = requestedSize;
+    endpoint->activeBufferSize = actualSize;
     ExReleaseFastMutex(&fileContext->mutex);
 
     PVOID mappedAddress = nullptr;
@@ -88,6 +86,7 @@ NTSTATUS SarKsPinRtGetBuffer(
     SarEndpointRegisters regs = {};
 
     processContext->bufferUVA = mappedAddress;
+    processContext->notificationCount = notificationCount;
     status = SarReadEndpointRegisters(&regs, endpoint);
 
     if (!NT_SUCCESS(status)) {
@@ -95,7 +94,7 @@ NTSTATUS SarKsPinRtGetBuffer(
     }
 
     regs.bufferOffset = cellIndex * SAR_BUFFER_CELL_SIZE;
-    regs.bufferSize = requestedSize;
+    regs.bufferSize = actualSize;
     status = SarWriteEndpointRegisters(&regs, endpoint);
 
     if (!NT_SUCCESS(status)) {
@@ -104,20 +103,34 @@ NTSTATUS SarKsPinRtGetBuffer(
         return status; // TODO: goto err_out
     }
 
-    buffer->ActualBufferSize = requestedSize;
+    buffer->ActualBufferSize = actualSize;
     buffer->BufferAddress = mappedAddress;
     buffer->CallMemoryBarrier = FALSE;
     return STATUS_SUCCESS;
 }
 
+NTSTATUS SarKsPinRtGetBuffer(
+    PIRP irp, PKSIDENTIFIER request, PVOID data)
+{
+    SAR_LOG("SarKsPinRtGetBuffer");
+    PKSRTAUDIO_BUFFER_PROPERTY prop = (PKSRTAUDIO_BUFFER_PROPERTY)request;
+    PKSRTAUDIO_BUFFER buffer = (PKSRTAUDIO_BUFFER)data;
+
+    return SarKsPinRtGetBufferCore(
+        irp, prop->BaseAddress, prop->RequestedBufferSize, 0, buffer);
+}
+
 NTSTATUS SarKsPinRtGetBufferWithNotification(
     PIRP irp, PKSIDENTIFIER request, PVOID data)
 {
-    UNREFERENCED_PARAMETER(irp);
-    UNREFERENCED_PARAMETER(request);
-    UNREFERENCED_PARAMETER(data);
     SAR_LOG("SarKsPinRtGetBufferWithNotification");
-    return STATUS_NOT_IMPLEMENTED;
+    PKSRTAUDIO_BUFFER_PROPERTY_WITH_NOTIFICATION prop =
+        (PKSRTAUDIO_BUFFER_PROPERTY_WITH_NOTIFICATION)request;
+    PKSRTAUDIO_BUFFER buffer = (PKSRTAUDIO_BUFFER)data;
+
+    return SarKsPinRtGetBufferCore(
+        irp, prop->BaseAddress, prop->RequestedBufferSize,
+        prop->NotificationCount, buffer);
 }
 
 NTSTATUS SarKsPinRtGetClockRegister(
@@ -164,12 +177,11 @@ NTSTATUS SarKsPinRtGetHwLatency(
         return STATUS_UNSUCCESSFUL;
     }
 
-    ULONG unitsPerSample = 10000000 / endpoint->owner->sampleRate;
+    //ULONG unitsPerSample = 10000000 / endpoint->owner->sampleRate;
 
-    latency->FifoSize = endpoint->owner->frameSize * endpoint->channelCount;
+    latency->FifoSize = 0;
     latency->ChipsetDelay = 0;
-    latency->CodecDelay = unitsPerSample *
-        (endpoint->owner->frameSize / endpoint->owner->sampleSize);
+    latency->CodecDelay = 0;
     return STATUS_SUCCESS;
 }
 
@@ -240,11 +252,28 @@ NTSTATUS SarKsPinRtQueryNotificationSupport(
 NTSTATUS SarKsPinRtRegisterNotificationEvent(
     PIRP irp, PKSIDENTIFIER request, PVOID data)
 {
-    UNREFERENCED_PARAMETER(irp);
-    UNREFERENCED_PARAMETER(request);
     UNREFERENCED_PARAMETER(data);
     SAR_LOG("SarKsPinRtRegisterNotificationEvent");
-    return STATUS_NOT_IMPLEMENTED;
+    SarEndpoint *endpoint = SarGetEndpointFromIrp(irp);
+    SarEndpointRegisters regs;
+    NTSTATUS status;
+    PKSRTAUDIO_NOTIFICATION_EVENT_PROPERTY prop =
+        (PKSRTAUDIO_NOTIFICATION_EVENT_PROPERTY)request;
+
+    if (!endpoint) {
+        return STATUS_UNSUCCESSFUL;
+    }
+
+    status = SarReadEndpointRegisters(&regs, endpoint);
+
+    if (!NT_SUCCESS(status)) {
+        return status;
+    }
+
+    ULONG64 associatedData = regs.generation | ((ULONG64)endpoint->index << 32);
+
+    return SarPostHandleQueue(&endpoint->owner->handleQueue,
+        prop->NotificationEvent, associatedData);
 }
 
 NTSTATUS SarKsPinRtUnregisterNotificationEvent(

@@ -130,13 +130,9 @@ typedef struct SarEndpointRegisters
     DWORD clockRegister;
     DWORD bufferOffset;
     DWORD bufferSize;
-    HANDLE eventHandle;
 } SarEndpointRegisters;
 
 #if defined(KERNEL)
-#ifndef SEC_NOCACHE
-#define SEC_NOCACHE      0x10000000
-#endif
 
 #define SAR_CONTROL_REFERENCE_STRING L"\\{0EB287D4-6C04-4926-AE19-3C066A4C3F3A}"
 #define SAR_TAG '1RAS'
@@ -212,6 +208,7 @@ typedef struct SarEndpointProcessContext
     HANDLE processHandle;
     SarEndpointRegisters *registerFileUVA;
     PVOID bufferUVA;
+    DWORD notificationCount;
 } SarEndpointProcessContext;
 
 typedef struct SarEndpoint
@@ -353,7 +350,7 @@ NTSTATUS SarWriteEndpointRegisters(
 NTSTATUS SarStringDuplicate(PUNICODE_STRING str, PUNICODE_STRING src);
 void SarInitializeHandleQueue(SarHandleQueue *queue);
 NTSTATUS SarTransferQueuedHandle(
-    SarHandleQueueIrp *queuedIrp, ULONG responseIndex,
+    PIRP irp, HANDLE kernelTargetProcessHandle, ULONG responseIndex,
     HANDLE kernelProcessHandle, HANDLE userHandle, ULONG64 associatedData);
 NTSTATUS SarPostHandleQueue(
     SarHandleQueue *queue, HANDLE userHandle, ULONG64 associatedData);
