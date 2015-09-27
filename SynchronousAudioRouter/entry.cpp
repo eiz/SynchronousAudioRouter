@@ -244,8 +244,7 @@ NTSTATUS SarIrpDeviceControl(PDEVICE_OBJECT deviceObject, PIRP irp)
             break;
         }
         case SAR_REQUEST_GET_NOTIFICATION_EVENTS: {
-            ntStatus = SarWaitHandleQueue(
-                &fileContext->handleQueue, PsGetCurrentProcess(), irp);
+            ntStatus = SarWaitHandleQueue(&fileContext->handleQueue, irp);
             break;
         }
         default:

@@ -113,11 +113,11 @@ typedef struct SarSetBufferLayoutResponse
     DWORD registerBase;
 } SarSetBufferLayoutResponse;
 
-typedef struct SarGetNotificationEventsResponse
+typedef struct SarHandleQueueResponse
 {
     HANDLE handle;
     ULONG_PTR associatedData;
-} SarGetNotificationEventsResponse;
+} SarHandleQueueResponse;
 
 #define GENERATION_IS_ACTIVE(gen) ((gen) & 1)
 #define MAKE_GENERATION(gen, active) (((gen) << 1) | (active))
@@ -157,15 +157,18 @@ typedef struct SarHandleQueue
 
 typedef struct SarHandleQueueItem
 {
-    HANDLE kernelHandle;
-    ULONG_PTR associatedData;
+    LIST_ENTRY listEntry;
+    HANDLE kernelProcessHandle;
+    HANDLE userHandle;
+    ULONG64 associatedData;
 } SarHandleQueueItem;
 
-typedef struct SarEventQueueIrp
+typedef struct SarHandleQueueIrp
 {
+    LIST_ENTRY listEntry;
     HANDLE kernelProcessHandle;
     PIRP irp;
-} SarEventQueueIrp;
+} SarHandleQueueIrp;
 
 typedef struct SarDriverExtension
 {
@@ -349,9 +352,12 @@ NTSTATUS SarWriteEndpointRegisters(
     SarEndpointRegisters *regs, SarEndpoint *endpoint);
 NTSTATUS SarStringDuplicate(PUNICODE_STRING str, PUNICODE_STRING src);
 void SarInitializeHandleQueue(SarHandleQueue *queue);
+NTSTATUS SarTransferQueuedHandle(
+    SarHandleQueueIrp *queuedIrp, ULONG responseIndex,
+    HANDLE kernelProcessHandle, HANDLE userHandle, ULONG64 associatedData);
 NTSTATUS SarPostHandleQueue(
-    SarHandleQueue *queue, HANDLE kernelHandle, ULONG_PTR associatedData);
-NTSTATUS SarWaitHandleQueue(SarHandleQueue *queue, PEPROCESS process, PIRP irp);
+    SarHandleQueue *queue, HANDLE userHandle, ULONG64 associatedData);
+NTSTATUS SarWaitHandleQueue(SarHandleQueue *queue, PIRP irp);
 VOID SarStringFree(PUNICODE_STRING str);
 
 #endif // KERNEL

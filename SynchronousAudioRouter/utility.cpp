@@ -213,19 +213,89 @@ void SarInitializeHandleQueue(SarHandleQueue *queue)
     InitializeListHead(&queue->pendingItems);
 }
 
-NTSTATUS SarPostHandleQueue(
-    SarHandleQueue *queue, HANDLE kernelHandle, ULONG_PTR associatedData)
+NTSTATUS SarTransferQueuedHandle(
+    SarHandleQueueIrp *queuedIrp, ULONG responseIndex,
+    HANDLE kernelProcessHandle, HANDLE userHandle, ULONG64 associatedData)
 {
-    UNREFERENCED_PARAMETER(queue);
-    UNREFERENCED_PARAMETER(kernelHandle);
-    UNREFERENCED_PARAMETER(associatedData);
-    return STATUS_NOT_IMPLEMENTED;
+    PIO_STACK_LOCATION irpStack =
+        IoGetCurrentIrpStackLocation(queuedIrp->irp);
+
+    if (irpStack->Parameters.DeviceIoControl.OutputBufferLength <
+        sizeof(SarHandleQueueResponse) * (responseIndex + 1)) {
+
+        return STATUS_BUFFER_TOO_SMALL;
+    }
+
+    SarHandleQueueResponse *response =
+        &((SarHandleQueueResponse *)queuedIrp->irp->AssociatedIrp.SystemBuffer)
+            [responseIndex];
+
+    response->associatedData = associatedData;
+    return ZwDuplicateObject(
+        kernelProcessHandle, userHandle,
+        queuedIrp->kernelProcessHandle, &response->handle, 0, 0,
+        DUPLICATE_SAME_ACCESS);
 }
 
-NTSTATUS SarWaitHandleQueue(SarHandleQueue *queue, PEPROCESS process, PIRP irp)
+NTSTATUS SarPostHandleQueue(
+    SarHandleQueue *queue, HANDLE userHandle, ULONG64 associatedData)
+{
+    NTSTATUS status = STATUS_SUCCESS;
+    HANDLE kernelProcessHandle = nullptr;
+    SarHandleQueueIrp *queuedIrp = nullptr;
+
+    status = ObOpenObjectByPointerWithTag(
+        PsGetCurrentProcess(), OBJ_KERNEL_HANDLE,
+        nullptr, GENERIC_ALL, nullptr,
+        KernelMode, SAR_TAG, &kernelProcessHandle);
+
+    if (!NT_SUCCESS(status)) {
+        return status;
+    }
+
+    ExAcquireFastMutex(&queue->mutex);
+
+    if (!IsListEmpty(&queue->pendingIrps)) {
+        PLIST_ENTRY entry = queue->pendingIrps.Flink;
+
+        queuedIrp =
+            CONTAINING_RECORD(entry, SarHandleQueueIrp, listEntry);
+        RemoveEntryList(entry);
+    }
+
+    if (!queuedIrp) {
+        SarHandleQueueItem *item = (SarHandleQueueItem *)ExAllocatePoolWithTag(
+            NonPagedPool, sizeof(SarHandleQueueItem), SAR_TAG);
+
+        if (!item) {
+            ExReleaseFastMutex(&queue->mutex);
+            ZwClose(kernelProcessHandle);
+            return STATUS_INSUFFICIENT_RESOURCES;
+        }
+
+        item->associatedData = associatedData;
+        item->userHandle = userHandle;
+        item->kernelProcessHandle = kernelProcessHandle;
+        InsertTailList(&queue->pendingItems, &item->listEntry);
+    }
+
+    ExReleaseFastMutex(&queue->mutex);
+
+    if (queuedIrp) {
+        status = SarTransferQueuedHandle(
+            queuedIrp, 0, kernelProcessHandle, userHandle, associatedData);
+
+        queuedIrp->irp->IoStatus.Status = status;
+        IoCompleteRequest(queuedIrp->irp, IO_NO_INCREMENT);
+        ZwClose(kernelProcessHandle);
+    }
+
+    return status;
+}
+
+NTSTATUS SarWaitHandleQueue(SarHandleQueue *queue, PIRP irp)
 {
     UNREFERENCED_PARAMETER(queue);
-    UNREFERENCED_PARAMETER(process);
     UNREFERENCED_PARAMETER(irp);
     return STATUS_NOT_IMPLEMENTED;
 }
