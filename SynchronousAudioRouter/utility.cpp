@@ -149,6 +149,8 @@ NTSTATUS SarWriteEndpointRegisters(
         dest->clockRegister = regs->clockRegister;
         dest->bufferOffset = regs->bufferOffset;
         dest->bufferSize = regs->bufferSize;
+        dest->notificationCount = regs->notificationCount;
+        MemoryBarrier();
         InterlockedExchange((LONG *)&dest->generation, (ULONG)regs->generation);
     } __except(EXCEPTION_EXECUTE_HANDLER) {
         return GetExceptionCode();
@@ -207,7 +209,7 @@ NTSTATUS SarWriteUserBuffer(PVOID src, PIRP irp, ULONG size)
 
 void SarInitializeHandleQueue(SarHandleQueue *queue)
 {
-    ExInitializeFastMutex(&queue->mutex);
+    KeInitializeSpinLock(&queue->lock);
     InitializeListHead(&queue->pendingIrps);
     InitializeListHead(&queue->pendingItems);
 }
@@ -236,12 +238,57 @@ NTSTATUS SarTransferQueuedHandle(
         DUPLICATE_SAME_ACCESS);
 }
 
+void SarCancelHandleQueueIrp(PDEVICE_OBJECT deviceObject, PIRP irp)
+{
+    UNREFERENCED_PARAMETER(deviceObject);
+    IoReleaseCancelSpinLock(irp->CancelIrql);
+
+    PIO_STACK_LOCATION irpStack = IoGetCurrentIrpStackLocation(irp);
+    SarDriverExtension *extension = SarGetDriverExtensionFromIrp(irp);
+    SarFileContext *fileContext =
+        SarGetFileContextFromFileObject(extension, irpStack->FileObject);
+    PLIST_ENTRY entry;
+    SarHandleQueueIrp *toCancel = nullptr;
+    KIRQL irql;
+
+    if (!fileContext) {
+        return;
+    }
+
+    KeAcquireSpinLock(&fileContext->handleQueue.lock,  &irql);
+    entry = fileContext->handleQueue.pendingIrps.Flink;
+
+    while (entry != &fileContext->handleQueue.pendingIrps) {
+        SarHandleQueueIrp *pendingIrp =
+            CONTAINING_RECORD(entry, SarHandleQueueIrp, listEntry);
+
+        entry = entry->Flink;
+
+        if (pendingIrp->irp == irp) {
+            RemoveEntryList(entry);
+            toCancel = pendingIrp;
+            break;
+        }
+    }
+
+    KeReleaseSpinLock(&fileContext->handleQueue.lock, irql);
+
+    if (toCancel) {
+        ZwClose(toCancel->kernelProcessHandle);
+        ExFreePoolWithTag(toCancel, SAR_TAG);
+        irp->IoStatus.Information = 0;
+        irp->IoStatus.Status = STATUS_CANCELLED;
+        IoCompleteRequest(irp, IO_NO_INCREMENT);
+    }
+}
+
 NTSTATUS SarPostHandleQueue(
     SarHandleQueue *queue, HANDLE userHandle, ULONG64 associatedData)
 {
     NTSTATUS status = STATUS_SUCCESS;
     HANDLE kernelProcessHandle = nullptr;
     SarHandleQueueIrp *queuedIrp = nullptr;
+    KIRQL irql;
 
     status = ObOpenObjectByPointerWithTag(
         PsGetCurrentProcess(), OBJ_KERNEL_HANDLE,
@@ -252,7 +299,7 @@ NTSTATUS SarPostHandleQueue(
         return status;
     }
 
-    ExAcquireFastMutex(&queue->mutex);
+    KeAcquireSpinLock(&queue->lock, &irql);
 
     if (!IsListEmpty(&queue->pendingIrps)) {
         PLIST_ENTRY entry = queue->pendingIrps.Flink;
@@ -267,7 +314,7 @@ NTSTATUS SarPostHandleQueue(
             NonPagedPool, sizeof(SarHandleQueueItem), SAR_TAG);
 
         if (!item) {
-            ExReleaseFastMutex(&queue->mutex);
+            KeReleaseSpinLock(&queue->lock, irql);
             ZwClose(kernelProcessHandle);
             return STATUS_INSUFFICIENT_RESOURCES;
         }
@@ -278,7 +325,7 @@ NTSTATUS SarPostHandleQueue(
         InsertTailList(&queue->pendingItems, &item->listEntry);
     }
 
-    ExReleaseFastMutex(&queue->mutex);
+    KeReleaseSpinLock(&queue->lock, irql);
 
     if (queuedIrp) {
         status = SarTransferQueuedHandle(
@@ -286,6 +333,8 @@ NTSTATUS SarPostHandleQueue(
             0, kernelProcessHandle, userHandle, associatedData);
 
         queuedIrp->irp->IoStatus.Status = status;
+        queuedIrp->irp->IoStatus.Information = sizeof(SarHandleQueueResponse);
+        IoSetCancelRoutine(queuedIrp->irp, nullptr);
         IoCompleteRequest(queuedIrp->irp, IO_NO_INCREMENT);
         ZwClose(kernelProcessHandle);
         ExFreePoolWithTag(queuedIrp, SAR_TAG);
@@ -303,6 +352,7 @@ NTSTATUS SarWaitHandleQueue(SarHandleQueue *queue, PIRP irp)
         sizeof(SarHandleQueueResponse);
     DWORD nextItem = 0;
     LIST_ENTRY toComplete;
+    KIRQL irql;
 
     InitializeListHead(&toComplete);
     irp->IoStatus.Information = 0;
@@ -323,7 +373,7 @@ NTSTATUS SarWaitHandleQueue(SarHandleQueue *queue, PIRP irp)
         return status;
     }
 
-    ExAcquireFastMutex(&queue->mutex);
+    KeAcquireSpinLock(&queue->lock, &irql);
 
     while (!IsListEmpty(&queue->pendingItems) && nextItem < maxItems) {
         PLIST_ENTRY entry = RemoveHeadList(&queue->pendingItems);
@@ -338,19 +388,20 @@ NTSTATUS SarWaitHandleQueue(SarHandleQueue *queue, PIRP irp)
                 NonPagedPool, sizeof(SarHandleQueueIrp), SAR_TAG);
 
         if (!queuedIrp) {
-            ExReleaseFastMutex(&queue->mutex);
+            KeReleaseSpinLock(&queue->lock, irql);
             ZwClose(kernelProcessHandle);
             return STATUS_INSUFFICIENT_RESOURCES;
         }
 
         IoMarkIrpPending(irp);
+        IoSetCancelRoutine(irp, SarCancelHandleQueueIrp);
         queuedIrp->irp = irp;
         queuedIrp->kernelProcessHandle = kernelProcessHandle;
         InsertTailList(&queue->pendingIrps, &queuedIrp->listEntry);
         status = STATUS_PENDING;
     }
 
-    ExReleaseFastMutex(&queue->mutex);
+    KeReleaseSpinLock(&queue->lock, irql);
 
     if (!IsListEmpty(&toComplete)) {
         nextItem = 0;
@@ -364,6 +415,7 @@ NTSTATUS SarWaitHandleQueue(SarHandleQueue *queue, PIRP irp)
                 irp, kernelProcessHandle, nextItem++,
                 queueItem->kernelProcessHandle, queueItem->userHandle,
                 queueItem->associatedData);
+            ZwClose(queueItem->kernelProcessHandle);
             ExFreePoolWithTag(queueItem, SAR_TAG);
             irp->IoStatus.Information += sizeof(SarHandleQueueResponse);
 
@@ -374,6 +426,7 @@ NTSTATUS SarWaitHandleQueue(SarHandleQueue *queue, PIRP irp)
 
         irp->IoStatus.Status = status;
         IoCompleteRequest(irp, IO_NO_INCREMENT);
+        ZwClose(kernelProcessHandle);
     }
 
     return status;

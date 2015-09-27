@@ -130,6 +130,7 @@ typedef struct SarEndpointRegisters
     DWORD clockRegister;
     DWORD bufferOffset;
     DWORD bufferSize;
+    DWORD notificationCount;
 } SarEndpointRegisters;
 
 #if defined(KERNEL)
@@ -146,7 +147,7 @@ typedef struct SarEndpointRegisters
 
 typedef struct SarHandleQueue
 {
-    FAST_MUTEX mutex;
+    KSPIN_LOCK lock;
     LIST_ENTRY pendingItems;
     LIST_ENTRY pendingIrps;
 } SarHandleQueue;
@@ -208,7 +209,6 @@ typedef struct SarEndpointProcessContext
     HANDLE processHandle;
     SarEndpointRegisters *registerFileUVA;
     PVOID bufferUVA;
-    DWORD notificationCount;
 } SarEndpointProcessContext;
 
 typedef struct SarEndpoint
@@ -352,6 +352,7 @@ void SarInitializeHandleQueue(SarHandleQueue *queue);
 NTSTATUS SarTransferQueuedHandle(
     PIRP irp, HANDLE kernelTargetProcessHandle, ULONG responseIndex,
     HANDLE kernelProcessHandle, HANDLE userHandle, ULONG64 associatedData);
+void SarCancelHandleQueueIrp(PDEVICE_OBJECT deviceObject, PIRP irp);
 NTSTATUS SarPostHandleQueue(
     SarHandleQueue *queue, HANDLE userHandle, ULONG64 associatedData);
 NTSTATUS SarWaitHandleQueue(SarHandleQueue *queue, PIRP irp);

@@ -24,13 +24,17 @@ SarClient::SarClient(
     const DriverConfig& driverConfig,
     const BufferConfig& bufferConfig)
     : _driverConfig(driverConfig), _bufferConfig(bufferConfig),
-      _device(INVALID_HANDLE_VALUE)
+      _device(INVALID_HANDLE_VALUE), _completionPort(nullptr),
+      _handleQueueStarted(false)
 {
+    ZeroMemory(&_handleQueueCompletion, sizeof(HandleQueueCompletion));
 }
 
 void SarClient::tick(long bufferIndex)
 {
     ATLASSERT(bufferIndex == 0 || bufferIndex == 1);
+
+    updateNotificationHandles();
 
     // for each endpoint
     // read isActive, generation and buffer offset/size/position
@@ -53,7 +57,16 @@ void SarClient::tick(long bufferIndex)
         auto positionRegister = _registers[i].positionRegister;
         auto ntargets = (int)(asioBuffers.size() / 2);
         auto frameSize = asioBufferSize * ntargets;
+        auto notificationCount = _registers[i].notificationCount;
         void **targetBuffers = (void **)alloca(sizeof(void *) * ntargets);
+
+        //std::ostringstream os;
+
+        //os << i << "(" << generation << "): Offset: " << endpointBufferOffset
+        //   << " Size: " << endpointBufferSize << " Pos: " << positionRegister
+        //   << " FrameSize: " << frameSize << " NotificationCount: "
+        //   << notificationCount;
+        //OutputDebugStringA(os.str().c_str());
 
         for (int bi = bufferIndex, ti = 0; bi < asioBuffers.size(); bi += 2) {
             targetBuffers[ti++] = asioBuffers[bi];
@@ -110,6 +123,24 @@ void SarClient::tick(long bufferIndex)
             // while we're updating the position register. Maybe use DCAS on the
             // generation+position? Does it actually matter?
             _registers[i].positionRegister = nextPositionRegister;
+
+            if ((notificationCount >= 1 && nextPositionRegister == 0) ||
+                (notificationCount >= 2 &&
+                 nextPositionRegister >= endpointBufferSize / 2 &&
+                 positionRegister < endpointBufferSize / 2)) {
+
+                auto evt = _notificationHandles[i].handle;
+
+                if (evt) {
+                    if (!SetEvent(evt)) {
+                        auto error = GetLastError();
+                        std::ostringstream os;
+
+                        os << "SetEvent error " << error;
+                        OutputDebugStringA(os.str().c_str());
+                    }
+                }
+            }
         }
     }
 }
@@ -139,8 +170,14 @@ bool SarClient::start()
 void SarClient::stop()
 {
     if (_device != INVALID_HANDLE_VALUE) {
+        CancelIoEx(_device, nullptr);
         CloseHandle(_device);
         _device = INVALID_HANDLE_VALUE;
+    }
+
+    if (_completionPort) {
+        CloseHandle(_completionPort);
+        _completionPort = nullptr;
     }
 }
 
@@ -185,12 +222,23 @@ bool SarClient::openControlDevice()
     }
 
     _device = CreateFile(interfaceDetail->DevicePath,
-        GENERIC_ALL, 0, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+        GENERIC_ALL, 0, nullptr, OPEN_EXISTING,
+        FILE_ATTRIBUTE_NORMAL|FILE_FLAG_OVERLAPPED, nullptr);
 
     if (_device == INVALID_HANDLE_VALUE) {
         return false;
     }
 
+    _completionPort = CreateIoCompletionPort(_device, nullptr, 0, 0);
+
+    if (!_completionPort) {
+        CloseHandle(_device);
+        _device = nullptr;
+        return false;
+    }
+
+    _notificationHandles.clear();
+    _notificationHandles.resize(_driverConfig.endpoints.size());
     return true;
 }
 
@@ -245,6 +293,74 @@ bool SarClient::createEndpoints()
     }
 
     return true;
+}
+
+void SarClient::updateNotificationHandles()
+{
+    bool startNewOperation = false;
+    BOOL status;
+    DWORD error;
+
+    if (_handleQueueStarted) {
+        DWORD bytes = 0;
+        ULONG_PTR key = 0;
+        LPOVERLAPPED overlapped = nullptr;
+
+        if (GetQueuedCompletionStatus(
+            _completionPort, &bytes, &key, &overlapped, 0)) {
+
+            processNotificationHandleUpdates(
+                bytes / sizeof(SarHandleQueueResponse));
+            startNewOperation = true;
+        } else if (overlapped) {
+            OutputDebugStringA("Dequeued a failed operation"); // TODO
+            startNewOperation = true;
+        }
+    } else {
+        _handleQueueStarted = true;
+        startNewOperation = true;
+    }
+
+    if (!startNewOperation) {
+        return;
+    }
+
+    ZeroMemory((LPOVERLAPPED)&_handleQueueCompletion, sizeof(OVERLAPPED));
+    status = DeviceIoControl(
+        _device, SAR_REQUEST_GET_NOTIFICATION_EVENTS, nullptr, 0,
+        _handleQueueCompletion.responses,
+        sizeof(_handleQueueCompletion.responses),
+        nullptr, &_handleQueueCompletion);
+    error = GetLastError();
+
+    // DeviceIoControl completed synchronously, so process the result.
+    if (status) {
+        processNotificationHandleUpdates(
+            (int)(_handleQueueCompletion.InternalHigh /
+                  sizeof(SarHandleQueueResponse)));
+        _handleQueueStarted = false;
+    }
+
+    if (error != ERROR_IO_PENDING) {
+        OutputDebugStringA("SAR_REQUEST_GET_NOTIFICATION_EVENTS failed");
+        _handleQueueStarted = false;
+    }
+}
+
+void SarClient::processNotificationHandleUpdates(int updateCount)
+{
+    for (int i = 0; i < updateCount; ++i) {
+        SarHandleQueueResponse *response = &_handleQueueCompletion.responses[i];
+        DWORD endpointIndex = (DWORD)(response->associatedData >> 32);
+        DWORD generation = (DWORD)(response->associatedData & 0xFFFFFFFF);
+
+        if (_notificationHandles[endpointIndex].handle) {
+            CloseHandle(_notificationHandles[endpointIndex].handle);
+        }
+
+        _notificationHandles[endpointIndex].generation = generation;
+        _notificationHandles[endpointIndex].handle = response->handle;
+    }
 }
 
 void SarClient::demux(

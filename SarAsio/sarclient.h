@@ -40,9 +40,31 @@ struct SarClient
     void stop();
 
 private:
+    struct NotificationHandle
+    {
+        NotificationHandle(): generation(0), handle(nullptr) {}
+        ~NotificationHandle()
+        {
+            if (handle) {
+                CloseHandle(handle);
+            }
+        }
+
+        ULONG generation;
+        HANDLE handle;
+    };
+
+    struct HandleQueueCompletion: OVERLAPPED
+    {
+        SarHandleQueueResponse responses[32];
+    };
+
     bool openControlDevice();
     bool setBufferLayout();
     bool createEndpoints();
+    void updateNotificationHandles();
+    void processNotificationHandleUpdates(int updateCount);
+
     void demux(
         void *muxBuffer, void **targetBuffers, int ntargets,
         size_t targetSize, int sampleSize);
@@ -52,10 +74,14 @@ private:
 
     DriverConfig _driverConfig;
     BufferConfig _bufferConfig;
+    std::vector<NotificationHandle> _notificationHandles;
     HANDLE _device;
+    HANDLE _completionPort;
     void *_sharedBuffer;
     DWORD _sharedBufferSize;
     volatile SarEndpointRegisters *_registers;
+    HandleQueueCompletion _handleQueueCompletion;
+    bool _handleQueueStarted;
 };
 
 } // namespace Sar

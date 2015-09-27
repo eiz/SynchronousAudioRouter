@@ -86,7 +86,6 @@ NTSTATUS SarKsPinRtGetBufferCore(
     SarEndpointRegisters regs = {};
 
     processContext->bufferUVA = mappedAddress;
-    processContext->notificationCount = notificationCount;
     status = SarReadEndpointRegisters(&regs, endpoint);
 
     if (!NT_SUCCESS(status)) {
@@ -95,6 +94,7 @@ NTSTATUS SarKsPinRtGetBufferCore(
 
     regs.bufferOffset = cellIndex * SAR_BUFFER_CELL_SIZE;
     regs.bufferSize = actualSize;
+    regs.notificationCount = notificationCount;
     status = SarWriteEndpointRegisters(&regs, endpoint);
 
     if (!NT_SUCCESS(status)) {
