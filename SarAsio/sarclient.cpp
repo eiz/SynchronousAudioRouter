@@ -33,8 +33,7 @@ SarClient::SarClient(
 void SarClient::tick(long bufferIndex)
 {
     ATLASSERT(bufferIndex == 0 || bufferIndex == 1);
-
-    updateNotificationHandles();
+    bool hasUpdatedNotificationHandles = false;
 
     // for each endpoint
     // read isActive, generation and buffer offset/size/position
@@ -60,16 +59,16 @@ void SarClient::tick(long bufferIndex)
         auto notificationCount = _registers[i].notificationCount;
         void **targetBuffers = (void **)alloca(sizeof(void *) * ntargets);
 
-        //std::ostringstream os;
-
-        //os << i << "(" << generation << "): Offset: " << endpointBufferOffset
-        //   << " Size: " << endpointBufferSize << " Pos: " << positionRegister
-        //   << " FrameSize: " << frameSize << " NotificationCount: "
-        //   << notificationCount;
-        //OutputDebugStringA(os.str().c_str());
-
         for (int bi = bufferIndex, ti = 0; bi < asioBuffers.size(); bi += 2) {
             targetBuffers[ti++] = asioBuffers[bi];
+        }
+
+        if (!hasUpdatedNotificationHandles && notificationCount &&
+            (GENERATION_NUMBER(generation) !=
+             GENERATION_NUMBER(_notificationHandles[i].generation))) {
+
+            updateNotificationHandles();
+            hasUpdatedNotificationHandles = true;
         }
 
         if (!GENERATION_IS_ACTIVE(generation) || !endpointBufferSize) {
@@ -130,8 +129,12 @@ void SarClient::tick(long bufferIndex)
                  positionRegister < endpointBufferSize / 2)) {
 
                 auto evt = _notificationHandles[i].handle;
+                auto targetGeneration = _notificationHandles[i].generation;
 
-                if (evt) {
+                if (evt &&
+                    (GENERATION_NUMBER(targetGeneration) ==
+                     GENERATION_NUMBER(generation))) {
+
                     if (!SetEvent(evt)) {
                         auto error = GetLastError();
                         std::ostringstream os;

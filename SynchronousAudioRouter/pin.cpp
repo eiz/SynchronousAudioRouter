@@ -84,6 +84,20 @@ NTSTATUS SarKsPinCreate(PKSPIN pin, PIRP irp)
 
     endpoint->activeCellIndex = 0;
     endpoint->activeViewSize = 0;
+
+    SarEndpointRegisters regs = {};
+
+    if (!NT_SUCCESS(SarReadEndpointRegisters(&regs, endpoint))) {
+        SAR_LOG("Couldn't increment endpoint generation");
+    } else {
+        regs.generation =
+            MAKE_GENERATION(GENERATION_NUMBER(regs.generation) + 1, FALSE);
+
+        if (!NT_SUCCESS(SarWriteEndpointRegisters(&regs, endpoint))) {
+            SAR_LOG("Couldn't write endpoint registers");
+        }
+    }
+
     return status;
 }
 
@@ -185,7 +199,7 @@ NTSTATUS SarKsPinClose(PKSPIN pin, PIRP irp)
         SAR_LOG("Couldn't increment endpoint generation");
     } else {
         regs.generation =
-            MAKE_GENERATION(GENERATION_NUMBER(regs.generation + 1), FALSE);
+            MAKE_GENERATION(GENERATION_NUMBER(regs.generation) + 1, FALSE);
 
         if (!NT_SUCCESS(SarWriteEndpointRegisters(&regs, endpoint))) {
             SAR_LOG("Couldn't clear endpoint registers");
