@@ -29,19 +29,19 @@ SarDriverExtension *SarGetDriverExtensionFromIrp(PIRP irp)
     return SarGetDriverExtension(irpStack->DeviceObject->DriverObject);
 }
 
-SarFileContext *SarGetFileContextFromFileObject(
+SarControlContext *SarGetControlContextFromFileObject(
     SarDriverExtension *extension, PFILE_OBJECT fileObject)
 {
-    SarFileContext *fileContext;
-    SarFileContext fileContextTemplate;
+    SarControlContext *controlContext;
+    SarControlContext controlContextTemplate;
 
-    fileContextTemplate.fileObject = fileObject;
-    ExAcquireFastMutex(&extension->fileContextLock);
-    fileContext = (SarFileContext *)RtlLookupElementGenericTable(
-        &extension->fileContextTable, (PVOID)&fileContextTemplate);
-    ExReleaseFastMutex(&extension->fileContextLock);
+    controlContextTemplate.fileObject = fileObject;
+    ExAcquireFastMutex(&extension->controlContextLock);
+    controlContext = (SarControlContext *)RtlLookupElementGenericTable(
+        &extension->controlContextTable, (PVOID)&controlContextTemplate);
+    ExReleaseFastMutex(&extension->controlContextLock);
 
-    return fileContext;
+    return controlContext;
 }
 
 // TODO: gotta go fast
@@ -53,15 +53,17 @@ SarEndpoint *SarGetEndpointFromIrp(PIRP irp)
     PVOID restartKey = nullptr;
     SarEndpoint *found = nullptr;
 
-    ExAcquireFastMutex(&extension->fileContextLock);
+    ExAcquireFastMutex(&extension->controlContextLock);
 
     FOR_EACH_GENERIC(
-        &extension->fileContextTable, SarFileContext, fileContext, restartKey) {
-        ExAcquireFastMutex(&fileContext->mutex);
+        &extension->controlContextTable, SarControlContext,
+        controlContext, restartKey) {
 
-        PLIST_ENTRY entry = fileContext->endpointList.Flink;
+        ExAcquireFastMutex(&controlContext->mutex);
 
-        while (entry != &fileContext->endpointList) {
+        PLIST_ENTRY entry = controlContext->endpointList.Flink;
+
+        while (entry != &controlContext->endpointList) {
             SarEndpoint *endpoint =
                 CONTAINING_RECORD(entry, SarEndpoint, listEntry);
 
@@ -73,14 +75,14 @@ SarEndpoint *SarGetEndpointFromIrp(PIRP irp)
             }
         }
 
-        ExReleaseFastMutex(&fileContext->mutex);
+        ExReleaseFastMutex(&controlContext->mutex);
 
         if (found) {
             break;
         }
     }
 
-    ExReleaseFastMutex(&extension->fileContextLock);
+    ExReleaseFastMutex(&extension->controlContextLock);
     return found;
 }
 
@@ -245,20 +247,20 @@ void SarCancelHandleQueueIrp(PDEVICE_OBJECT deviceObject, PIRP irp)
 
     PIO_STACK_LOCATION irpStack = IoGetCurrentIrpStackLocation(irp);
     SarDriverExtension *extension = SarGetDriverExtensionFromIrp(irp);
-    SarFileContext *fileContext =
-        SarGetFileContextFromFileObject(extension, irpStack->FileObject);
+    SarControlContext *controlContext =
+        SarGetControlContextFromFileObject(extension, irpStack->FileObject);
     PLIST_ENTRY entry;
     SarHandleQueueIrp *toCancel = nullptr;
     KIRQL irql;
 
-    if (!fileContext) {
+    if (!controlContext) {
         return;
     }
 
-    KeAcquireSpinLock(&fileContext->handleQueue.lock,  &irql);
-    entry = fileContext->handleQueue.pendingIrps.Flink;
+    KeAcquireSpinLock(&controlContext->handleQueue.lock,  &irql);
+    entry = controlContext->handleQueue.pendingIrps.Flink;
 
-    while (entry != &fileContext->handleQueue.pendingIrps) {
+    while (entry != &controlContext->handleQueue.pendingIrps) {
         SarHandleQueueIrp *pendingIrp =
             CONTAINING_RECORD(entry, SarHandleQueueIrp, listEntry);
 
@@ -271,7 +273,7 @@ void SarCancelHandleQueueIrp(PDEVICE_OBJECT deviceObject, PIRP irp)
         }
     }
 
-    KeReleaseSpinLock(&fileContext->handleQueue.lock, irql);
+    KeReleaseSpinLock(&controlContext->handleQueue.lock, irql);
 
     if (toCancel) {
         ZwClose(toCancel->kernelProcessHandle);

@@ -21,7 +21,7 @@ NTSTATUS SarKsPinRtGetBufferCore(
     ULONG notificationCount, PKSRTAUDIO_BUFFER buffer)
 {
     SarEndpoint *endpoint = SarGetEndpointFromIrp(irp);
-    SarFileContext *fileContext = endpoint->owner;
+    SarControlContext *controlContext = endpoint->owner;
     SarEndpointProcessContext *processContext;
     NTSTATUS status;
 
@@ -44,29 +44,29 @@ NTSTATUS SarKsPinRtGetBufferCore(
 
     ULONG actualSize = ROUND_UP(
         requestedBufferSize,
-        fileContext->frameSize * endpoint->channelCount);
+        controlContext->frameSize * endpoint->channelCount);
     SIZE_T viewSize = ROUND_UP(actualSize, SAR_BUFFER_CELL_SIZE);
 
-    ExAcquireFastMutex(&fileContext->mutex);
+    ExAcquireFastMutex(&controlContext->mutex);
 
-    if (!fileContext->bufferSection) {
+    if (!controlContext->bufferSection) {
         SAR_LOG("Buffer isn't allocated");
-        ExReleaseFastMutex(&fileContext->mutex);
+        ExReleaseFastMutex(&controlContext->mutex);
         return STATUS_INSUFFICIENT_RESOURCES;
     }
 
     ULONG cellIndex = RtlFindClearBitsAndSet(
-        &fileContext->bufferMap, (ULONG)(viewSize / SAR_BUFFER_CELL_SIZE), 0);
+        &controlContext->bufferMap, (ULONG)(viewSize / SAR_BUFFER_CELL_SIZE), 0);
 
     if (cellIndex == 0xFFFFFFFF) {
-        ExReleaseFastMutex(&fileContext->mutex);
+        ExReleaseFastMutex(&controlContext->mutex);
         return STATUS_INSUFFICIENT_RESOURCES;
     }
 
     endpoint->activeCellIndex = cellIndex;
     endpoint->activeViewSize = viewSize;
     endpoint->activeBufferSize = actualSize;
-    ExReleaseFastMutex(&fileContext->mutex);
+    ExReleaseFastMutex(&controlContext->mutex);
 
     PVOID mappedAddress = nullptr;
     LARGE_INTEGER sectionOffset;

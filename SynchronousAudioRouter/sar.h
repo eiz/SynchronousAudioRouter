@@ -174,12 +174,12 @@ typedef struct SarDriverExtension
     PDRIVER_DISPATCH ksDispatchCleanup;
     PDRIVER_DISPATCH ksDispatchDeviceControl;
     UNICODE_STRING sarInterfaceName;
-    FAST_MUTEX fileContextLock;
-    RTL_GENERIC_TABLE fileContextTable;
+    FAST_MUTEX controlContextLock;
+    RTL_GENERIC_TABLE controlContextTable;
     LONG nextFilterId;
 } SarDriverExtension;
 
-typedef struct SarFileContext
+typedef struct SarControlContext
 {
     PFILE_OBJECT fileObject;
     FAST_MUTEX mutex;
@@ -194,13 +194,13 @@ typedef struct SarFileContext
     DWORD frameSize;
     DWORD sampleRate;
     DWORD sampleSize;
-} SarFileContext;
+} SarControlContext;
 
-#define SarBufferMapEntryCount(fileContext) \
-    ((fileContext)->bufferSize / SAR_BUFFER_CELL_SIZE)
-#define SarBufferMapSize(fileContext) (sizeof(DWORD) * ( \
-    SarBufferMapEntryCount(fileContext) / sizeof(DWORD) + \
-    (((SarBufferMapEntryCount(fileContext) % sizeof(DWORD)) != 0) ? 1 : 0)))
+#define SarBufferMapEntryCount(controlContext) \
+    ((controlContext)->bufferSize / SAR_BUFFER_CELL_SIZE)
+#define SarBufferMapSize(controlContext) (sizeof(DWORD) * ( \
+    SarBufferMapEntryCount(controlContext) / sizeof(DWORD) + \
+    (((SarBufferMapEntryCount(controlContext) % sizeof(DWORD)) != 0) ? 1 : 0)))
 
 typedef struct SarEndpointProcessContext
 {
@@ -216,7 +216,7 @@ typedef struct SarEndpoint
     LIST_ENTRY listEntry;
     PIRP pendingIrp;
     UNICODE_STRING deviceName;
-    SarFileContext *owner;
+    SarControlContext *owner;
     PKSFILTERFACTORY filterFactory;
     PKSFILTER_DESCRIPTOR filterDesc;
     PKSPIN_DESCRIPTOR_EX pinDesc;
@@ -241,14 +241,14 @@ NTSTATUS SarReadUserBuffer(PVOID src, PIRP irp, ULONG size);
 NTSTATUS SarWriteUserBuffer(PVOID src, PIRP irp, ULONG size);
 VOID SarDumpKsIoctl(PIO_STACK_LOCATION irpStack);
 NTSTATUS SarSetBufferLayout(
-    SarFileContext *fileContext,
+    SarControlContext *controlContext,
     SarSetBufferLayoutRequest *request,
     SarSetBufferLayoutResponse *response);
 NTSTATUS SarCreateEndpoint(
     PDEVICE_OBJECT device,
     PIRP irp,
     SarDriverExtension *extension,
-    SarFileContext *fileContext,
+    SarControlContext *controlContext,
     SarCreateEndpointRequest *request);
 
 // Device
@@ -308,12 +308,12 @@ NTSTATUS SarGetOrCreateEndpointProcessContext(
 NTSTATUS SarDeleteEndpointProcessContext(SarEndpointProcessContext *context);
 
 // Init
-NTSTATUS SarInitializeFileContext(SarFileContext *fileContext);
-BOOLEAN SarDeleteFileContext(SarDriverExtension *extension, PIRP irp);
-RTL_GENERIC_COMPARE_RESULTS NTAPI SarCompareFileContext(
+NTSTATUS SarInitializeControlContext(SarControlContext *controlContext);
+BOOLEAN SarDeleteControlContext(SarDriverExtension *extension, PIRP irp);
+RTL_GENERIC_COMPARE_RESULTS NTAPI SarCompareControlContext(
     PRTL_GENERIC_TABLE table, PVOID lhs, PVOID rhs);
-PVOID NTAPI SarAllocateFileContext(PRTL_GENERIC_TABLE table, CLONG byteSize);
-VOID NTAPI SarFreeFileContext(PRTL_GENERIC_TABLE table, PVOID buffer);
+PVOID NTAPI SarAllocateControlContext(PRTL_GENERIC_TABLE table, CLONG byteSize);
+VOID NTAPI SarFreeControlContext(PRTL_GENERIC_TABLE table, PVOID buffer);
 NTSTATUS DriverEntry(
     IN PDRIVER_OBJECT driverObject,
     IN PUNICODE_STRING registryPath);
@@ -340,7 +340,7 @@ NTSTATUS DriverEntry(
 
 SarDriverExtension *SarGetDriverExtension(PDRIVER_OBJECT driverObject);
 SarDriverExtension *SarGetDriverExtensionFromIrp(PIRP irp);
-SarFileContext *SarGetFileContextFromFileObject(
+SarControlContext *SarGetControlContextFromFileObject(
     SarDriverExtension *extension, PFILE_OBJECT fileObject);
 SarEndpoint *SarGetEndpointFromIrp(PIRP irp);
 NTSTATUS SarReadEndpointRegisters(

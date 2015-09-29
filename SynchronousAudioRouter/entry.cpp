@@ -54,8 +54,8 @@ NTSTATUS SarIrpCreate(PDEVICE_OBJECT deviceObject, PIRP irp)
     SarDriverExtension *extension =
         (SarDriverExtension *)IoGetDriverObjectExtension(
             deviceObject->DriverObject, DriverEntry);
-    SarFileContext fileContextTemplate;
-    SarFileContext *fileContext;
+    SarControlContext controlContextTemplate;
+    SarControlContext *controlContext;
     BOOLEAN isNew;
 
     RtlUnicodeStringInit(&referencePath, SAR_CONTROL_REFERENCE_STRING);
@@ -66,26 +66,26 @@ NTSTATUS SarIrpCreate(PDEVICE_OBJECT deviceObject, PIRP irp)
         return extension->ksDispatchCreate(deviceObject, irp);
     }
 
-    fileContextTemplate.fileObject = irpStack->FileObject;
-    ExAcquireFastMutex(&extension->fileContextLock);
-    fileContext = (SarFileContext *)RtlInsertElementGenericTable(
-        &extension->fileContextTable, (PVOID)&fileContextTemplate,
-        sizeof(SarFileContext), &isNew);
-    ExReleaseFastMutex(&extension->fileContextLock);
+    controlContextTemplate.fileObject = irpStack->FileObject;
+    ExAcquireFastMutex(&extension->controlContextLock);
+    controlContext = (SarControlContext *)RtlInsertElementGenericTable(
+        &extension->controlContextTable, (PVOID)&controlContextTemplate,
+        sizeof(SarControlContext), &isNew);
+    ExReleaseFastMutex(&extension->controlContextLock);
     ASSERT(isNew);
 
-    if (!fileContext) {
+    if (!controlContext) {
         status = STATUS_INSUFFICIENT_RESOURCES;
         goto out;
     }
 
-    if (!NT_SUCCESS(SarInitializeFileContext(fileContext))) {
-        SarDeleteFileContext(extension, irp);
+    if (!NT_SUCCESS(SarInitializeControlContext(controlContext))) {
+        SarDeleteControlContext(extension, irp);
         status = STATUS_INSUFFICIENT_RESOURCES;
         goto out;
     }
 
-    irpStack->FileObject->FsContext2 = fileContext;
+    irpStack->FileObject->FsContext2 = controlContext;
 
 out:
     irp->IoStatus.Status = status;
@@ -99,7 +99,7 @@ NTSTATUS SarIrpClose(PDEVICE_OBJECT deviceObject, PIRP irp)
     SarDriverExtension *extension =
         (SarDriverExtension *)IoGetDriverObjectExtension(
             deviceObject->DriverObject, DriverEntry);
-    BOOLEAN deleted = SarDeleteFileContext(extension, irp);
+    BOOLEAN deleted = SarDeleteControlContext(extension, irp);
 
     if (!deleted) {
         return extension->ksDispatchClose(deviceObject, irp);
@@ -111,26 +111,26 @@ NTSTATUS SarIrpClose(PDEVICE_OBJECT deviceObject, PIRP irp)
     return status;
 }
 
-BOOLEAN SarDeleteFileContext(SarDriverExtension *extension, PIRP irp)
+BOOLEAN SarDeleteControlContext(SarDriverExtension *extension, PIRP irp)
 {
     PIO_STACK_LOCATION irpStack;
-    SarFileContext *fileContext;
-    SarFileContext fileContextTemplate;
+    SarControlContext *controlContext;
+    SarControlContext controlContextTemplate;
     BOOLEAN deleted;
 
     irpStack = IoGetCurrentIrpStackLocation(irp);
-    fileContextTemplate.fileObject = irpStack->FileObject;
-    ExAcquireFastMutex(&extension->fileContextLock);
-    fileContext = (SarFileContext *)RtlLookupElementGenericTable(
-        &extension->fileContextTable, (PVOID)&fileContextTemplate);
-    ExReleaseFastMutex(&extension->fileContextLock);
+    controlContextTemplate.fileObject = irpStack->FileObject;
+    ExAcquireFastMutex(&extension->controlContextLock);
+    controlContext = (SarControlContext *)RtlLookupElementGenericTable(
+        &extension->controlContextTable, (PVOID)&controlContextTemplate);
+    ExReleaseFastMutex(&extension->controlContextLock);
 
-    if (fileContext) {
-        ExAcquireFastMutex(&fileContext->mutex);
+    if (controlContext) {
+        ExAcquireFastMutex(&controlContext->mutex);
 
-        PLIST_ENTRY entry = fileContext->endpointList.Flink;
+        PLIST_ENTRY entry = controlContext->endpointList.Flink;
 
-        while (entry != &fileContext->endpointList) {
+        while (entry != &controlContext->endpointList) {
             //SarEndpoint *endpoint =
             //    CONTAINING_RECORD(entry, SarEndpoint, listEntry);
 
@@ -139,21 +139,21 @@ BOOLEAN SarDeleteFileContext(SarDriverExtension *extension, PIRP irp)
             SAR_LOG("This should delete filters but the locking is tricky");
         }
 
-        if (fileContext->workItem) {
-            IoFreeWorkItem(fileContext->workItem);
+        if (controlContext->workItem) {
+            IoFreeWorkItem(controlContext->workItem);
         }
 
-        ExReleaseFastMutex(&fileContext->mutex);
+        ExReleaseFastMutex(&controlContext->mutex);
 
-        if (fileContext->bufferSection) {
-            ZwClose(fileContext->bufferSection);
+        if (controlContext->bufferSection) {
+            ZwClose(controlContext->bufferSection);
         }
     }
 
-    ExAcquireFastMutex(&extension->fileContextLock);
+    ExAcquireFastMutex(&extension->controlContextLock);
     deleted = RtlDeleteElementGenericTable(
-        &extension->fileContextTable, &fileContextTemplate);
-    ExReleaseFastMutex(&extension->fileContextLock);
+        &extension->controlContextTable, &controlContextTemplate);
+    ExReleaseFastMutex(&extension->controlContextLock);
     return deleted;
 }
 
@@ -164,7 +164,7 @@ NTSTATUS SarIrpCleanup(PDEVICE_OBJECT deviceObject, PIRP irp)
     SarDriverExtension *extension =
         (SarDriverExtension *)IoGetDriverObjectExtension(
             deviceObject->DriverObject, DriverEntry);
-    BOOLEAN deleted = SarDeleteFileContext(extension, irp);
+    BOOLEAN deleted = SarDeleteControlContext(extension, irp);
 
     if (!deleted) {
         return extension->ksDispatchCleanup(deviceObject, irp);
@@ -184,8 +184,8 @@ NTSTATUS SarIrpDeviceControl(PDEVICE_OBJECT deviceObject, PIRP irp)
     SarDriverExtension *extension =
         (SarDriverExtension *)IoGetDriverObjectExtension(
             deviceObject->DriverObject, DriverEntry);
-    SarFileContext *fileContext;
-    SarFileContext fileContextTemplate;
+    SarControlContext *controlContext;
+    SarControlContext controlContextTemplate;
 
     irpStack = IoGetCurrentIrpStackLocation(irp);
     ioControlCode = irpStack->Parameters.DeviceIoControl.IoControlCode;
@@ -194,13 +194,13 @@ NTSTATUS SarIrpDeviceControl(PDEVICE_OBJECT deviceObject, PIRP irp)
     SarDumpKsIoctl(irp);
 #endif
 
-    fileContextTemplate.fileObject = irpStack->FileObject;
-    ExAcquireFastMutex(&extension->fileContextLock);
-    fileContext = (SarFileContext *)RtlLookupElementGenericTable(
-        &extension->fileContextTable, (PVOID)&fileContextTemplate);
-    ExReleaseFastMutex(&extension->fileContextLock);
+    controlContextTemplate.fileObject = irpStack->FileObject;
+    ExAcquireFastMutex(&extension->controlContextLock);
+    controlContext = (SarControlContext *)RtlLookupElementGenericTable(
+        &extension->controlContextTable, (PVOID)&controlContextTemplate);
+    ExReleaseFastMutex(&extension->controlContextLock);
 
-    if (!fileContext) {
+    if (!controlContext) {
         return extension->ksDispatchDeviceControl(deviceObject, irp);
     }
 
@@ -218,7 +218,7 @@ NTSTATUS SarIrpDeviceControl(PDEVICE_OBJECT deviceObject, PIRP irp)
                 break;
             }
 
-            ntStatus = SarSetBufferLayout(fileContext, &request, &response);
+            ntStatus = SarSetBufferLayout(controlContext, &request, &response);
 
             if (!NT_SUCCESS(ntStatus)) {
                 break;
@@ -240,11 +240,11 @@ NTSTATUS SarIrpDeviceControl(PDEVICE_OBJECT deviceObject, PIRP irp)
 
             IoMarkIrpPending(irp);
             ntStatus = SarCreateEndpoint(
-                deviceObject, irp, extension, fileContext, &request);
+                deviceObject, irp, extension, controlContext, &request);
             break;
         }
         case SAR_REQUEST_GET_NOTIFICATION_EVENTS: {
-            ntStatus = SarWaitHandleQueue(&fileContext->handleQueue, irp);
+            ntStatus = SarWaitHandleQueue(&controlContext->handleQueue, irp);
             break;
         }
         default:
@@ -271,45 +271,45 @@ VOID SarUnload(PDRIVER_OBJECT driverObject)
     RtlFreeUnicodeString(&extension->sarInterfaceName);
 }
 
-NTSTATUS SarInitializeFileContext(SarFileContext *fileContext)
+NTSTATUS SarInitializeControlContext(SarControlContext *controlContext)
 {
-    PFILE_OBJECT fileObject = fileContext->fileObject;
+    PFILE_OBJECT fileObject = controlContext->fileObject;
 
-    RtlZeroMemory(fileContext, sizeof(SarFileContext));
-    fileContext->fileObject = fileObject;
-    ExInitializeFastMutex(&fileContext->mutex);
-    InitializeListHead(&fileContext->endpointList);
-    InitializeListHead(&fileContext->pendingEndpointList);
-    SarInitializeHandleQueue(&fileContext->handleQueue);
-    fileContext->workItem = IoAllocateWorkItem(
-        fileContext->fileObject->DeviceObject);
+    RtlZeroMemory(controlContext, sizeof(SarControlContext));
+    controlContext->fileObject = fileObject;
+    ExInitializeFastMutex(&controlContext->mutex);
+    InitializeListHead(&controlContext->endpointList);
+    InitializeListHead(&controlContext->pendingEndpointList);
+    SarInitializeHandleQueue(&controlContext->handleQueue);
+    controlContext->workItem = IoAllocateWorkItem(
+        controlContext->fileObject->DeviceObject);
 
-    if (!fileContext->workItem) {
+    if (!controlContext->workItem) {
         return STATUS_INSUFFICIENT_RESOURCES;
     }
 
     return STATUS_SUCCESS;
 }
 
-RTL_GENERIC_COMPARE_RESULTS NTAPI SarCompareFileContext(
+RTL_GENERIC_COMPARE_RESULTS NTAPI SarCompareControlContext(
     PRTL_GENERIC_TABLE table, PVOID lhs, PVOID rhs)
 {
     UNREFERENCED_PARAMETER(table);
-    SarFileContext *slhs = (SarFileContext *)lhs;
-    SarFileContext *srhs = (SarFileContext *)rhs;
+    SarControlContext *slhs = (SarControlContext *)lhs;
+    SarControlContext *srhs = (SarControlContext *)rhs;
 
     return slhs->fileObject < srhs->fileObject ? GenericLessThan :
         slhs->fileObject == srhs->fileObject ? GenericEqual :
         GenericGreaterThan;
 }
 
-PVOID NTAPI SarAllocateFileContext(PRTL_GENERIC_TABLE table, CLONG byteSize)
+PVOID NTAPI SarAllocateControlContext(PRTL_GENERIC_TABLE table, CLONG byteSize)
 {
     UNREFERENCED_PARAMETER(table);
     return ExAllocatePoolWithTag(NonPagedPool, byteSize, SAR_TAG);
 }
 
-VOID NTAPI SarFreeFileContext(PRTL_GENERIC_TABLE table, PVOID buffer)
+VOID NTAPI SarFreeControlContext(PRTL_GENERIC_TABLE table, PVOID buffer)
 {
     UNREFERENCED_PARAMETER(table);
     ExFreePoolWithTag(buffer, SAR_TAG);
@@ -338,11 +338,11 @@ extern "C" NTSTATUS DriverEntry(
         return status;
     }
 
-    ExInitializeFastMutex(&extension->fileContextLock);
-    RtlInitializeGenericTable(&extension->fileContextTable,
-        SarCompareFileContext,
-        SarAllocateFileContext,
-        SarFreeFileContext,
+    ExInitializeFastMutex(&extension->controlContextLock);
+    RtlInitializeGenericTable(&extension->controlContextTable,
+        SarCompareControlContext,
+        SarAllocateControlContext,
+        SarFreeControlContext,
         nullptr);
     extension->ksDispatchCreate = driverObject->MajorFunction[IRP_MJ_CREATE];
     extension->ksDispatchClose = driverObject->MajorFunction[IRP_MJ_CLOSE];
