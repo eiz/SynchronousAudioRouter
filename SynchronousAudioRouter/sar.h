@@ -333,6 +333,14 @@ FORCEINLINE BOOLEAN SarReleaseControlContext(SarControlContext *controlContext)
     return FALSE;
 }
 
+FORCEINLINE VOID SarReleaseEndpointAndContext(SarEndpoint *endpoint)
+{
+    SarControlContext *controlContext = endpoint->owner;
+
+    SarReleaseEndpoint(endpoint);
+    SarReleaseControlContext(controlContext);
+}
+
 NTSTATUS DriverEntry(
     IN PDRIVER_OBJECT driverObject,
     IN PUNICODE_STRING registryPath);
@@ -361,7 +369,10 @@ SarDriverExtension *SarGetDriverExtensionFromIrp(PIRP irp);
 SarControlContext *SarGetControlContextFromFileObject(
     SarDriverExtension *extension, PFILE_OBJECT fileObject);
 
-SarEndpoint *SarGetEndpointFromIrp(PIRP irp);
+// Gets the endpoint associated with an IRP for a KS pin or filter. If retain
+// is TRUE, both the endpoint and its control context are retained and must be
+// released using SarReleaseEndpointAndContext.
+SarEndpoint *SarGetEndpointFromIrp(PIRP irp, BOOLEAN retain);
 NTSTATUS SarReadEndpointRegisters(
     SarEndpointRegisters *regs, SarEndpoint *endpoint);
 NTSTATUS SarWriteEndpointRegisters(

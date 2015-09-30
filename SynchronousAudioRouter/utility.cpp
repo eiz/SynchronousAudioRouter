@@ -43,7 +43,7 @@ SarControlContext *SarGetControlContextFromFileObject(
 }
 
 // TODO: gotta go fast
-SarEndpoint *SarGetEndpointFromIrp(PIRP irp)
+SarEndpoint *SarGetEndpointFromIrp(PIRP irp, BOOLEAN retain)
 {
     PKSFILTER filter = KsGetFilterFromIrp(irp);
     PKSFILTERFACTORY factory = KsFilterGetParentFilterFactory(filter);
@@ -72,6 +72,12 @@ SarEndpoint *SarGetEndpointFromIrp(PIRP irp)
 
             if (endpoint->filterFactory == factory) {
                 found = endpoint;
+
+                if (retain) {
+                    SarRetainControlContext(controlContext);
+                    SarRetainEndpoint(endpoint);
+                }
+
                 break;
             }
         }

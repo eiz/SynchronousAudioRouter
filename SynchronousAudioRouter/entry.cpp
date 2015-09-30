@@ -77,28 +77,36 @@ SarControlContext *SarCreateControlContext(PFILE_OBJECT fileObject)
 
 VOID SarDeleteControlContext(SarControlContext *controlContext)
 {
-    ExAcquireFastMutex(&controlContext->mutex);
+    SAR_LOG("SarDeleteControlContext");
+    while (!IsListEmpty(&controlContext->endpointList)) {
+        PLIST_ENTRY entry = controlContext->endpointList.Flink;
+        SarEndpoint *endpoint =
+            CONTAINING_RECORD(entry, SarEndpoint, listEntry);
 
-    PLIST_ENTRY entry = controlContext->endpointList.Flink;
+        RemoveEntryList(&endpoint->listEntry);
+        SarReleaseEndpoint(endpoint);
+    }
 
-    while (entry != &controlContext->endpointList) {
-        //SarEndpoint *endpoint =
-        //    CONTAINING_RECORD(entry, SarEndpoint, listEntry);
+    while (!IsListEmpty(&controlContext->pendingEndpointList)) {
+        PLIST_ENTRY entry = controlContext->pendingEndpointList.Flink;
+        SarEndpoint *endpoint =
+            CONTAINING_RECORD(entry, SarEndpoint, listEntry);
 
-        entry = entry->Flink;
-        // TODO: destroy ks filters when sar control device is closed
-        SAR_LOG("This should delete filters but the locking is tricky");
+        RemoveEntryList(&endpoint->listEntry);
+        SarReleaseEndpoint(endpoint);
     }
 
     if (controlContext->workItem) {
         IoFreeWorkItem(controlContext->workItem);
+        controlContext->workItem = nullptr;
     }
-
-    ExReleaseFastMutex(&controlContext->mutex);
 
     if (controlContext->bufferSection) {
         ZwClose(controlContext->bufferSection);
+        controlContext->bufferSection = nullptr;
     }
+
+    ExFreePoolWithTag(controlContext, SAR_TAG);
 }
 
 BOOLEAN SarOrphanControlContext(SarDriverExtension *extension, PIRP irp)
@@ -122,6 +130,7 @@ BOOLEAN SarOrphanControlContext(SarDriverExtension *extension, PIRP irp)
         return FALSE;
     }
 
+    SAR_LOG("SarOrphanControlContext");
     ExAcquireFastMutex(&controlContext->mutex);
     controlContext->orphan = TRUE;
     InitializeListHead(&orphanEndpoints);
@@ -141,7 +150,7 @@ BOOLEAN SarOrphanControlContext(SarDriverExtension *extension, PIRP irp)
             CONTAINING_RECORD(orphanEndpoints.Flink, SarEndpoint, listEntry);
 
         RemoveEntryList(&endpoint->listEntry);
-        SarReleaseEndpoint(endpoint);
+        SarOrphanEndpoint(endpoint);
     }
 
     SarReleaseControlContext(controlContext);

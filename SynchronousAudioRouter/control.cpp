@@ -739,5 +739,15 @@ err_out:
 
 VOID SarDeleteEndpoint(SarEndpoint *endpoint)
 {
+    SAR_LOG("SarDeleteEndpoint");
     UNREFERENCED_PARAMETER(endpoint);
+}
+
+VOID SarOrphanEndpoint(SarEndpoint *endpoint)
+{
+    SAR_LOG("SarOrphanEndpoint");
+    ExAcquireFastMutex(&endpoint->mutex);
+    endpoint->orphan = TRUE;
+    ExReleaseFastMutex(&endpoint->mutex);
+    SarReleaseEndpoint(endpoint);
 }

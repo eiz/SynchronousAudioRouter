@@ -20,7 +20,7 @@ NTSTATUS SarKsPinRtGetBufferCore(
     PIRP irp, PVOID baseAddress, ULONG requestedBufferSize,
     ULONG notificationCount, PKSRTAUDIO_BUFFER buffer)
 {
-    SarEndpoint *endpoint = SarGetEndpointFromIrp(irp);
+    SarEndpoint *endpoint = SarGetEndpointFromIrp(irp, TRUE);
     SarControlContext *controlContext = endpoint->owner;
     SarEndpointProcessContext *processContext;
     NTSTATUS status;
@@ -32,6 +32,7 @@ NTSTATUS SarKsPinRtGetBufferCore(
 
     if (baseAddress != nullptr) {
         SAR_LOG("It wants a specific address");
+        SarReleaseEndpointAndContext(endpoint);
         return STATUS_NOT_IMPLEMENTED;
     }
 
@@ -39,6 +40,7 @@ NTSTATUS SarKsPinRtGetBufferCore(
         endpoint, PsGetCurrentProcess(), &processContext);
 
     if (!NT_SUCCESS(status)) {
+        SarReleaseEndpointAndContext(endpoint);
         return status;
     }
 
@@ -52,6 +54,7 @@ NTSTATUS SarKsPinRtGetBufferCore(
     if (!controlContext->bufferSection) {
         SAR_LOG("Buffer isn't allocated");
         ExReleaseFastMutex(&controlContext->mutex);
+        SarReleaseEndpointAndContext(endpoint);
         return STATUS_INSUFFICIENT_RESOURCES;
     }
 
@@ -60,6 +63,7 @@ NTSTATUS SarKsPinRtGetBufferCore(
 
     if (cellIndex == 0xFFFFFFFF) {
         ExReleaseFastMutex(&controlContext->mutex);
+        SarReleaseEndpointAndContext(endpoint);
         return STATUS_INSUFFICIENT_RESOURCES;
     }
 
@@ -80,6 +84,7 @@ NTSTATUS SarKsPinRtGetBufferCore(
 
     if (!NT_SUCCESS(status)) {
         SAR_LOG("Section mapping failed %08X", status);
+        SarReleaseEndpointAndContext(endpoint);
         return status;
     }
 
@@ -89,6 +94,7 @@ NTSTATUS SarKsPinRtGetBufferCore(
     status = SarReadEndpointRegisters(&regs, endpoint);
 
     if (!NT_SUCCESS(status)) {
+        SarReleaseEndpointAndContext(endpoint);
         return status;
     }
 
@@ -100,12 +106,14 @@ NTSTATUS SarKsPinRtGetBufferCore(
     if (!NT_SUCCESS(status)) {
         SAR_LOG("Couldn't write endpoint registers: %08X %p %p", status,
             processContext->process, PsGetCurrentProcess());
+        SarReleaseEndpointAndContext(endpoint);
         return status; // TODO: goto err_out
     }
 
     buffer->ActualBufferSize = actualSize;
     buffer->BufferAddress = mappedAddress;
     buffer->CallMemoryBarrier = FALSE;
+    SarReleaseEndpointAndContext(endpoint);
     return STATUS_SUCCESS;
 }
 
@@ -141,7 +149,7 @@ NTSTATUS SarKsPinRtGetClockRegister(
 
     NTSTATUS status;
     PKSRTAUDIO_HWREGISTER reg = (PKSRTAUDIO_HWREGISTER)data;
-    SarEndpoint *endpoint = SarGetEndpointFromIrp(irp);
+    SarEndpoint *endpoint = SarGetEndpointFromIrp(irp, TRUE);
     SarEndpointProcessContext *context;
 
     if (!endpoint) {
@@ -152,6 +160,7 @@ NTSTATUS SarKsPinRtGetClockRegister(
         endpoint, PsGetCurrentProcess(), &context);
 
     if (!NT_SUCCESS(status)) {
+        SarReleaseEndpointAndContext(endpoint);
         return status;
     }
 
@@ -161,6 +170,7 @@ NTSTATUS SarKsPinRtGetClockRegister(
     reg->Accuracy = 0;
     reg->Numerator = endpoint->owner->sampleRate;
     reg->Denominator = endpoint->owner->frameSize / endpoint->owner->sampleSize;
+    SarReleaseEndpointAndContext(endpoint);
     return STATUS_SUCCESS;
 }
 
@@ -171,7 +181,7 @@ NTSTATUS SarKsPinRtGetHwLatency(
     UNREFERENCED_PARAMETER(request);
     SAR_LOG("SarKsPinRtGetHwLatency");
     PKSRTAUDIO_HWLATENCY latency = (PKSRTAUDIO_HWLATENCY)data;
-    SarEndpoint *endpoint = SarGetEndpointFromIrp(irp);
+    SarEndpoint *endpoint = SarGetEndpointFromIrp(irp, TRUE);
 
     if (!endpoint) {
         return STATUS_UNSUCCESSFUL;
@@ -182,6 +192,7 @@ NTSTATUS SarKsPinRtGetHwLatency(
     latency->FifoSize = 0;
     latency->ChipsetDelay = 0;
     latency->CodecDelay = 0;
+    SarReleaseEndpointAndContext(endpoint);
     return STATUS_SUCCESS;
 }
 
@@ -203,7 +214,7 @@ NTSTATUS SarKsPinRtGetPositionRegister(
 
     NTSTATUS status;
     PKSRTAUDIO_HWREGISTER reg = (PKSRTAUDIO_HWREGISTER)data;
-    SarEndpoint *endpoint = SarGetEndpointFromIrp(irp);
+    SarEndpoint *endpoint = SarGetEndpointFromIrp(irp, TRUE);
     SarEndpointProcessContext *context;
 
     if (!endpoint) {
@@ -214,6 +225,7 @@ NTSTATUS SarKsPinRtGetPositionRegister(
         endpoint, PsGetCurrentProcess(), &context);
 
     if (!NT_SUCCESS(status)) {
+        SarReleaseEndpointAndContext(endpoint);
         return status;
     }
 
@@ -225,6 +237,7 @@ NTSTATUS SarKsPinRtGetPositionRegister(
         endpoint->owner->frameSize;
     reg->Numerator = 0;
     reg->Denominator = 0;
+    SarReleaseEndpointAndContext(endpoint);
     return STATUS_SUCCESS;
 }
 
@@ -254,7 +267,7 @@ NTSTATUS SarKsPinRtRegisterNotificationEvent(
 {
     UNREFERENCED_PARAMETER(data);
     SAR_LOG("SarKsPinRtRegisterNotificationEvent");
-    SarEndpoint *endpoint = SarGetEndpointFromIrp(irp);
+    SarEndpoint *endpoint = SarGetEndpointFromIrp(irp, TRUE);
     SarEndpointRegisters regs;
     NTSTATUS status;
     PKSRTAUDIO_NOTIFICATION_EVENT_PROPERTY prop =
@@ -267,13 +280,16 @@ NTSTATUS SarKsPinRtRegisterNotificationEvent(
     status = SarReadEndpointRegisters(&regs, endpoint);
 
     if (!NT_SUCCESS(status)) {
+        SarReleaseEndpointAndContext(endpoint);
         return status;
     }
 
     ULONG64 associatedData = regs.generation | ((ULONG64)endpoint->index << 32);
 
-    return SarPostHandleQueue(&endpoint->owner->handleQueue,
+    status = SarPostHandleQueue(&endpoint->owner->handleQueue,
         prop->NotificationEvent, associatedData);
+    SarReleaseEndpointAndContext(endpoint);
+    return status;
 }
 
 NTSTATUS SarKsPinRtUnregisterNotificationEvent(

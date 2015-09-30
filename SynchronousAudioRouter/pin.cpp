@@ -19,10 +19,15 @@
 NTSTATUS SarKsPinGetName(
     PIRP irp, PKSIDENTIFIER request, PVOID data)
 {
-    SarEndpoint *endpoint = SarGetEndpointFromIrp(irp);
     PKSP_PIN pinRequest = (PKSP_PIN)request;
 
-    if (!endpoint || pinRequest->PinId != 1) {
+    if (pinRequest->PinId != 1) {
+        return STATUS_NOT_FOUND;
+    }
+
+    SarEndpoint *endpoint = SarGetEndpointFromIrp(irp, TRUE);
+
+    if (!endpoint) {
         return STATUS_NOT_FOUND;
     }
 
@@ -33,16 +38,19 @@ NTSTATUS SarKsPinGetName(
     irp->IoStatus.Information = endpoint->deviceName.MaximumLength;
 
     if (outputLength == 0) {
+        SarReleaseEndpointAndContext(endpoint);
         return STATUS_BUFFER_OVERFLOW;
     }
 
     if (outputLength < endpoint->deviceName.MaximumLength) {
+        SarReleaseEndpointAndContext(endpoint);
         return STATUS_BUFFER_TOO_SMALL;
     }
 
     UNICODE_STRING output = { 0, (USHORT)outputLength, (PWCH)data };
 
     RtlCopyUnicodeString(&output, &endpoint->deviceName);
+    SarReleaseEndpointAndContext(endpoint);
     return STATUS_SUCCESS;
 }
 
@@ -57,7 +65,7 @@ NTSTATUS SarKsPinCreate(PKSPIN pin, PIRP irp)
     UNREFERENCED_PARAMETER(pin);
     UNREFERENCED_PARAMETER(irp);
     SAR_LOG("SarKsPinCreate");
-    SarEndpoint *endpoint = SarGetEndpointFromIrp(irp);
+    SarEndpoint *endpoint = SarGetEndpointFromIrp(irp, TRUE);
     NTSTATUS status;
 
     pin->Context = endpoint;
@@ -71,6 +79,8 @@ NTSTATUS SarKsPinCreate(PKSPIN pin, PIRP irp)
         (PVOID *)&endpoint->activePin, pin, nullptr);
 
     if (endpoint->activePin != pin) {
+        pin->Context = nullptr;
+        SarReleaseEndpointAndContext(endpoint);
         return STATUS_RESOURCE_IN_USE;
     }
 
@@ -78,7 +88,9 @@ NTSTATUS SarKsPinCreate(PKSPIN pin, PIRP irp)
         endpoint, PsGetCurrentProcess(), nullptr);
 
     if (!NT_SUCCESS(status)) {
+        pin->Context = nullptr;
         endpoint->activePin = nullptr;
+        SarReleaseEndpointAndContext(endpoint);
         return status;
     }
 
@@ -240,6 +252,7 @@ NTSTATUS SarKsPinClose(PKSPIN pin, PIRP irp)
     endpoint->activeCellIndex = 0;
     endpoint->activeViewSize = 0;
     InterlockedExchangePointer((PVOID *)&endpoint->activePin, nullptr);
+    SarReleaseEndpointAndContext(endpoint);
     return STATUS_SUCCESS;
 }
 
@@ -447,7 +460,11 @@ NTSTATUS SarKsPinGetGlobalInstancesCount(
 {
     PKSP_PIN pinRequest = (PKSP_PIN)request;
     PKSPIN_CINSTANCES instances = (PKSPIN_CINSTANCES)data;
-    SarEndpoint *endpoint = SarGetEndpointFromIrp(irp);
+    SarEndpoint *endpoint = SarGetEndpointFromIrp(irp, TRUE);
+
+    if (!endpoint) {
+        return STATUS_NOT_FOUND;
+    }
 
     if (pinRequest->PinId == 0) {
         instances->CurrentCount = (endpoint && endpoint->activePin) ? 1 : 0;
@@ -457,6 +474,7 @@ NTSTATUS SarKsPinGetGlobalInstancesCount(
         instances->PossibleCount = 0;
     }
 
+    SarReleaseEndpointAndContext(endpoint);
     return STATUS_SUCCESS;
 }
 
@@ -469,7 +487,7 @@ NTSTATUS SarKsPinGetDefaultDataFormat(
         return STATUS_NOT_FOUND;
     }
 
-    SarEndpoint *endpoint = SarGetEndpointFromIrp(irp);
+    SarEndpoint *endpoint = SarGetEndpointFromIrp(irp, TRUE);
     PIO_STACK_LOCATION irpStack = IoGetCurrentIrpStackLocation(irp);
     ULONG outputLength =
         irpStack->Parameters.DeviceIoControl.OutputBufferLength;
@@ -480,6 +498,7 @@ NTSTATUS SarKsPinGetDefaultDataFormat(
 
     if (outputLength < sizeof(KSDATAFORMAT_WAVEFORMATEX)) {
         irp->IoStatus.Information = sizeof(KSDATAFORMAT_WAVEFORMATEX);
+        SarReleaseEndpointAndContext(endpoint);
         return STATUS_BUFFER_OVERFLOW;
     }
 
@@ -503,6 +522,7 @@ NTSTATUS SarKsPinGetDefaultDataFormat(
     waveFormat->WaveFormatEx.cbSize = 0;
     waveFormat->DataFormat.SampleSize = waveFormat->WaveFormatEx.nBlockAlign;
     waveFormat->DataFormat.FormatSize = sizeof(KSDATAFORMAT_WAVEFORMATEX);
+    SarReleaseEndpointAndContext(endpoint);
     return STATUS_SUCCESS;
 }
 
@@ -518,13 +538,14 @@ NTSTATUS SarKsPinProposeDataFormat(
         return STATUS_NOT_FOUND;
     }
 
-    SarEndpoint *endpoint = SarGetEndpointFromIrp(irp);
+    SarEndpoint *endpoint = SarGetEndpointFromIrp(irp, TRUE);
 
     if (!endpoint) {
         return STATUS_NOT_FOUND;
     }
 
     if (outputLength < sizeof(KSDATAFORMAT)) {
+        SarReleaseEndpointAndContext(endpoint);
         return STATUS_BUFFER_TOO_SMALL;
     }
 
@@ -541,10 +562,12 @@ NTSTATUS SarKsPinProposeDataFormat(
             GUID_VALUES(format->DataFormat.MajorFormat),
             GUID_VALUES(format->DataFormat.SubFormat),
             GUID_VALUES(format->DataFormat.Specifier));
+        SarReleaseEndpointAndContext(endpoint);
         return STATUS_NO_MATCH;
     }
 
     if (outputLength < sizeof(KSDATAFORMAT_WAVEFORMATEX)) {
+        SarReleaseEndpointAndContext(endpoint);
         return STATUS_BUFFER_TOO_SMALL;
     }
 
@@ -554,9 +577,10 @@ NTSTATUS SarKsPinProposeDataFormat(
         (format->WaveFormatEx.wFormatTag != WAVE_FORMAT_PCM &&
          format->WaveFormatEx.wFormatTag != WAVE_FORMAT_EXTENSIBLE) ||
         format->WaveFormatEx.nSamplesPerSec != endpoint->owner->sampleRate) {
+        SarReleaseEndpointAndContext(endpoint);
         return STATUS_NO_MATCH;
     }
 
+    SarReleaseEndpointAndContext(endpoint);
     return STATUS_SUCCESS;
 }
-
