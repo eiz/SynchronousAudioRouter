@@ -33,12 +33,10 @@ SarControlContext *SarGetControlContextFromFileObject(
     SarDriverExtension *extension, PFILE_OBJECT fileObject)
 {
     SarControlContext *controlContext;
-    SarControlContext controlContextTemplate;
 
-    controlContextTemplate.fileObject = fileObject;
     ExAcquireFastMutex(&extension->controlContextLock);
-    controlContext = (SarControlContext *)RtlLookupElementGenericTable(
-        &extension->controlContextTable, (PVOID)&controlContextTemplate);
+    controlContext = (SarControlContext *)SarGetTableEntry(
+        &extension->controlContextTable, fileObject);
     ExReleaseFastMutex(&extension->controlContextLock);
 
     return controlContext;
