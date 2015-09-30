@@ -488,6 +488,7 @@ out:
     }
 
     ExReleaseFastMutex(&controlContext->mutex);
+    SarReleaseControlContext(controlContext);
 }
 
 NTSTATUS SarCreateEndpoint(
@@ -497,7 +498,6 @@ NTSTATUS SarCreateEndpoint(
     SarControlContext *controlContext,
     SarCreateEndpointRequest *request)
 {
-    UNREFERENCED_PARAMETER(controlContext);
     WCHAR buf[20] = {};
     UNICODE_STRING referenceString = { 0, sizeof(buf), buf };
     NTSTATUS status = STATUS_SUCCESS;
@@ -528,6 +528,7 @@ NTSTATUS SarCreateEndpoint(
     }
 
     RtlZeroMemory(endpoint, sizeof(SarEndpoint));
+    endpoint->refs = 1;
     ExInitializeFastMutex(&endpoint->mutex);
     InitializeListHead(&endpoint->activeProcessList);
     endpoint->pendingIrp = irp;
@@ -688,6 +689,7 @@ NTSTATUS SarCreateEndpoint(
     InsertTailList(&controlContext->pendingEndpointList, &endpoint->listEntry);
 
     if (runWorkItem) {
+        SarRetainControlContext(controlContext);
         IoQueueWorkItem(
             controlContext->workItem,
             SarProcessPendingEndpoints, DelayedWorkQueue, controlContext);
@@ -733,4 +735,9 @@ err_out:
 
     ExFreePoolWithTag(endpoint, SAR_TAG);
     return status;
+}
+
+VOID SarDeleteEndpoint(SarEndpoint *endpoint)
+{
+    UNREFERENCED_PARAMETER(endpoint);
 }

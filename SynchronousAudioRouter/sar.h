@@ -47,27 +47,6 @@ extern "C" {
 DEFINE_GUID(GUID_DEVINTERFACE_SYNCHRONOUSAUDIOROUTER,
     0xc16e8d6c, 0xc4cc, 0x4c76, 0xb1, 0x1c, 0x79, 0xb8, 0x41, 0x4e, 0xa9, 0x68);
 
-// TODO: this information is now obsolete. buffers are direct mapped using wavert
-// so there's no audio tick or mapping ioctls.
-
-// things the sar ioctl needs to be able to do:
-// - create a ks audio endpoint (capture or playback)
-// - delete a ks audio endpoint
-// - configure audio buffer count/size
-// - set mapping between ks pins(?) and audio buffers
-// - perform processing tick
-
-// for the sake of keeping things simple let's define an order of operations:
-// - all state is scoped to a handle to the device interface (kind of)
-// - SarCreateAudioBuffers should be called before any endpoints are created
-//   it must be called exactly once
-// - SarCreateEndpoint should be called to create all endpoints
-// - SarMapAudioBuffer should be called after the buffers and endpoints are set up
-// - SarAudioTick should be called finally
-// Any configuration changes require the device to be closed and reopened.
-// Closing the SynchronousAudioRouter device automatically destroys all endpoints.
-// Endpoint names are global.
-
 #define MAX_ENDPOINT_NAME_LENGTH 63
 
 #define SAR_ENDPOINT_TYPE_RECORDING 1
@@ -167,6 +146,12 @@ typedef struct SarHandleQueueIrp
     PIRP irp;
 } SarHandleQueueIrp;
 
+typedef struct SarTableEntry
+{
+    PVOID key;
+    PVOID value;
+} SarTableEntry;
+
 typedef struct SarDriverExtension
 {
     PDRIVER_DISPATCH ksDispatchCreate;
@@ -181,14 +166,16 @@ typedef struct SarDriverExtension
 
 typedef struct SarControlContext
 {
-    PFILE_OBJECT fileObject;
+    LONG refs;
+
     FAST_MUTEX mutex;
+    BOOLEAN orphan;
+    PFILE_OBJECT fileObject;
     PIO_WORKITEM workItem;
     LIST_ENTRY endpointList;
     LIST_ENTRY pendingEndpointList;
     HANDLE bufferSection;
     SarHandleQueue handleQueue;
-
     RTL_BITMAP bufferMap;
     DWORD bufferSize;
     DWORD frameSize;
@@ -213,6 +200,7 @@ typedef struct SarEndpointProcessContext
 
 typedef struct SarEndpoint
 {
+    LONG refs;
     LIST_ENTRY listEntry;
     PIRP pendingIrp;
     UNICODE_STRING deviceName;
@@ -229,6 +217,7 @@ typedef struct SarEndpoint
     DWORD channelCount;
 
     FAST_MUTEX mutex;
+    BOOLEAN orphan;
     PKSPIN activePin;
     DWORD activeCellIndex;
     SIZE_T activeViewSize;
@@ -250,6 +239,23 @@ NTSTATUS SarCreateEndpoint(
     SarDriverExtension *extension,
     SarControlContext *controlContext,
     SarCreateEndpointRequest *request);
+VOID SarOrphanEndpoint(SarEndpoint *endpoint);
+VOID SarDeleteEndpoint(SarEndpoint *endpoint);
+
+FORCEINLINE VOID SarRetainEndpoint(SarEndpoint *endpoint)
+{
+    InterlockedIncrement(&endpoint->refs);
+}
+
+FORCEINLINE BOOLEAN SarReleaseEndpoint(SarEndpoint *endpoint)
+{
+    if (InterlockedDecrement(&endpoint->refs) == 0) {
+        SarDeleteEndpoint(endpoint);
+        return TRUE;
+    }
+
+    return FALSE;
+}
 
 // Device
 NTSTATUS SarKsDeviceAdd(IN PKSDEVICE device);
@@ -307,19 +313,31 @@ NTSTATUS SarGetOrCreateEndpointProcessContext(
     SarEndpointProcessContext **outContext);
 NTSTATUS SarDeleteEndpointProcessContext(SarEndpointProcessContext *context);
 
-// Init
-NTSTATUS SarInitializeControlContext(SarControlContext *controlContext);
-BOOLEAN SarDeleteControlContext(SarDriverExtension *extension, PIRP irp);
-RTL_GENERIC_COMPARE_RESULTS NTAPI SarCompareControlContext(
-    PRTL_GENERIC_TABLE table, PVOID lhs, PVOID rhs);
-PVOID NTAPI SarAllocateControlContext(PRTL_GENERIC_TABLE table, CLONG byteSize);
-VOID NTAPI SarFreeControlContext(PRTL_GENERIC_TABLE table, PVOID buffer);
+// Entry
+SarControlContext *SarCreateControlContext(PFILE_OBJECT fileObject);
+VOID SarDeleteControlContext(SarControlContext *controlContext);
+BOOLEAN SarOrphanControlContext(SarDriverExtension *extension, PIRP irp);
+
+FORCEINLINE VOID SarRetainControlContext(SarControlContext *controlContext)
+{
+    InterlockedIncrement(&controlContext->refs);
+}
+
+FORCEINLINE BOOLEAN SarReleaseControlContext(SarControlContext *controlContext)
+{
+    if (InterlockedDecrement(&controlContext->refs) == 0) {
+        SarDeleteControlContext(controlContext);
+        return TRUE;
+    }
+
+    return FALSE;
+}
+
 NTSTATUS DriverEntry(
     IN PDRIVER_OBJECT driverObject,
     IN PUNICODE_STRING registryPath);
 
 // Utility
-
 #define FOR_EACH_GENERIC(table, objType, obj, restartKey) \
     for (objType *obj = (objType *)RtlEnumerateGenericTableWithoutSplaying( \
         (table), &(restartKey)); \
@@ -342,12 +360,15 @@ SarDriverExtension *SarGetDriverExtension(PDRIVER_OBJECT driverObject);
 SarDriverExtension *SarGetDriverExtensionFromIrp(PIRP irp);
 SarControlContext *SarGetControlContextFromFileObject(
     SarDriverExtension *extension, PFILE_OBJECT fileObject);
+
 SarEndpoint *SarGetEndpointFromIrp(PIRP irp);
 NTSTATUS SarReadEndpointRegisters(
     SarEndpointRegisters *regs, SarEndpoint *endpoint);
 NTSTATUS SarWriteEndpointRegisters(
     SarEndpointRegisters *regs, SarEndpoint *endpoint);
+
 NTSTATUS SarStringDuplicate(PUNICODE_STRING str, PUNICODE_STRING src);
+
 void SarInitializeHandleQueue(SarHandleQueue *queue);
 NTSTATUS SarTransferQueuedHandle(
     PIRP irp, HANDLE kernelTargetProcessHandle, ULONG responseIndex,
@@ -357,6 +378,15 @@ NTSTATUS SarPostHandleQueue(
     SarHandleQueue *queue, HANDLE userHandle, ULONG64 associatedData);
 NTSTATUS SarWaitHandleQueue(SarHandleQueue *queue, PIRP irp);
 VOID SarStringFree(PUNICODE_STRING str);
+
+RTL_GENERIC_COMPARE_RESULTS NTAPI SarCompareTableEntry(
+    PRTL_GENERIC_TABLE table, PVOID lhs, PVOID rhs);
+PVOID NTAPI SarAllocateTableEntry(PRTL_GENERIC_TABLE table, CLONG byteSize);
+VOID NTAPI SarFreeTableEntry(PRTL_GENERIC_TABLE table, PVOID buffer);
+NTSTATUS SarInsertTableEntry(PRTL_GENERIC_TABLE table, PVOID key, PVOID value);
+BOOLEAN SarRemoveTableEntry(PRTL_GENERIC_TABLE table, PVOID key);
+PVOID SarGetTableEntry(PRTL_GENERIC_TABLE table, PVOID key);
+VOID SarInitializeTable(PRTL_GENERIC_TABLE table);
 
 #endif // KERNEL
 

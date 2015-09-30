@@ -56,8 +56,11 @@ SarEndpoint *SarGetEndpointFromIrp(PIRP irp)
     ExAcquireFastMutex(&extension->controlContextLock);
 
     FOR_EACH_GENERIC(
-        &extension->controlContextTable, SarControlContext,
-        controlContext, restartKey) {
+        &extension->controlContextTable, SarTableEntry,
+        tableEntry, restartKey) {
+
+        SarControlContext *controlContext =
+            (SarControlContext *)tableEntry->value;
 
         ExAcquireFastMutex(&controlContext->mutex);
 
@@ -432,4 +435,72 @@ NTSTATUS SarWaitHandleQueue(SarHandleQueue *queue, PIRP irp)
     }
 
     return status;
+}
+
+RTL_GENERIC_COMPARE_RESULTS NTAPI SarCompareTableEntry(
+    PRTL_GENERIC_TABLE table, PVOID lhs, PVOID rhs)
+{
+    UNREFERENCED_PARAMETER(table);
+    SarTableEntry *le = (SarTableEntry *)lhs;
+    SarTableEntry *re = (SarTableEntry *)rhs;
+
+    return le->key < re->key ? GenericLessThan :
+        le->key == re->key ? GenericEqual : GenericGreaterThan;
+}
+
+PVOID NTAPI SarAllocateTableEntry(PRTL_GENERIC_TABLE table, CLONG byteSize)
+{
+    UNREFERENCED_PARAMETER(table);
+    return ExAllocatePoolWithTag(NonPagedPool, byteSize, SAR_TAG);
+}
+
+VOID NTAPI SarFreeTableEntry(PRTL_GENERIC_TABLE table, PVOID buffer)
+{
+    UNREFERENCED_PARAMETER(table);
+    ExFreePoolWithTag(buffer, SAR_TAG);
+}
+
+VOID SarInitializeTable(PRTL_GENERIC_TABLE table)
+{
+    RtlInitializeGenericTable(table,
+        SarCompareTableEntry,  SarAllocateTableEntry, SarFreeTableEntry,
+        nullptr);
+}
+
+NTSTATUS SarInsertTableEntry(PRTL_GENERIC_TABLE table, PVOID key, PVOID value)
+{
+    SarTableEntry entry = { key, value };
+    BOOLEAN isNew = FALSE;
+    PVOID result =
+        RtlInsertElementGenericTable(table, &entry, sizeof(entry), &isNew);
+
+    if (!result) {
+        return STATUS_INSUFFICIENT_RESOURCES;
+    }
+
+    if (!isNew) {
+        return STATUS_OBJECT_NAME_EXISTS;
+    }
+
+    return STATUS_SUCCESS;
+}
+
+BOOLEAN SarRemoveTableEntry(PRTL_GENERIC_TABLE table, PVOID key)
+{
+    SarTableEntry entry = { key, nullptr };
+
+    return RtlDeleteElementGenericTable(table, &entry);
+}
+
+PVOID SarGetTableEntry(PRTL_GENERIC_TABLE table, PVOID key)
+{
+    SarTableEntry entry = { key, nullptr };
+    SarTableEntry *result =
+        (SarTableEntry *)RtlLookupElementGenericTable(table, &entry);
+
+    if (result) {
+        return result->value;
+    }
+
+    return nullptr;
 }
