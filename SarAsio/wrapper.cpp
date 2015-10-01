@@ -221,9 +221,8 @@ AsioStatus SarAsioWrapper::getChannelInfo(AsioChannelInfo *info)
         return status;
     }
 
-    // TODO: for now, we require at least one physical channel of the same kind
-    // as the virtual to exist, so we can mimic the sample type of the
-    // underlying hardware.
+    // We require at least one physical channel of the same kind  as the virtual
+    // to exist, so we can mimic the sample type of the underlying hardware.
     if ((info->isInput == AsioBool::True && inputChannels == 0) ||
         (info->isInput == AsioBool::False && outputChannels == 0)) {
         return AsioStatus::NotPresent;
