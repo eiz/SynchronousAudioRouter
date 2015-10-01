@@ -139,8 +139,8 @@ const KSTOPOLOGY_CONNECTION gFilterConnections[] = {
 };
 
 KSFILTER_DISPATCH gFilterDispatch = {
-    nullptr, // Create
-    nullptr, // Close
+    SarKsFilterCreate, // Create
+    SarKsFilterClose, // Close
     nullptr, // Process
     nullptr, // Reset
 };
@@ -699,7 +699,20 @@ NTSTATUS SarCreateEndpoint(
     return STATUS_PENDING;
 
 err_out:
-    if (deviceNameAllocated) {
+    if (!deviceNameAllocated) {
+        endpoint->deviceName = {};
+    }
+
+    SarDeleteEndpoint(endpoint);
+    return status;
+}
+
+VOID SarDeleteEndpoint(SarEndpoint *endpoint)
+{
+    SAR_LOG("SarDeleteEndpoint");
+    PKSDEVICE ksDevice = KsFilterFactoryGetDevice(endpoint->filterFactory);
+
+    if (endpoint->deviceName.Buffer) {
         SarStringFree(&endpoint->deviceName);
     }
 
@@ -734,13 +747,6 @@ err_out:
     }
 
     ExFreePoolWithTag(endpoint, SAR_TAG);
-    return status;
-}
-
-VOID SarDeleteEndpoint(SarEndpoint *endpoint)
-{
-    SAR_LOG("SarDeleteEndpoint");
-    UNREFERENCED_PARAMETER(endpoint);
 }
 
 VOID SarOrphanEndpoint(SarEndpoint *endpoint)
@@ -749,5 +755,6 @@ VOID SarOrphanEndpoint(SarEndpoint *endpoint)
     ExAcquireFastMutex(&endpoint->mutex);
     endpoint->orphan = TRUE;
     ExReleaseFastMutex(&endpoint->mutex);
+    KsFilterFactorySetDeviceClassesState(endpoint->filterFactory, FALSE);
     SarReleaseEndpoint(endpoint);
 }

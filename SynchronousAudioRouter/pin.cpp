@@ -16,6 +16,25 @@
 
 #include "sar.h"
 
+NTSTATUS SarKsFilterCreate(PKSFILTER filter, PIRP irp)
+{
+    filter->Context = SarGetEndpointFromIrp(irp, TRUE);
+
+    if (!filter->Context) {
+        SAR_LOG("Failed to find endpoint for filter");
+        return STATUS_NOT_FOUND;
+    }
+
+    return STATUS_SUCCESS;
+}
+
+NTSTATUS SarKsFilterClose(PKSFILTER filter, PIRP irp)
+{
+    UNREFERENCED_PARAMETER(irp);
+    SarReleaseEndpointAndContext((SarEndpoint *)filter->Context);
+    return STATUS_SUCCESS;
+}
+
 NTSTATUS SarKsPinGetName(
     PIRP irp, PKSIDENTIFIER request, PVOID data)
 {

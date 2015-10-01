@@ -261,7 +261,9 @@ FORCEINLINE BOOLEAN SarReleaseEndpoint(SarEndpoint *endpoint)
 NTSTATUS SarKsDeviceAdd(IN PKSDEVICE device);
 NTSTATUS SarKsDevicePostStart(IN PKSDEVICE device);
 
-// Pin
+// Pin/Filter
+NTSTATUS SarKsFilterCreate(PKSFILTER filter, PIRP irp);
+NTSTATUS SarKsFilterClose(PKSFILTER filter, PIRP irp);
 NTSTATUS SarKsPinCreate(PKSPIN pin, PIRP irp);
 NTSTATUS SarKsPinClose(PKSPIN pin, PIRP irp);
 VOID SarKsPinReset(PKSPIN pin);
