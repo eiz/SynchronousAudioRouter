@@ -211,7 +211,6 @@ typedef struct SarEndpoint
     PKSNODE_DESCRIPTOR nodeDesc;
     PKSDATARANGE_AUDIO dataRange;
     PKSDATARANGE_AUDIO analogDataRange;
-    PKSALLOCATOR_FRAMING_EX allocatorFraming;
     DWORD type;
     DWORD index;
     DWORD channelCount;

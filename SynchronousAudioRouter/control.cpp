@@ -89,16 +89,6 @@ DEFINE_KSAUTOMATION_TABLE(gPinAutomation) {
     DEFINE_KSAUTOMATION_EVENTS_NULL,
 };
 
-DECLARE_SIMPLE_FRAMING_EX(
-    gAllocatorFraming,
-    STATICGUIDOF(KSMEMORY_TYPE_KERNEL_NONPAGED),
-    KSALLOCATOR_REQUIREMENTF_SYSTEM_MEMORY |
-    KSALLOCATOR_REQUIREMENTF_PREFERENCES_ONLY,
-    25,
-    0,
-    2 * PAGE_SIZE,
-    2 * PAGE_SIZE);
-
 const KSPIN_INTERFACE gPinInterfaces[] = {
     {
         STATICGUIDOF(KSINTERFACESETID_Standard),
@@ -117,7 +107,7 @@ const KSPIN_DESCRIPTOR_EX gPinDescriptorTemplate = {
     KSPIN_FLAG_DO_NOT_USE_STANDARD_TRANSPORT,
     1, // InstancesPossible
     0, // InstancesNecessary
-    &gAllocatorFraming, // AllocatorFraming
+    nullptr, // AllocatorFraming
     SarKsPinIntersectHandler, // IntersectHandler
 };
 
@@ -133,9 +123,14 @@ const GUID gCategoriesTableRender[] = {
     STATICGUIDOF(KSCATEGORY_REALTIME),
 };
 
-const KSTOPOLOGY_CONNECTION gFilterConnections[] = {
+const KSTOPOLOGY_CONNECTION gFilterConnectionsRendering[] = {
     { KSFILTER_NODE, 0, 0, 1 },
     { 0, 0, KSFILTER_NODE, 1 }
+};
+
+const KSTOPOLOGY_CONNECTION gFilterConnectionsCapture[] = {
+    { KSFILTER_NODE, 1, 0, 1 },
+    { 0, 0, KSFILTER_NODE, 0 }
 };
 
 KSFILTER_DISPATCH gFilterDispatch = {
@@ -189,7 +184,8 @@ static KSFILTER_DESCRIPTOR gFilterDescriptorTemplate = {
     nullptr,
     DEFINE_KSFILTER_CATEGORIES_NULL,
     DEFINE_KSFILTER_NODE_DESCRIPTORS_NULL,
-    DEFINE_KSFILTER_CONNECTIONS(gFilterConnections),
+    2, // ConnectionsCount
+    nullptr, // Connections
     nullptr, // ComponentId
 };
 
@@ -567,14 +563,6 @@ NTSTATUS SarCreateEndpoint(
         goto err_out;
     }
 
-    endpoint->allocatorFraming = (PKSALLOCATOR_FRAMING_EX)
-        ExAllocatePoolWithTag(
-            NonPagedPool, sizeof(KSALLOCATOR_FRAMING_EX), SAR_TAG);
-
-    if (!endpoint->allocatorFraming) {
-        goto err_out;
-    }
-
     endpoint->nodeDesc = (PKSNODE_DESCRIPTOR)
         ExAllocatePoolWithTag(NonPagedPool, sizeof(KSNODE_DESCRIPTOR), SAR_TAG);
 
@@ -595,6 +583,9 @@ NTSTATUS SarCreateEndpoint(
     endpoint->filterDesc->NodeDescriptors = endpoint->nodeDesc;
     endpoint->filterDesc->NodeDescriptorSize = sizeof(KSNODE_DESCRIPTOR);
     endpoint->filterDesc->NodeDescriptorsCount = 1;
+    endpoint->filterDesc->Connections =
+        request->type == SAR_ENDPOINT_TYPE_RECORDING ?
+        gFilterConnectionsCapture : gFilterConnectionsRendering;
 
     PKSPIN_DESCRIPTOR pinDesc = &endpoint->pinDesc[0].PinDescriptor;
 
@@ -720,10 +711,6 @@ VOID SarDeleteEndpoint(SarEndpoint *endpoint)
         KsAcquireDevice(ksDevice);
         KsDeleteFilterFactory(endpoint->filterFactory);
         KsReleaseDevice(ksDevice);
-    }
-
-    if (endpoint->allocatorFraming) {
-        ExFreePoolWithTag(endpoint->allocatorFraming, SAR_TAG);
     }
 
     if (endpoint->dataRange) {
