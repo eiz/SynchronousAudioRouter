@@ -221,6 +221,7 @@ bool SarClient::openControlDevice()
         devinfo, &interfaceData, interfaceDetail,
         requiredSize, nullptr, nullptr)) {
 
+        free(interfaceDetail);
         return false;
     }
 
@@ -229,6 +230,7 @@ bool SarClient::openControlDevice()
         FILE_ATTRIBUTE_NORMAL|FILE_FLAG_OVERLAPPED, nullptr);
 
     if (_device == INVALID_HANDLE_VALUE) {
+        free(interfaceDetail);
         return false;
     }
 
@@ -237,11 +239,13 @@ bool SarClient::openControlDevice()
     if (!_completionPort) {
         CloseHandle(_device);
         _device = nullptr;
+        free(interfaceDetail);
         return false;
     }
 
     _notificationHandles.clear();
     _notificationHandles.resize(_driverConfig.endpoints.size());
+    free(interfaceDetail);
     return true;
 }
 
