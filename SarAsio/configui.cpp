@@ -220,30 +220,38 @@ void EndpointsPropertySheetPage::initControls()
     LVCOLUMN col = {};
 
     col.mask = LVCF_TEXT;
-    col.pszText = L"Name";
-    ListView_InsertColumn(_listView, 0, &col);
     col.pszText = L"Type";
-    ListView_InsertColumn(_listView, 1, &col);
+    ListView_InsertColumn(_listView, 0, &col);
     col.pszText = L"Channels";
+    ListView_InsertColumn(_listView, 1, &col);
+    col.pszText = L"Name";
     ListView_InsertColumn(_listView, 2, &col);
 
-    ListView_SetExtendedListViewStyle(_listView, LVS_EX_FULLROWSELECT);
+    ListView_SetExtendedListViewStyle(_listView,LVS_EX_FULLROWSELECT);
 
     int i = 0;
 
     for (auto& endpoint : _config.endpoints) {
         LVITEM item = {};
+        std::wstring description = UTF8ToWide(endpoint.description);
 
+        item.iItem = i;
         ListView_InsertItem(_listView, &item);
-        ListView_SetItemText(
-            _listView, i, 0, (LPWSTR)UTF8ToWide(endpoint.description).c_str());
+        OutputDebugStringA(endpoint.description.c_str());
+        ListView_SetItemText(_listView, i, 2, (LPWSTR)description.c_str());
 
         if (endpoint.type == EndpointType::Recording) {
-            ListView_SetItemText(_listView, i, 1, L"Recording");
+            ListView_SetItemText(_listView, i, 0, L"Recording");
         } else {
-            ListView_SetItemText(_listView, i, 1, L"Playback");
+            ListView_SetItemText(_listView, i, 0, L"Playback");
         }
 
+        std::wostringstream wos;
+        std::wstring channelCount;
+
+        wos << endpoint.channelCount;
+        channelCount = wos.str();
+        ListView_SetItemText(_listView, i, 1, (LPWSTR)channelCount.c_str());
         i++;
     }
 
