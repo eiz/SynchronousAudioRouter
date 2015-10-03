@@ -216,6 +216,40 @@ void EndpointsPropertySheetPage::initControls()
     }
 
     ComboBox_SetCurSel(_hardwareInterfaceDropdown, selectIndex);
+
+    LVCOLUMN col = {};
+
+    col.mask = LVCF_TEXT;
+    col.pszText = L"Name";
+    ListView_InsertColumn(_listView, 0, &col);
+    col.pszText = L"Type";
+    ListView_InsertColumn(_listView, 1, &col);
+    col.pszText = L"Channels";
+    ListView_InsertColumn(_listView, 2, &col);
+
+    ListView_SetExtendedListViewStyle(_listView, LVS_EX_FULLROWSELECT);
+
+    int i = 0;
+
+    for (auto& endpoint : _config.endpoints) {
+        LVITEM item = {};
+
+        ListView_InsertItem(_listView, &item);
+        ListView_SetItemText(
+            _listView, i, 0, (LPWSTR)UTF8ToWide(endpoint.description).c_str());
+
+        if (endpoint.type == EndpointType::Recording) {
+            ListView_SetItemText(_listView, i, 1, L"Recording");
+        } else {
+            ListView_SetItemText(_listView, i, 1, L"Playback");
+        }
+
+        i++;
+    }
+
+    ListView_SetColumnWidth(_listView, 0, LVSCW_AUTOSIZE_USEHEADER);
+    ListView_SetColumnWidth(_listView, 1, LVSCW_AUTOSIZE_USEHEADER);
+    ListView_SetColumnWidth(_listView, 2, LVSCW_AUTOSIZE_USEHEADER);
     updateEnabled();
 }
 
