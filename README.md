@@ -18,6 +18,10 @@ unique characteristics compared to similar virtual audio cable software:
 * Designed for use with DAW software. Instead of treating all virtual audio
   streams independently, they're mapped to a single multichannel ASIO interface
   which also includes all channels from the physical audio device.
+* Low latency. Since SAR is synchronous with the hardware audio interface and
+  uses WaveRT to transport audio to/from applications, it doesn't impact your
+  DAW's latency. It's practical to use 1-2ms buffer sizes on a cheap USB 2.0
+  interface.
 * Extremely simple UI. Because the DAW is expected to do all the hard work of
   audio processing, SAR doesn't need to include a complicated mixer interface or
   extensive configuration options.
