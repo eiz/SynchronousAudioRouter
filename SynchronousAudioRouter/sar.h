@@ -83,6 +83,7 @@ typedef struct SarSetBufferLayoutRequest
     DWORD frameSize;
     DWORD sampleRate;
     DWORD sampleSize;
+    DWORD minimumFrameCount;
 } SarSetBufferLayoutRequest;
 
 typedef struct SarSetBufferLayoutResponse
@@ -181,6 +182,7 @@ typedef struct SarControlContext
     DWORD frameSize;
     DWORD sampleRate;
     DWORD sampleSize;
+    DWORD minimumFrameCount;
 } SarControlContext;
 
 #define SarBufferMapEntryCount(controlContext) \

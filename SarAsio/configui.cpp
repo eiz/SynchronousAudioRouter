@@ -199,6 +199,25 @@ void EndpointsPropertySheetPage::initControls()
     _addButton = GetDlgItem(_hwnd, 1005);
     _removeButton = GetDlgItem(_hwnd, 1006);
 
+    LVCOLUMN col = {};
+
+    col.mask = LVCF_TEXT;
+    col.pszText = L"Type";
+    ListView_InsertColumn(_listView, 0, &col);
+    col.pszText = L"Channels";
+    ListView_InsertColumn(_listView, 1, &col);
+    col.pszText = L"Name";
+    ListView_InsertColumn(_listView, 2, &col);
+    ListView_SetExtendedListViewStyle(_listView,LVS_EX_FULLROWSELECT);
+
+    refreshHardwareInterfaceList();
+    refreshEndpointList();
+    updateEnabled();
+}
+
+void EndpointsPropertySheetPage::refreshHardwareInterfaceList()
+{
+    ComboBox_ResetContent(_hardwareInterfaceDropdown);
     ComboBox_AddString(_hardwareInterfaceDropdown, TEXT("None"));
 
     int index = 1, selectIndex = 0;
@@ -216,18 +235,11 @@ void EndpointsPropertySheetPage::initControls()
     }
 
     ComboBox_SetCurSel(_hardwareInterfaceDropdown, selectIndex);
+}
 
-    LVCOLUMN col = {};
-
-    col.mask = LVCF_TEXT;
-    col.pszText = L"Type";
-    ListView_InsertColumn(_listView, 0, &col);
-    col.pszText = L"Channels";
-    ListView_InsertColumn(_listView, 1, &col);
-    col.pszText = L"Name";
-    ListView_InsertColumn(_listView, 2, &col);
-
-    ListView_SetExtendedListViewStyle(_listView,LVS_EX_FULLROWSELECT);
+void EndpointsPropertySheetPage::refreshEndpointList()
+{
+    ListView_DeleteAllItems(_listView);
 
     int i = 0;
 
@@ -237,7 +249,6 @@ void EndpointsPropertySheetPage::initControls()
 
         item.iItem = i;
         ListView_InsertItem(_listView, &item);
-        OutputDebugStringA(endpoint.description.c_str());
         ListView_SetItemText(_listView, i, 2, (LPWSTR)description.c_str());
 
         if (endpoint.type == EndpointType::Recording) {
@@ -258,7 +269,6 @@ void EndpointsPropertySheetPage::initControls()
     ListView_SetColumnWidth(_listView, 0, LVSCW_AUTOSIZE_USEHEADER);
     ListView_SetColumnWidth(_listView, 1, LVSCW_AUTOSIZE_USEHEADER);
     ListView_SetColumnWidth(_listView, 2, LVSCW_AUTOSIZE_USEHEADER);
-    updateEnabled();
 }
 
 void EndpointsPropertySheetPage::updateEnabled()

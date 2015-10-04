@@ -223,6 +223,7 @@ NTSTATUS SarSetBufferLayout(
     controlContext->frameSize = request->frameSize;
     controlContext->sampleSize = request->sampleSize;
     controlContext->sampleRate = request->sampleRate;
+    controlContext->minimumFrameCount = request->minimumFrameCount;
     ExReleaseFastMutex(&controlContext->mutex);
 
     // TODO: don't be an aslr bypass

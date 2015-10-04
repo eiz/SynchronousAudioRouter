@@ -98,6 +98,7 @@ void DriverConfig::load(picojson::object& obj)
     auto poDriverClsid = obj.find("driverClsid");
     auto poEndpoints = obj.find("endpoints");
     auto poApplications = obj.find("applications");
+    auto poWaveRtMinimumFrames = obj.find("waveRtMinimumFrames");
 
     if (poDriverClsid != obj.end() &&
         poDriverClsid->second.is<std::string>()) {
@@ -130,6 +131,12 @@ void DriverConfig::load(picojson::object& obj)
             application.load(item.get<picojson::object>());
             applications.emplace_back(application);
         }
+    }
+
+    if (poWaveRtMinimumFrames != obj.end() &&
+        poWaveRtMinimumFrames->second.is<double>()) {
+
+        waveRtMinimumFrames = (int)poWaveRtMinimumFrames->second.get<double>();
     }
 }
 

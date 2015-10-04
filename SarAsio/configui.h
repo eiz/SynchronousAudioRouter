@@ -59,6 +59,8 @@ protected:
 
 private:
     void initControls();
+    void refreshHardwareInterfaceList();
+    void refreshEndpointList();
     void updateEnabled();
     void onHardwareInterfaceChanged();
     void onConfigureHardwareInterface();

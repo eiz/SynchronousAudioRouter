@@ -45,7 +45,10 @@ NTSTATUS SarKsPinRtGetBufferCore(
     }
 
     ULONG actualSize = ROUND_UP(
-        requestedBufferSize,
+        max(requestedBufferSize,
+            controlContext->minimumFrameCount *
+            controlContext->frameSize *
+            endpoint->channelCount),
         controlContext->frameSize * endpoint->channelCount);
     SIZE_T viewSize = ROUND_UP(actualSize, SAR_BUFFER_CELL_SIZE);
 

@@ -260,6 +260,10 @@ bool SarClient::setBufferLayout()
     request.sampleRate = _bufferConfig.sampleRate;
     request.sampleSize = _bufferConfig.sampleSize;
 
+    if (_driverConfig.waveRtMinimumFrames >= 2) {
+        request.minimumFrameCount = _driverConfig.waveRtMinimumFrames;
+    }
+
     if (!DeviceIoControl(_device, SAR_REQUEST_SET_BUFFER_LAYOUT,
         (LPVOID)&request, sizeof(request), (LPVOID)&response, sizeof(response),
         nullptr, nullptr)) {

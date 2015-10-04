@@ -53,6 +53,7 @@ struct DriverConfig
     std::string driverClsid;
     std::vector<EndpointConfig> endpoints;
     std::vector<ApplicationConfig> applications;
+    int waveRtMinimumFrames = 0;
 
     void load(picojson::object& obj);
     picojson::object save();
