@@ -207,8 +207,6 @@ AsioStatus SarAsioWrapper::getSamplePosition(int64_t *pos, int64_t *timestamp)
 
 AsioStatus SarAsioWrapper::getChannelInfo(AsioChannelInfo *info)
 {
-    OutputDebugString(L"SarAsioWrapper::getChannelInfo");
-
     if (!_innerDriver) {
         return AsioStatus::NotPresent;
     }
@@ -418,8 +416,6 @@ AsioStatus SarAsioWrapper::future(long selector, void *opt)
 
 AsioStatus SarAsioWrapper::outputReady()
 {
-    OutputDebugString(L"SarAsioWrapper::outputReady");
-
     if (!_innerDriver) {
         return AsioStatus::NotPresent;
     }
