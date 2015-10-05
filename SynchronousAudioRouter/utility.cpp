@@ -274,7 +274,7 @@ void SarCancelHandleQueueIrp(PDEVICE_OBJECT deviceObject, PIRP irp)
         entry = entry->Flink;
 
         if (pendingIrp->irp == irp) {
-            RemoveEntryList(entry);
+            RemoveEntryList(&pendingIrp->listEntry);
             toCancel = pendingIrp;
             break;
         }
