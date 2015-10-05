@@ -433,8 +433,6 @@ NTSTATUS SarWaitHandleQueue(SarHandleQueue *queue, PIRP irp)
             }
         }
 
-        irp->IoStatus.Status = status;
-        IoCompleteRequest(irp, IO_NO_INCREMENT);
         ZwClose(kernelProcessHandle);
     }
 
