@@ -118,11 +118,6 @@ void SarClient::tick(long bufferIndex)
                 }
             }
         } else {
-            // TODO: this can still race if the endpoint is stopped and started
-            // while we're updating the position register. Maybe use DCAS on the
-            // generation+position? Does it actually matter?
-            _registers[i].positionRegister = nextPositionRegister;
-
             if ((notificationCount >= 1 && nextPositionRegister == 0) ||
                 (notificationCount >= 2 &&
                  nextPositionRegister >= endpointBufferSize / 2 &&
@@ -135,6 +130,8 @@ void SarClient::tick(long bufferIndex)
                     (GENERATION_NUMBER(targetGeneration) ==
                      GENERATION_NUMBER(generation))) {
 
+                    _registers[i].positionRegister = nextPositionRegister;
+
                     if (!SetEvent(evt)) {
                         auto error = GetLastError();
                         std::ostringstream os;
@@ -142,7 +139,15 @@ void SarClient::tick(long bufferIndex)
                         os << "SetEvent error " << error;
                         OutputDebugStringA(os.str().c_str());
                     }
+                } else {
+                    for (int ti = 0; ti < ntargets; ++ti) {
+                        if (targetBuffers[ti]) {
+                            ZeroMemory(targetBuffers[ti], asioBufferSize);
+                        }
+                    }
                 }
+            } else {
+                _registers[i].positionRegister = nextPositionRegister;
             }
         }
     }

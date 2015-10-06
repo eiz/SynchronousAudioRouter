@@ -22,6 +22,7 @@
 #include "wrapper.h"
 #include "utility.h"
 
+#include <Audioclient.h>
 using namespace Sar;
 
 SarAsioWrapper *gActiveWrapper;

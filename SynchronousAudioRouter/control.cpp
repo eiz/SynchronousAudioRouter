@@ -316,8 +316,6 @@ NTSTATUS SarSetDeviceInterfaceProperties(
         goto out;
     }
 
-    SAR_LOG("Setting interface properties for %wZ", &aliasLink);
-
     status = IoSetDeviceInterfacePropertyData(&aliasLink,
         &DEVPKEY_DeviceInterface_FriendlyName, LOCALE_NEUTRAL, 0,
         DEVPROP_TYPE_STRING,

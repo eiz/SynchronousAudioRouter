@@ -350,13 +350,21 @@ NTSTATUS SarKsPinSetDeviceState(PKSPIN pin, KSSTATE toState, KSSTATE fromState)
 
     NTSTATUS status;
     SarEndpoint *endpoint = (SarEndpoint *)pin->Context;
-    BOOL isActive = FALSE, needsChange = FALSE;
+    BOOL isActive = FALSE, needsChange = FALSE, resetPosition = FALSE;
 
     if (toState == KSSTATE_RUN && fromState != KSSTATE_RUN) {
         isActive = TRUE;
         needsChange = TRUE;
     } else if (fromState == KSSTATE_RUN && toState != KSSTATE_RUN) {
         isActive = FALSE;
+        needsChange = TRUE;
+    }
+
+    if (toState == KSSTATE_STOP && fromState != KSSTATE_STOP) {
+        resetPosition = TRUE;
+        needsChange = TRUE;
+    } else if (fromState == KSSTATE_STOP && toState != KSSTATE_STOP) {
+        resetPosition = TRUE;
         needsChange = TRUE;
     }
 
@@ -371,6 +379,11 @@ NTSTATUS SarKsPinSetDeviceState(PKSPIN pin, KSSTATE toState, KSSTATE fromState)
 
         regs.generation =
             MAKE_GENERATION(GENERATION_NUMBER(regs.generation), isActive);
+
+        if (resetPosition) {
+            regs.positionRegister = 0;
+        }
+
         status = SarWriteEndpointRegisters(&regs, endpoint);
 
         if (!NT_SUCCESS(status)) {

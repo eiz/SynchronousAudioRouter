@@ -62,7 +62,8 @@ NTSTATUS SarKsPinRtGetBufferCore(
     }
 
     ULONG cellIndex = RtlFindClearBitsAndSet(
-        &controlContext->bufferMap, (ULONG)(viewSize / SAR_BUFFER_CELL_SIZE), 0);
+        &controlContext->bufferMap,
+        (ULONG)(viewSize / SAR_BUFFER_CELL_SIZE), 0);
 
     if (cellIndex == 0xFFFFFFFF) {
         ExReleaseFastMutex(&controlContext->mutex);
@@ -79,7 +80,8 @@ NTSTATUS SarKsPinRtGetBufferCore(
     LARGE_INTEGER sectionOffset;
 
     sectionOffset.QuadPart = cellIndex * SAR_BUFFER_CELL_SIZE;
-    SAR_LOG("Mapping %08X %016llX", viewSize, sectionOffset.QuadPart);
+    SAR_LOG("Mapping %08X %016llX %lu %lu", viewSize, sectionOffset.QuadPart,
+        actualSize, requestedBufferSize);
     status = ZwMapViewOfSection(
         endpoint->owner->bufferSection, ZwCurrentProcess(),
         &mappedAddress, 0, 0, &sectionOffset, &viewSize, ViewUnmap,
@@ -177,6 +179,8 @@ NTSTATUS SarKsPinRtGetClockRegister(
     return STATUS_SUCCESS;
 }
 
+#define UNITS_PER_SECOND 10000000
+
 NTSTATUS SarKsPinRtGetHwLatency(
     PIRP irp, PKSIDENTIFIER request, PVOID data)
 {
@@ -190,11 +194,23 @@ NTSTATUS SarKsPinRtGetHwLatency(
         return STATUS_UNSUCCESSFUL;
     }
 
-    //ULONG unitsPerSample = 10000000 / endpoint->owner->sampleRate;
+    // TODO: This seems like it should be accurate, but results in weird WASAPI
+    // errors. Why?
+    //ULONG sampleRate = endpoint->owner->sampleRate;
+    //ULONG errPerSample = UNITS_PER_SECOND % sampleRate;
+    //ULONG unitsPerSample =
+    //    ((sampleRate - errPerSample) + UNITS_PER_SECOND) / sampleRate;
 
-    latency->FifoSize = 0;
+    //latency->FifoSize =
+    //    endpoint->channelCount *
+    //    endpoint->owner->frameSize;
     latency->ChipsetDelay = 0;
-    latency->CodecDelay = 0;
+    //latency->CodecDelay =
+    //    unitsPerSample *
+    //    (endpoint->owner->frameSize / endpoint->owner->sampleSize);
+    latency->CodecDelay = latency->FifoSize = 0;
+    //SAR_LOG("FifoSize %lu CodecDelay %lu",
+    //    latency->FifoSize, latency->CodecDelay);
     SarReleaseEndpointAndContext(endpoint);
     return STATUS_SUCCESS;
 }
@@ -235,9 +251,10 @@ NTSTATUS SarKsPinRtGetPositionRegister(
     reg->Register =
         &context->registerFileUVA[endpoint->index].positionRegister;
     reg->Width = 32;
-    reg->Accuracy =
-        endpoint->channelCount *
-        endpoint->owner->frameSize;
+    // TODO: reporting a more 'correct' accuracy here causes odd intermittent
+    // WASAPI errors, specifically AUDCLNT_E_BUFFER_SIZE_ERROR. Or at least,
+    // it seems to be implicated. Why?
+    reg->Accuracy = 1;
     reg->Numerator = 0;
     reg->Denominator = 0;
     SarReleaseEndpointAndContext(endpoint);
