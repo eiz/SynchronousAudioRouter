@@ -89,15 +89,15 @@ typedef struct SarSetBufferLayoutRequest
 
 typedef struct SarSetBufferLayoutResponse
 {
-    PVOID virtualAddress;
+    PVOID64 virtualAddress;
     DWORD actualSize;
     DWORD registerBase;
 } SarSetBufferLayoutResponse;
 
 typedef struct SarHandleQueueResponse
 {
-    HANDLE handle;
-    ULONG_PTR associatedData;
+    PVOID64 handle;
+    ULONG64 associatedData;
 } SarHandleQueueResponse;
 
 #define GENERATION_IS_ACTIVE(gen) ((gen) & 1)

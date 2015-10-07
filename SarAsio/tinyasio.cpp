@@ -55,10 +55,14 @@ std::vector<AsioDriver> InstalledAsioDrivers()
             asio, name, TEXT("Description"), RRF_RT_REG_SZ,
             nullptr, value, &valueSize) != ERROR_SUCCESS) {
 
-            continue;
+            // Workaround for drivers with incomplete ASIO registration.
+            // Observed with M-Audio drivers: the main (64bit) registration is
+            // fine but the Wow6432Node version is missing the description.
+            driver.name = TCHARToUTF8(name);
+        } else {
+            driver.name = TCHARToUTF8(value);
         }
 
-        driver.name = TCHARToUTF8(value);
         result.emplace_back(driver);
     }
 

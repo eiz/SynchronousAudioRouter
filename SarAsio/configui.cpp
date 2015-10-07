@@ -143,7 +143,7 @@ void EndpointsPropertySheetPage::onHardwareInterfaceChanged()
 {
     auto index = ComboBox_GetCurSel(_hardwareInterfaceDropdown) - 1;
 
-    if (index >= 0 && index < _drivers.size()) {
+    if (index >= 0 && index < (int)_drivers.size()) {
         _config.driverClsid = _drivers[index].clsid;
     } else {
         _config.driverClsid = "";

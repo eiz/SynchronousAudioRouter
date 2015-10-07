@@ -45,7 +45,7 @@ void SarClient::tick(long bufferIndex)
     // read isActive, generation
     //   if conflicted, skip endpoint and fill asio frames with 0
     // else increment position register
-    for (int i = 0; i < _driverConfig.endpoints.size(); ++i) {
+    for (size_t i = 0; i < _driverConfig.endpoints.size(); ++i) {
         auto& endpoint = _driverConfig.endpoints[i];
         auto& asioBuffers = _bufferConfig.asioBuffers[i];
         auto asioBufferSize =
@@ -59,7 +59,10 @@ void SarClient::tick(long bufferIndex)
         auto notificationCount = _registers[i].notificationCount;
         void **targetBuffers = (void **)alloca(sizeof(void *) * ntargets);
 
-        for (int bi = bufferIndex, ti = 0; bi < asioBuffers.size(); bi += 2) {
+        for (size_t bi = bufferIndex, ti = 0;
+             bi < asioBuffers.size();
+             bi += 2) {
+
             targetBuffers[ti++] = asioBuffers[bi];
         }
 
@@ -392,7 +395,7 @@ void SarClient::demux(
             continue;
         }
 
-        for (int j = 0; j < targetSize; j += sampleSize) {
+        for (size_t j = 0; j < targetSize; j += sampleSize) {
             memcpy((char *)(targetBuffers[i]) + j, buf, sampleSize);
             buf += sampleSize * ntargets;
         }
@@ -412,7 +415,7 @@ void SarClient::mux(
             continue;
         }
 
-        for (int j = 0; j < targetSize; j += sampleSize) {
+        for (size_t j = 0; j < targetSize; j += sampleSize) {
             memcpy(buf, (char *)(targetBuffers[i]) + j, sampleSize);
             buf += sampleSize * ntargets;
         }

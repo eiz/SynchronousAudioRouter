@@ -245,7 +245,7 @@ AsioStatus SarAsioWrapper::getChannelInfo(AsioChannelInfo *info)
         _virtualInputs : _virtualOutputs;
     auto index = info->index - innerCount;
 
-    if (index < channels.size()) {
+    if (index < (int)channels.size()) {
         info->group = 0;
         info->sampleType = query.sampleType;
         info->isActive = AsioBool::False; // TODO: when is this true?
@@ -301,7 +301,7 @@ AsioStatus SarAsioWrapper::createBuffers(
             _virtualInputs : _virtualOutputs;
 
         if (infos[i].index >= count) {
-            if (infos[i].index >= count + channels.size()) {
+            if (infos[i].index >= count + (int)channels.size()) {
                 return AsioStatus::NotPresent;
             }
 
@@ -329,7 +329,7 @@ AsioStatus SarAsioWrapper::createBuffers(
         return status;
     }
 
-    for (long i = 0; i < physicalChannelBuffers.size(); ++i) {
+    for (size_t i = 0; i < physicalChannelBuffers.size(); ++i) {
         infos[physicalChannelIndices[i]] = physicalChannelBuffers[i];
     }
 
@@ -340,7 +340,7 @@ AsioStatus SarAsioWrapper::createBuffers(
     _bufferConfig.asioBuffers.clear();
     _bufferConfig.asioBuffers.resize(_config.endpoints.size());
 
-    for (int i = 0; i < _config.endpoints.size(); ++i) {
+    for (size_t i = 0; i < _config.endpoints.size(); ++i) {
         _bufferConfig.asioBuffers[i].resize(
             _config.endpoints[i].channelCount * 2);
     }
