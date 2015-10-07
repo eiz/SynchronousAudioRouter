@@ -303,7 +303,7 @@ NTSTATUS SarIrpDeviceControl(PDEVICE_OBJECT deviceObject, PIRP irp)
 
             IoMarkIrpPending(irp);
             ntStatus = SarCreateEndpoint(
-                deviceObject, irp, extension, controlContext, &request);
+                deviceObject, irp, controlContext, &request);
             break;
         }
         case SAR_REQUEST_GET_NOTIFICATION_EVENTS: {
@@ -365,7 +365,6 @@ extern "C" NTSTATUS DriverEntry(
     extension->ksDispatchCleanup = driverObject->MajorFunction[IRP_MJ_CLEANUP];
     extension->ksDispatchDeviceControl =
         driverObject->MajorFunction[IRP_MJ_DEVICE_CONTROL];
-    extension->nextFilterId = 0;
     extension->sarInterfaceName = {};
     driverObject->MajorFunction[IRP_MJ_CREATE] = SarIrpCreate;
     driverObject->MajorFunction[IRP_MJ_DEVICE_CONTROL] = SarIrpDeviceControl;

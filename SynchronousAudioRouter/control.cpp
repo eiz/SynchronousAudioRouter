@@ -489,15 +489,12 @@ out:
 NTSTATUS SarCreateEndpoint(
     PDEVICE_OBJECT device,
     PIRP irp,
-    SarDriverExtension *extension,
     SarControlContext *controlContext,
     SarCreateEndpointRequest *request)
 {
-    WCHAR buf[20] = {};
-    UNICODE_STRING referenceString = { 0, sizeof(buf), buf };
     NTSTATUS status = STATUS_SUCCESS;
     PKSDEVICE ksDevice = KsGetDeviceForDeviceObject(device);
-    BOOLEAN deviceNameAllocated = FALSE;
+    BOOLEAN deviceNameAllocated = FALSE, deviceIdAllocated = FALSE;
     SarEndpoint *endpoint;
 
     if (request->type != SAR_ENDPOINT_TYPE_RECORDING &&
@@ -650,7 +647,10 @@ NTSTATUS SarCreateEndpoint(
     endpoint->analogDataRange->MaximumChannels = 0;
 
     request->name[MAX_ENDPOINT_NAME_LENGTH] = '\0';
+    request->id[MAX_ENDPOINT_NAME_LENGTH] = '\0';
     RtlInitUnicodeString(&endpoint->deviceName, request->name);
+    RtlInitUnicodeString(&endpoint->deviceId, request->id);
+    endpoint->deviceId.MaximumLength = MAX_ENDPOINT_NAME_LENGTH;
     status = SarStringDuplicate(&endpoint->deviceName, &endpoint->deviceName);
 
     if (!NT_SUCCESS(status)) {
@@ -658,13 +658,18 @@ NTSTATUS SarCreateEndpoint(
     }
 
     deviceNameAllocated = TRUE;
+    status = SarStringDuplicate(&endpoint->deviceId, &endpoint->deviceId);
 
-    LONG filterId = InterlockedIncrement(&extension->nextFilterId);
+    if (!NT_SUCCESS(status)) {
+        goto err_out;
+    }
 
-    RtlIntegerToUnicodeString(filterId, 10, &referenceString);
+    deviceIdAllocated = TRUE;
+
     KsAcquireDevice(ksDevice);
     status = KsCreateFilterFactory(
-        device, endpoint->filterDesc, buf, nullptr, KSCREATE_ITEM_FREEONSTOP,
+        device, endpoint->filterDesc, endpoint->deviceId.Buffer,
+        nullptr, KSCREATE_ITEM_FREEONSTOP,
         nullptr, nullptr, &endpoint->filterFactory);
     KsReleaseDevice(ksDevice);
 
@@ -693,6 +698,10 @@ err_out:
         endpoint->deviceName = {};
     }
 
+    if (!deviceIdAllocated) {
+        endpoint->deviceId = {};
+    }
+
     SarDeleteEndpoint(endpoint);
     return status;
 }
@@ -704,6 +713,10 @@ VOID SarDeleteEndpoint(SarEndpoint *endpoint)
 
     if (endpoint->deviceName.Buffer) {
         SarStringFree(&endpoint->deviceName);
+    }
+
+    if (endpoint->deviceId.Buffer) {
+        SarStringFree(&endpoint->deviceId);
     }
 
     if (endpoint->filterFactory) {

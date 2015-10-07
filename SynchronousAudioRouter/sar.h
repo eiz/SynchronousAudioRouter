@@ -74,6 +74,7 @@ typedef struct SarCreateEndpointRequest
     DWORD type;
     DWORD index;
     DWORD channelCount;
+    WCHAR id[MAX_ENDPOINT_NAME_LENGTH+1];
     WCHAR name[MAX_ENDPOINT_NAME_LENGTH+1];
 } SarCreateEndpointRequest;
 
@@ -162,7 +163,6 @@ typedef struct SarDriverExtension
     UNICODE_STRING sarInterfaceName;
     FAST_MUTEX controlContextLock;
     RTL_GENERIC_TABLE controlContextTable;
-    LONG nextFilterId;
 } SarDriverExtension;
 
 typedef struct SarControlContext
@@ -206,6 +206,7 @@ typedef struct SarEndpoint
     LIST_ENTRY listEntry;
     PIRP pendingIrp;
     UNICODE_STRING deviceName;
+    UNICODE_STRING deviceId;
     SarControlContext *owner;
     PKSFILTERFACTORY filterFactory;
     PKSFILTER_DESCRIPTOR filterDesc;
@@ -237,7 +238,6 @@ NTSTATUS SarSetBufferLayout(
 NTSTATUS SarCreateEndpoint(
     PDEVICE_OBJECT device,
     PIRP irp,
-    SarDriverExtension *extension,
     SarControlContext *controlContext,
     SarCreateEndpointRequest *request);
 VOID SarOrphanEndpoint(SarEndpoint *endpoint);

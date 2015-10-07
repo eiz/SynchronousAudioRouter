@@ -295,6 +295,7 @@ bool SarClient::createEndpoints()
         request.channelCount = endpoint.channelCount;
         request.index = i++;
         wcscpy_s(request.name, UTF8ToWide(endpoint.description).c_str());
+        wcscpy_s(request.id, UTF8ToWide(endpoint.id).c_str());
 
         if (!DeviceIoControl(_device, SAR_REQUEST_CREATE_ENDPOINT,
             (LPVOID)&request, sizeof(request), nullptr, 0, nullptr, nullptr)) {
