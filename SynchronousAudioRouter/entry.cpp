@@ -268,7 +268,7 @@ NTSTATUS SarIrpDeviceControl(PDEVICE_OBJECT deviceObject, PIRP irp)
     }
 
     switch (ioControlCode) {
-        case SAR_REQUEST_SET_BUFFER_LAYOUT: {
+        case SAR_SET_BUFFER_LAYOUT: {
             SAR_LOG("(SAR) create audio buffers");
 
             SarSetBufferLayoutRequest request;
@@ -291,7 +291,7 @@ NTSTATUS SarIrpDeviceControl(PDEVICE_OBJECT deviceObject, PIRP irp)
                 &response, irp, sizeof(SarSetBufferLayoutResponse));
             break;
         }
-        case SAR_REQUEST_CREATE_ENDPOINT: {
+        case SAR_CREATE_ENDPOINT: {
             SarCreateEndpointRequest request;
 
             ntStatus = SarReadUserBuffer(
@@ -306,7 +306,7 @@ NTSTATUS SarIrpDeviceControl(PDEVICE_OBJECT deviceObject, PIRP irp)
                 deviceObject, irp, controlContext, &request);
             break;
         }
-        case SAR_REQUEST_GET_NOTIFICATION_EVENTS: {
+        case SAR_WAIT_HANDLE_QUEUE: {
             ntStatus = SarWaitHandleQueue(&controlContext->handleQueue, irp);
             break;
         }

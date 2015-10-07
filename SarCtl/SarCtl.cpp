@@ -32,7 +32,7 @@ BOOL createEndpoint(
     request.channelCount = channelCount;
     wcscpy_s(request.name, name);
 
-    if (!DeviceIoControl(device, SAR_REQUEST_CREATE_ENDPOINT,
+    if (!DeviceIoControl(device, SAR_CREATE_ENDPOINT,
             (LPVOID)&request, sizeof(request), nullptr, 0, nullptr, nullptr)) {
         return FALSE;
     }
@@ -55,7 +55,7 @@ BOOL setBufferLayout(
     request.sampleRate = sampleRate;
     request.sampleSize = sampleSize;
 
-    if (!DeviceIoControl(device, SAR_REQUEST_SET_BUFFER_LAYOUT,
+    if (!DeviceIoControl(device, SAR_SET_BUFFER_LAYOUT,
         (LPVOID)&request, sizeof(request), (LPVOID)&response, sizeof(response),
         nullptr, nullptr)) {
 

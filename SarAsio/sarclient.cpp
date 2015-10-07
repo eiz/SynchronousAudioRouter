@@ -269,7 +269,7 @@ bool SarClient::setBufferLayout()
         request.minimumFrameCount = _driverConfig.waveRtMinimumFrames;
     }
 
-    if (!DeviceIoControl(_device, SAR_REQUEST_SET_BUFFER_LAYOUT,
+    if (!DeviceIoControl(_device, SAR_SET_BUFFER_LAYOUT,
         (LPVOID)&request, sizeof(request), (LPVOID)&response, sizeof(response),
         nullptr, nullptr)) {
 
@@ -297,7 +297,7 @@ bool SarClient::createEndpoints()
         wcscpy_s(request.name, UTF8ToWide(endpoint.description).c_str());
         wcscpy_s(request.id, UTF8ToWide(endpoint.id).c_str());
 
-        if (!DeviceIoControl(_device, SAR_REQUEST_CREATE_ENDPOINT,
+        if (!DeviceIoControl(_device, SAR_CREATE_ENDPOINT,
             (LPVOID)&request, sizeof(request), nullptr, 0, nullptr, nullptr)) {
 
             std::ostringstream os;
@@ -344,7 +344,7 @@ void SarClient::updateNotificationHandles()
 
     ZeroMemory((LPOVERLAPPED)&_handleQueueCompletion, sizeof(OVERLAPPED));
     status = DeviceIoControl(
-        _device, SAR_REQUEST_GET_NOTIFICATION_EVENTS, nullptr, 0,
+        _device, SAR_WAIT_HANDLE_QUEUE, nullptr, 0,
         _handleQueueCompletion.responses,
         sizeof(_handleQueueCompletion.responses),
         nullptr, &_handleQueueCompletion);
