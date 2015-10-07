@@ -650,7 +650,6 @@ NTSTATUS SarCreateEndpoint(
     request->id[MAX_ENDPOINT_NAME_LENGTH] = '\0';
     RtlInitUnicodeString(&endpoint->deviceName, request->name);
     RtlInitUnicodeString(&endpoint->deviceId, request->id);
-    endpoint->deviceId.MaximumLength = MAX_ENDPOINT_NAME_LENGTH;
     status = SarStringDuplicate(&endpoint->deviceName, &endpoint->deviceName);
 
     if (!NT_SUCCESS(status)) {
@@ -665,7 +664,6 @@ NTSTATUS SarCreateEndpoint(
     }
 
     deviceIdAllocated = TRUE;
-
     KsAcquireDevice(ksDevice);
     status = KsCreateFilterFactory(
         device, endpoint->filterDesc, endpoint->deviceId.Buffer,
@@ -711,14 +709,6 @@ VOID SarDeleteEndpoint(SarEndpoint *endpoint)
     SAR_LOG("SarDeleteEndpoint");
     PKSDEVICE ksDevice = KsFilterFactoryGetDevice(endpoint->filterFactory);
 
-    if (endpoint->deviceName.Buffer) {
-        SarStringFree(&endpoint->deviceName);
-    }
-
-    if (endpoint->deviceId.Buffer) {
-        SarStringFree(&endpoint->deviceId);
-    }
-
     if (endpoint->filterFactory) {
         KsAcquireDevice(ksDevice);
         KsDeleteFilterFactory(endpoint->filterFactory);
@@ -743,6 +733,14 @@ VOID SarDeleteEndpoint(SarEndpoint *endpoint)
 
     if (endpoint->filterDesc) {
         ExFreePoolWithTag(endpoint->filterDesc, SAR_TAG);
+    }
+
+    if (endpoint->deviceName.Buffer) {
+        SarStringFree(&endpoint->deviceName);
+    }
+
+    if (endpoint->deviceId.Buffer) {
+        SarStringFree(&endpoint->deviceId);
     }
 
     ExFreePoolWithTag(endpoint, SAR_TAG);
