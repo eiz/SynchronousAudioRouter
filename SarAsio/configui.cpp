@@ -298,5 +298,7 @@ ConfigurationPropertyDialog::ConfigurationPropertyDialog(DriverConfig& config)
 {
     pszCaption = TEXT("Synchronous Audio Router");
     addPage(_endpoints);
-    addPage(_applications);
+
+    // TODO: will re-add once the backend for this actually exists
+    // addPage(_applications);
 }
