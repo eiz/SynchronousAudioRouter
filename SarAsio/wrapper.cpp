@@ -398,6 +398,11 @@ AsioStatus SarAsioWrapper::controlPanel()
     if (sheet->show(_hwnd) > 0) {
         _config = sheet->newConfig();
         _config.writeFile(ConfigurationPath("default.json"));
+
+        if (_callbacks.asioMessage) {
+            _callbacks.asioMessage(
+                AsioMessage::ResetRequest, 0, nullptr, nullptr);
+        }
     }
 
     return AsioStatus::OK;
