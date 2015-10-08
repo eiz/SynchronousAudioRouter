@@ -117,8 +117,6 @@ INT_PTR EndpointsPropertySheetPage::dialogProc(
                     }
 
                     break;
-                case 1004: // _listView
-                    break;
                 case 1005: // _addButton
                     if (HIWORD(wparam) == BN_CLICKED) {
                         onAddEndpoint();
@@ -134,6 +132,20 @@ INT_PTR EndpointsPropertySheetPage::dialogProc(
             }
 
             break;
+        case WM_NOTIFY: {
+            LPNMHDR nmh = (LPNMHDR)lparam;
+
+            switch (nmh->idFrom) {
+                case 1004: // _listView
+                    if (nmh->code == LVN_ITEMCHANGED) {
+                        updateEnabled();
+                    }
+
+                    break;
+            }
+
+            break;
+        }
     }
 
     return 0;
@@ -189,6 +201,16 @@ void EndpointsPropertySheetPage::onAddEndpoint()
 
 void EndpointsPropertySheetPage::onRemoveEndpoint()
 {
+    auto index = ListView_GetNextItem(_listView, -1, LVNI_SELECTED);
+
+    if (index < 0 || index >= (int)_config.endpoints.size()) {
+        return;
+    }
+
+    _config.endpoints.erase(_config.endpoints.begin() + index);
+    refreshEndpointList();
+    updateEnabled();
+    changed();
 }
 
 void EndpointsPropertySheetPage::initControls()
