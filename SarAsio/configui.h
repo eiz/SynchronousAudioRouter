@@ -74,6 +74,20 @@ private:
     HWND _listView;
     HWND _addButton;
     HWND _removeButton;
+
+    void initEpDialogControls();
+    void updateEpDialogConfig();
+    INT_PTR epDialogProc(
+        HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam);
+    static INT_PTR CALLBACK epDialogProcStub(
+        HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam);
+
+    HWND _epDialog;
+    HWND _epDialogName;
+    HWND _epDialogType;
+    HWND _epDialogChannelCount;
+    EndpointConfig _epDialogConfig;
+    int _epDialogConfigIndex;
 };
 
 struct ApplicationsPropertySheetPage: public PropertySheetPage

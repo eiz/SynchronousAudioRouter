@@ -194,9 +194,36 @@ void EndpointsPropertySheetPage::onConfigureHardwareInterface()
 
 void EndpointsPropertySheetPage::onAddEndpoint()
 {
-    MessageBox(_hwnd,
-        TEXT("Add endpoint is not yet implemented."), TEXT("Error"),
-        MB_OK | MB_ICONERROR);
+    _epDialogConfig = EndpointConfig();
+    _epDialogConfigIndex = -1;
+
+    int counter = 1;
+
+    do {
+        std::ostringstream os;
+
+        os << "ep_" << counter;
+
+        if (!_config.findEndpoint(os.str())) {
+            _epDialogConfig.id = os.str();
+        } else {
+            counter++;
+        }
+    } while (_epDialogConfig.id.empty());
+
+    auto result = DialogBoxParam(
+        gDllModule,
+        MAKEINTRESOURCE(IDD_CONFIG_ENDPOINT_DETAILS),
+        _hwnd,
+        &EndpointsPropertySheetPage::epDialogProcStub,
+        (LPARAM)this);
+
+    if (result == IDOK) {
+        _config.endpoints.push_back(_epDialogConfig);
+        refreshEndpointList();
+        updateEnabled();
+        changed();
+    }
 }
 
 void EndpointsPropertySheetPage::onRemoveEndpoint()
@@ -299,6 +326,91 @@ void EndpointsPropertySheetPage::updateEnabled()
         ComboBox_GetCurSel(_hardwareInterfaceDropdown) > 0);
     Button_Enable(_removeButton,
         ListView_GetSelectedCount(_listView) > 0);
+}
+
+void EndpointsPropertySheetPage::initEpDialogControls()
+{
+    _epDialogName = GetDlgItem(_epDialog, 1101);
+    _epDialogType = GetDlgItem(_epDialog, 1103);
+    _epDialogChannelCount = GetDlgItem(_epDialog, 1105);
+
+    ComboBox_AddString(_epDialogType, L"Playback");
+    ComboBox_AddString(_epDialogType, L"Recording");
+    ComboBox_SetCurSel(_epDialogType,
+        _epDialogConfig.type == EndpointType::Recording ? 1 : 0);
+
+    std::wostringstream wos;
+
+    wos << _epDialogConfig.channelCount;
+
+    Edit_SetText(_epDialogChannelCount, wos.str().c_str());
+}
+
+void EndpointsPropertySheetPage::updateEpDialogConfig()
+{
+    auto len = Edit_GetTextLength(_epDialogName);
+    auto buf = new WCHAR[len + 1];
+
+    Edit_GetText(_epDialogName, buf, len + 1);
+    _epDialogConfig.description = TCHARToUTF8(buf);
+    delete[] buf;
+
+    len = Edit_GetTextLength(_epDialogChannelCount);
+    buf = new WCHAR[len + 1];
+    Edit_GetText(_epDialogChannelCount, buf, len + 1);
+
+    auto countStr = TCHARToUTF8(buf);
+
+    delete[] buf;
+    _epDialogConfig.channelCount = max(1, std::stoi(countStr));
+    _epDialogConfig.type = ComboBox_GetCurSel(_epDialogType) == 1 ?
+        EndpointType::Recording : EndpointType::Playback;
+}
+
+INT_PTR EndpointsPropertySheetPage::epDialogProc(
+    HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
+{
+    OutputDebugStringA("EndpointsPropertySheetPage::addEndpointDialogProc");
+
+    switch (msg) {
+        case WM_INITDIALOG:
+            initEpDialogControls();
+            break;
+        case WM_COMMAND:
+            switch (LOWORD(wparam)) {
+                case IDOK:
+                    updateEpDialogConfig();
+
+                    // fall-through
+                case IDCANCEL:
+                    EndDialog(hwnd, wparam);
+                    break;
+            }
+
+            break;
+    }
+
+    return 0;
+}
+
+INT_PTR CALLBACK EndpointsPropertySheetPage::epDialogProcStub(
+    HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
+{
+    if (msg == WM_INITDIALOG) {
+        EndpointsPropertySheetPage *page = (EndpointsPropertySheetPage *)lparam;
+
+        page->_epDialog = hwnd;
+        SetWindowLongPtr(hwnd, GWLP_USERDATA, (LONG_PTR)page);
+    }
+
+    EndpointsPropertySheetPage *page =
+        (EndpointsPropertySheetPage *)GetWindowLongPtr(hwnd, GWLP_USERDATA);
+
+    if (page) {
+        return page->epDialogProc(hwnd, msg, wparam, lparam);
+    }
+
+    return 0;
 }
 
 ApplicationsPropertySheetPage::ApplicationsPropertySheetPage()

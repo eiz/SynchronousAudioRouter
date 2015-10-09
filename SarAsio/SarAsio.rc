@@ -68,3 +68,28 @@ CAPTION "Applications"
 FONT 8, "MS Shell Dlg", 400, 0, 0
 {
 }
+
+LANGUAGE LANG_NEUTRAL, SUBLANG_NEUTRAL
+IDD_CONFIG_ENDPOINT_DETAILS DIALOGEX 0, 0, 256, 71
+STYLE DS_SHELLFONT | WS_CAPTION | WS_POPUP | WS_SYSMENU | DS_MODALFRAME
+CAPTION "Endpoint Details"
+FONT 8, "MS Shell Dlg", 400, 0, 0
+{
+    LTEXT "Name:", 1100,
+        4, 6, 56, 12
+    EDITTEXT 1101,
+        68, 5, 184, 12
+    LTEXT "Type:", 1102,
+        4, 22, 56, 12
+    COMBOBOX 1103,
+        68, 21, 184, 12,
+        CBS_DROPDOWNLIST | CBS_HASSTRINGS, WS_EX_LEFT
+    LTEXT "Channel count:", 1104,
+        4, 38, 56, 12
+    EDITTEXT 1105,
+        68, 37, 16, 12
+    PUSHBUTTON "&OK", IDOK,
+        160, 53, 44, 14
+    PUSHBUTTON "&Cancel", IDCANCEL,
+        208, 53, 44, 14
+}

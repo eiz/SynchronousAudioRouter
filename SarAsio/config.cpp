@@ -200,4 +200,15 @@ DriverConfig DriverConfig::fromFile(const std::string& path)
     return result;
 }
 
+EndpointConfig *DriverConfig::findEndpoint(const std::string& id)
+{
+    for (auto& ep : endpoints) {
+        if (ep.id == id) {
+            return &ep;
+        }
+    }
+
+    return nullptr;
+}
+
 } // namespace Sar

@@ -32,7 +32,7 @@ struct EndpointConfig
     std::string id;
     std::string description;
     EndpointType type;
-    int channelCount;
+    int channelCount = 2;
 
     bool load(picojson::object& obj);
     picojson::object save();
@@ -59,6 +59,7 @@ struct DriverConfig
     picojson::object save();
     bool writeFile(const std::string& path);
     static DriverConfig fromFile(const std::string& path);
+    EndpointConfig *findEndpoint(const std::string& id);
 };
 
 } // namespace Sar
