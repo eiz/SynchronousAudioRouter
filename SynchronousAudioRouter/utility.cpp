@@ -241,10 +241,16 @@ NTSTATUS SarTransferQueuedHandle(
 
     response->associatedData = associatedData;
     response->handle = nullptr;
-    return ZwDuplicateObject(
+
+    HANDLE result = nullptr;
+    NTSTATUS status;
+
+    status = ZwDuplicateObject(
         kernelProcessHandle, userHandle,
-        kernelTargetProcessHandle, &response->handle, 0, 0,
+        kernelTargetProcessHandle, &result, 0, 0,
         DUPLICATE_SAME_ACCESS);
+    response->handle = result;
+    return status;
 }
 
 void SarCancelHandleQueueIrp(PDEVICE_OBJECT deviceObject, PIRP irp)

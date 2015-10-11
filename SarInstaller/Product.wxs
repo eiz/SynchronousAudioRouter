@@ -1,6 +1,12 @@
 <?xml version="1.0" encoding="UTF-8"?>
+<?if $(var.Platform) = x64 ?>
+  <?define bitness = "(64 bit)" ?>
+<?else ?>
+  <?define bitness = "(32 bit)" ?>
+<?endif ?>
+
 <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
-	<Product Id="*" Name="Synchronous Audio Router"
+	<Product Id="*" Name="Synchronous Audio Router $(var.bitness)"
            Language="1033" Version="1.0.0.0"
            Manufacturer="Many Worlds"
            UpgradeCode="8cae7fd4-4469-4cc1-ba9a-76c00fbb5e05">
@@ -8,27 +14,132 @@
              InstallScope="perMachine" />
 
 		<MajorUpgrade DowngradeErrorMessage="A newer version of [ProductName] is already installed." />
-		<MediaTemplate />
+		<MediaTemplate EmbedCab="yes" />
 
-		<Feature Id="ProductFeature" Title="Synchronous Audio Router" Level="1">
-			<ComponentGroupRef Id="ProductComponents" />
+		<Feature Id="Main" Title="Synchronous Audio Router" Level="1">
+      <ComponentRef Id="KernelDriver64"/>
+      <ComponentRef Id="KernelDriver32"/>
+      <ComponentRef Id="AsioDriver64"/>
+      <!--<ComponentRef Id="AsioDriver64_32"/>-->
+      <ComponentRef Id="AsioDriver32"/>
 		</Feature>
+
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="ProgramFiles64Folder">
+        <Directory Id="INSTALLDIR64" Name="Synchronous Audio Router"/>
+      </Directory>
+      <Directory Id="ProgramFilesFolder">
+        <Directory Id="INSTALLDIR" Name="Synchronous Audio Router"/>
+      </Directory>
+    </Directory>
+
+    <DirectoryRef Id="INSTALLDIR64">
+      <Component Id="KernelDriver64"
+                 Guid="{48C7E358-9797-42F7-B86D-5AA1DD3E0E44}"
+                 Win64="yes">
+        <File Id="SynchronousAudioRouter_x64.sys"
+              Name="SynchronousAudioRouter_x64.sys"
+              Source="..\x64\Release\SynchronousAudioRouter.sys"
+              KeyPath="yes"/>
+      </Component>
+
+      <Component Id="AsioDriver64"
+                 Guid="{2EE1A63F-AEB4-4518-A3FD-963A67CAA5DA}"
+                 Win64="yes">
+        <File Id="SarAsio_x64.dll"
+              Name="SarAsio_x64.dll"
+              Source="..\x64\Release\SarAsio.dll"
+              KeyPath="yes"/>
+      </Component>
+    </DirectoryRef>
+
+    <DirectoryRef Id="INSTALLDIR">
+      <Component Id="KernelDriver32"
+           Guid="{865DF004-18BD-448C-A63B-BF3B758CAE99}"
+           Win64="no">
+        <File Id="SynchronousAudioRouter.sys"
+              Source="..\Release\SynchronousAudioRouter.sys"
+              KeyPath="yes"/>
+      </Component>
+
+      <!--<Component Id="AsioDriver64_32"
+           Guid="{CB5A7C17-29B8-43BA-9B5F-F24DE175934C}"
+           Win64="no">
+        <File Id="SarAsio_x64_32.dll"
+              Name="SarAsio.dll"
+              Source="..\Release\SarAsio.dll"
+              KeyPath="yes"/>
+        <RegistryValue Root="HKCR"
+                       Key="CLSID\{0569D852-1F6A-44A7-B7B5-EFB78B66BE21}\InProcServer32"
+                       Value="[#fil94765CC30F4FF05A88E589FA5C15F327]"
+                       Type="string"
+                       Action="write" />
+        <RegistryValue Root="HKCR"
+                       Key="CLSID\{0569D852-1F6A-44A7-B7B5-EFB78B66BE21}\InProcServer32"
+                       Name="ThreadingModel"
+                       Value="Apartment"
+                       Type="string"
+                       Action="write" />
+        <RegistryValue Root="HKCR"
+                       Key="CLSID\{0569D852-1F6A-44A7-B7B5-EFB78B66BE21}\ProgID"
+                       Value="SynchronousAudioRouter.1"
+                       Type="string"
+                       Action="write" />
+        <RegistryValue Root="HKCR"
+                       Key="CLSID\{0569D852-1F6A-44A7-B7B5-EFB78B66BE21}"
+                       Value="Synchronous Audio Router ASIO"
+                       Type="string"
+                       Action="write" />
+        <RegistryValue Root="HKLM" Key="Software\ASIO\Synchronous Audio Router"
+                       Name="CLSID" Value="{0569D852-1F6A-44A7-B7B5-EFB78B66BE21}"
+                       Type="string"
+                       Action="write" />
+        <RegistryValue Root="HKLM"
+                       Key="Software\ASIO\Synchronous Audio Router"
+                       Name="Description"
+                       Value="Synchronous Audio Router"
+                       Type="string"
+                       Action="write" />
+      </Component>-->
+
+      <Component Id="AsioDriver32"
+                 Guid="{FFBEFDDB-FBC6-4CE5-9187-267DE9BB93D9}"
+                 Win64="no">
+        <File Id="SarAsio.dll"
+              Source="..\Release\SarAsio.dll"
+              KeyPath="yes"/>
+        <RegistryValue Root="HKCR"
+                       Key="CLSID\{0569D852-1F6A-44A7-B7B5-EFB78B66BE21}\InProcServer32"
+                       Value="[#SarAsio.dll]"
+                       Type="string"
+                       Action="write" />
+        <RegistryValue Root="HKCR"
+                       Key="CLSID\{0569D852-1F6A-44A7-B7B5-EFB78B66BE21}\InProcServer32"
+                       Name="ThreadingModel"
+                       Value="Apartment"
+                       Type="string"
+                       Action="write" />
+        <RegistryValue Root="HKCR"
+                       Key="CLSID\{0569D852-1F6A-44A7-B7B5-EFB78B66BE21}\ProgID"
+                       Value="SynchronousAudioRouter.1"
+                       Type="string"
+                       Action="write" />
+        <RegistryValue Root="HKCR"
+                       Key="CLSID\{0569D852-1F6A-44A7-B7B5-EFB78B66BE21}"
+                       Value="Synchronous Audio Router ASIO"
+                       Type="string"
+                       Action="write" />
+        <RegistryValue Root="HKLM" Key="Software\ASIO\Synchronous Audio Router"
+                       Name="CLSID" Value="{0569D852-1F6A-44A7-B7B5-EFB78B66BE21}"
+                       Type="string"
+                       Action="write" />
+        <RegistryValue Root="HKLM"
+                       Key="Software\ASIO\Synchronous Audio Router"
+                       Name="Description"
+                       Value="Synchronous Audio Router"
+                       Type="string"
+                       Action="write" />
+      </Component>
+    </DirectoryRef>
 	</Product>
-
-	<Fragment>
-		<Directory Id="TARGETDIR" Name="SourceDir">
-			<Directory Id="ProgramFilesFolder">
-				<Directory Id="INSTALLFOLDER" Name="SarInstaller" />
-			</Directory>
-		</Directory>
-	</Fragment>
-
-	<Fragment>
-		<ComponentGroup Id="ProductComponents" Directory="INSTALLFOLDER">
-			<!-- TODO: Remove the comments around this Component element and the ComponentRef below in order to add resources to this installer. -->
-			<!-- <Component Id="ProductComponent"> -->
-				<!-- TODO: Insert files, registry keys, and other resources here. -->
-			<!-- </Component> -->
-		</ComponentGroup>
-	</Fragment>
 </Wix>

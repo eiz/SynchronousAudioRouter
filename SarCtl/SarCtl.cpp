@@ -64,11 +64,11 @@ BOOL setBufferLayout(
 
     if (regsOut) {
         *regsOut = (SarEndpointRegisters *)
-            ((PCH)response.virtualAddress + response.registerBase);
+            ((PCH)(ULONG64)response.virtualAddress + response.registerBase);
     }
 
     if (bufferOut) {
-        *bufferOut = response.virtualAddress;
+        *bufferOut = (PVOID)(ULONG64)response.virtualAddress;
     }
 
     if (bufferSizeOut) {
