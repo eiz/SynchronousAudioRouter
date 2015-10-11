@@ -386,6 +386,18 @@ AsioStatus SarAsioWrapper::disposeBuffers()
         return AsioStatus::NotPresent;
     }
 
+    stop();
+
+    for (auto& endpointBuffers : _bufferConfig.asioBuffers) {
+        for (auto buffer : endpointBuffers) {
+            free(buffer);
+        }
+    }
+
+    _bufferConfig.asioBuffers.clear();
+    _callbacks = {};
+    _userTick = nullptr;
+    _userTickWithTime = nullptr;
     InterlockedExchangePointer((PVOID *)&gActiveWrapper, nullptr);
     return _innerDriver->disposeBuffers();
 }
