@@ -1,0 +1,11 @@
+HKCR {
+	NoRemove CLSID {
+		ForceRemove '{9FB96668-9EDD-4574-AD77-76BD89659D5D}' =
+			s 'Synchronous Audio Router MMDeviceEnumerator Wrapper' {
+			ProgID = s 'SarMMDeviceEnumerator.1'
+			InProcServer32 = s '%MODULE%' {
+				val ThreadingModel = s 'both'
+			}
+		}
+	}
+}

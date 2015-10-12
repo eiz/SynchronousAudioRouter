@@ -48,6 +48,9 @@
     <ClInclude Include="sarclient.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="mmwrapper.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="stdafx.cpp">
@@ -74,6 +77,9 @@
     <ClCompile Include="sarclient.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="mmwrapper.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <None Include="SarAsio.rgs">
@@ -81,6 +87,9 @@
     </None>
     <None Include="SarAsio.def">
       <Filter>Source Files</Filter>
+    </None>
+    <None Include="SarMMDevice.rgs">
+      <Filter>Resource Files</Filter>
     </None>
   </ItemGroup>
   <ItemGroup>

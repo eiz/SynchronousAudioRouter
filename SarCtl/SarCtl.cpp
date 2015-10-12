@@ -78,6 +78,12 @@ BOOL setBufferLayout(
     return TRUE;
 }
 
+BOOL startRegistryFilter(HANDLE device)
+{
+    return DeviceIoControl(device, SAR_START_REGISTRY_FILTER,
+        nullptr, 0, nullptr, 0, nullptr, nullptr);
+}
+
 int main(int argc, char *argv[])
 {
     HDEVINFO devinfo;
@@ -136,59 +142,64 @@ int main(int argc, char *argv[])
 
     std::cout << "Opened SAR device." << std::endl;
 
-    SarEndpointRegisters *regs = nullptr;
-    PCH buffer = nullptr;
-    DWORD bufferSize = 0;
-
-    if (!setBufferLayout(
-        device, 1024 * 1024, 96000, 3, &regs, (LPVOID *)&buffer, &bufferSize)) {
-        std::cerr << "Couldn't set buffer layout: "
-            << GetLastError() << std::endl;
-        return 1;
-    }
-
-    if (!createEndpoint(
-        device, SAR_ENDPOINT_TYPE_PLAYBACK, 0, 2, L"Music Out (Stereo)")) {
-        std::cerr << "Couldn't create endpoint: "
-            << GetLastError() << std::endl;
-        return 1;
-    }
-
+    startRegistryFilter(device);
     while (true) {
-        Sleep(100);
-
-        SarEndpointRegisters snap;
-        PCH first = nullptr, last = nullptr;
-        DWORD sum = 0;
-
-        RtlCopyMemory(&snap, regs, sizeof(SarEndpointRegisters));
-        std::cout << "Active: " << GENERATION_IS_ACTIVE(snap.generation)
-                  << " Offset: " << snap.bufferOffset << " Size: "
-                  << snap.bufferSize << " Clock: " << snap.clockRegister
-                  << " Position: " << snap.positionRegister << std::endl;
-
-        for (PCH p = buffer; p < buffer + bufferSize - SAR_BUFFER_CELL_SIZE; ++p) {
-            if (*p) {
-                if (!first) {
-                    first = p;
-                }
-
-                last = p;
-                sum += *p;
-            }
-        }
-
-        if (first) {
-            std::cout << "First: " << (first - buffer)
-                      << " Last: " << (last - buffer)
-                      << " Sum: " << sum << std::endl;
-        }
-
-        if (snap.bufferSize) {
-            regs->positionRegister =
-                (regs->positionRegister + 1024) % snap.bufferSize;
-        }
+        Sleep(1000);
     }
+
+    //SarEndpointRegisters *regs = nullptr;
+    //PCH buffer = nullptr;
+    //DWORD bufferSize = 0;
+
+    //if (!setBufferLayout(
+    //    device, 1024 * 1024, 96000, 3, &regs, (LPVOID *)&buffer, &bufferSize)) {
+    //    std::cerr << "Couldn't set buffer layout: "
+    //        << GetLastError() << std::endl;
+    //    return 1;
+    //}
+
+    //if (!createEndpoint(
+    //    device, SAR_ENDPOINT_TYPE_PLAYBACK, 0, 2, L"Music Out (Stereo)")) {
+    //    std::cerr << "Couldn't create endpoint: "
+    //        << GetLastError() << std::endl;
+    //    return 1;
+    //}
+
+    //while (true) {
+    //    Sleep(100);
+
+    //    SarEndpointRegisters snap;
+    //    PCH first = nullptr, last = nullptr;
+    //    DWORD sum = 0;
+
+    //    RtlCopyMemory(&snap, regs, sizeof(SarEndpointRegisters));
+    //    std::cout << "Active: " << GENERATION_IS_ACTIVE(snap.generation)
+    //              << " Offset: " << snap.bufferOffset << " Size: "
+    //              << snap.bufferSize << " Clock: " << snap.clockRegister
+    //              << " Position: " << snap.positionRegister << std::endl;
+
+    //    for (PCH p = buffer; p < buffer + bufferSize - SAR_BUFFER_CELL_SIZE; ++p) {
+    //        if (*p) {
+    //            if (!first) {
+    //                first = p;
+    //            }
+
+    //            last = p;
+    //            sum += *p;
+    //        }
+    //    }
+
+    //    if (first) {
+    //        std::cout << "First: " << (first - buffer)
+    //                  << " Last: " << (last - buffer)
+    //                  << " Sum: " << sum << std::endl;
+    //    }
+
+    //    if (snap.bufferSize) {
+    //        regs->positionRegister =
+    //            (regs->positionRegister + 1024) % snap.bufferSize;
+    //    }
+    //}
 
     CloseHandle(device);
     return 0;

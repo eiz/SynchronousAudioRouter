@@ -19,6 +19,7 @@
 #endif
 
 #define IDR_SARASIO                             101
+#define IDR_SARMMDEVICE                         102
 #define IDD_CONFIG_ENDPOINTS                    201
 #define IDD_CONFIG_ENDPOINT_DETAILS             202
 #define IDD_CONFIG_APPLICATIONS                 203

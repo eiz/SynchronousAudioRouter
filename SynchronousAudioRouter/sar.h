@@ -58,6 +58,8 @@ DEFINE_GUID(GUID_DEVINTERFACE_SYNCHRONOUSAUDIOROUTER,
     FILE_DEVICE_UNKNOWN, 2, METHOD_NEITHER, FILE_READ_DATA | FILE_WRITE_DATA)
 #define SAR_WAIT_HANDLE_QUEUE CTL_CODE( \
     FILE_DEVICE_UNKNOWN, 3, METHOD_BUFFERED, FILE_READ_DATA | FILE_WRITE_DATA)
+#define SAR_START_REGISTRY_FILTER CTL_CODE( \
+    FILE_DEVICE_UNKNOWN, 4, METHOD_NEITHER, FILE_READ_DATA | FILE_WRITE_DATA)
 
 #define SAR_MAX_BUFFER_SIZE 1024 * 1024 * 128
 #define SAR_MIN_SAMPLE_SIZE 1
@@ -161,8 +163,10 @@ typedef struct SarDriverExtension
     PDRIVER_DISPATCH ksDispatchCleanup;
     PDRIVER_DISPATCH ksDispatchDeviceControl;
     UNICODE_STRING sarInterfaceName;
-    FAST_MUTEX controlContextLock;
+    FAST_MUTEX mutex;
     RTL_GENERIC_TABLE controlContextTable;
+    BOOL hasWrittenRegistryFilterHello;
+    LARGE_INTEGER filterCookie;
 } SarDriverExtension;
 
 typedef struct SarControlContext
@@ -320,6 +324,7 @@ NTSTATUS SarDeleteEndpointProcessContext(SarEndpointProcessContext *context);
 SarControlContext *SarCreateControlContext(PFILE_OBJECT fileObject);
 VOID SarDeleteControlContext(SarControlContext *controlContext);
 BOOLEAN SarOrphanControlContext(SarDriverExtension *extension, PIRP irp);
+NTSTATUS SarRegistryCallback(PVOID context, PVOID argument1, PVOID argument2);
 
 FORCEINLINE VOID SarRetainControlContext(SarControlContext *controlContext)
 {

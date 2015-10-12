@@ -34,10 +34,10 @@ SarControlContext *SarGetControlContextFromFileObject(
 {
     SarControlContext *controlContext;
 
-    ExAcquireFastMutex(&extension->controlContextLock);
+    ExAcquireFastMutex(&extension->mutex);
     controlContext = (SarControlContext *)SarGetTableEntry(
         &extension->controlContextTable, fileObject);
-    ExReleaseFastMutex(&extension->controlContextLock);
+    ExReleaseFastMutex(&extension->mutex);
 
     return controlContext;
 }
@@ -51,7 +51,7 @@ SarEndpoint *SarGetEndpointFromIrp(PIRP irp, BOOLEAN retain)
     PVOID restartKey = nullptr;
     SarEndpoint *found = nullptr;
 
-    ExAcquireFastMutex(&extension->controlContextLock);
+    ExAcquireFastMutex(&extension->mutex);
 
     FOR_EACH_GENERIC(
         &extension->controlContextTable, SarTableEntry,
@@ -89,7 +89,7 @@ SarEndpoint *SarGetEndpointFromIrp(PIRP irp, BOOLEAN retain)
         }
     }
 
-    ExReleaseFastMutex(&extension->controlContextLock);
+    ExReleaseFastMutex(&extension->mutex);
     return found;
 }
 

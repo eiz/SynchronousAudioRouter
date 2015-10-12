@@ -157,6 +157,7 @@
     <ClInclude Include="config.h" />
     <ClInclude Include="configui.h" />
     <ClInclude Include="dllmain.h" />
+    <ClInclude Include="mmwrapper.h" />
     <ClInclude Include="picojson.h" />
     <ClInclude Include="sarclient.h" />
     <ClInclude Include="tinyasio.h" />
@@ -183,6 +184,7 @@
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
       </PrecompiledHeader>
     </ClCompile>
+    <ClCompile Include="mmwrapper.cpp" />
     <ClCompile Include="sarclient.cpp" />
     <ClCompile Include="stdafx.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Create</PrecompiledHeader>
@@ -197,6 +199,7 @@
   <ItemGroup>
     <None Include="SarAsio.def" />
     <None Include="SarAsio.rgs" />
+    <None Include="SarMMDevice.rgs" />
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="SarAsio.rc" />

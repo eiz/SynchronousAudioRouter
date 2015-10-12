@@ -115,7 +115,7 @@ BOOLEAN SarOrphanControlContext(SarDriverExtension *extension, PIRP irp)
     SarControlContext *controlContext;
     LIST_ENTRY orphanEndpoints;
 
-    ExAcquireFastMutex(&extension->controlContextLock);
+    ExAcquireFastMutex(&extension->mutex);
     controlContext = (SarControlContext *)SarGetTableEntry(
         &extension->controlContextTable, irpStack->FileObject);
 
@@ -124,7 +124,7 @@ BOOLEAN SarOrphanControlContext(SarDriverExtension *extension, PIRP irp)
             &extension->controlContextTable, irpStack->FileObject);
     }
 
-    ExReleaseFastMutex(&extension->controlContextLock);
+    ExReleaseFastMutex(&extension->mutex);
 
     if (!controlContext) {
         return FALSE;
@@ -182,11 +182,11 @@ NTSTATUS SarIrpCreate(PDEVICE_OBJECT deviceObject, PIRP irp)
         goto out;
     }
 
-    ExAcquireFastMutex(&extension->controlContextLock);
+    ExAcquireFastMutex(&extension->mutex);
     status = SarInsertTableEntry(
         &extension->controlContextTable, irpStack->FileObject,
         controlContext);
-    ExReleaseFastMutex(&extension->controlContextLock);
+    ExReleaseFastMutex(&extension->mutex);
 
     if (!NT_SUCCESS(status)) {
         goto out;
@@ -258,10 +258,10 @@ NTSTATUS SarIrpDeviceControl(PDEVICE_OBJECT deviceObject, PIRP irp)
     SarDumpKsIoctl(irp);
 #endif
 
-    ExAcquireFastMutex(&extension->controlContextLock);
+    ExAcquireFastMutex(&extension->mutex);
     controlContext = (SarControlContext *)SarGetTableEntry(
         &extension->controlContextTable, irpStack->FileObject);
-    ExReleaseFastMutex(&extension->controlContextLock);
+    ExReleaseFastMutex(&extension->mutex);
 
     if (!controlContext) {
         return extension->ksDispatchDeviceControl(deviceObject, irp);
@@ -310,6 +310,27 @@ NTSTATUS SarIrpDeviceControl(PDEVICE_OBJECT deviceObject, PIRP irp)
             ntStatus = SarWaitHandleQueue(&controlContext->handleQueue, irp);
             break;
         }
+        case SAR_START_REGISTRY_FILTER: {
+            UNICODE_STRING filterAltitude;
+
+            RtlUnicodeStringInit(&filterAltitude, L"360000");
+            ExAcquireFastMutex(&extension->mutex);
+
+            if (extension->filterCookie.QuadPart) {
+                ExReleaseFastMutex(&extension->mutex);
+                return STATUS_INSUFFICIENT_RESOURCES;
+            }
+
+            ntStatus = CmRegisterCallbackEx(
+                SarRegistryCallback,
+                &filterAltitude,
+                deviceObject->DriverObject,
+                extension,
+                &extension->filterCookie,
+                nullptr);
+            ExReleaseFastMutex(&extension->mutex);
+            break;
+        }
         default:
             SAR_LOG("(SAR) Unknown ioctl %d", ioControlCode);
             break;
@@ -332,8 +353,162 @@ VOID SarUnload(PDRIVER_OBJECT driverObject)
             driverObject, DriverEntry);
 
     RtlFreeUnicodeString(&extension->sarInterfaceName);
+
+    if (extension->filterCookie.QuadPart) {
+        CmUnRegisterCallback(extension->filterCookie);
+    }
 }
 
+#define CLSID_ROOT L"\\REGISTRY\\MACHINE\\SOFTWARE\\Classes\\CLSID\\"
+
+NTSTATUS SarFilterMMDeviceQuery(
+    PREG_QUERY_VALUE_KEY_INFORMATION queryInfo,
+    PUNICODE_STRING wrapperRegistrationPath)
+{
+    UNREFERENCED_PARAMETER(queryInfo);
+    UNICODE_STRING defaultValue = {};
+    NTSTATUS status;
+    OBJECT_ATTRIBUTES oa;
+    HANDLE wrapperKey;
+    PKEY_VALUE_FULL_INFORMATION valueInfo = nullptr;
+    ULONG valueInfoSize = 0, valueInfoSizeNeeded = 0;
+
+    InitializeObjectAttributes(
+        &oa, wrapperRegistrationPath, OBJ_KERNEL_HANDLE,
+        nullptr, nullptr);
+    status = ZwOpenKeyEx(&wrapperKey, KEY_ALL_ACCESS, &oa, 0);
+
+    if (!NT_SUCCESS(status)) {
+        return STATUS_SUCCESS;
+    }
+
+    status = ZwQueryValueKey(
+        wrapperKey, &defaultValue, KeyValueFullInformation,
+        valueInfo, 0, &valueInfoSizeNeeded);
+
+    if (status != STATUS_BUFFER_OVERFLOW &&
+        status != STATUS_BUFFER_TOO_SMALL) {
+
+        ZwClose(wrapperKey);
+        return STATUS_SUCCESS;
+    }
+
+    valueInfoSize = valueInfoSizeNeeded;
+    valueInfo = (PKEY_VALUE_FULL_INFORMATION)ExAllocatePoolWithTag(
+        NonPagedPool, valueInfoSize, SAR_TAG);
+
+    if (!valueInfo) {
+        ZwClose(wrapperKey);
+        return STATUS_SUCCESS;
+    }
+
+    status = ZwQueryValueKey(
+        wrapperKey, &defaultValue, KeyValueFullInformation,
+        valueInfo, valueInfoSize, &valueInfoSizeNeeded);
+
+    if (!NT_SUCCESS(status)) {
+        ExFreePool(valueInfo);
+        ZwClose(wrapperKey);
+    }
+
+    switch (queryInfo->KeyValueInformationClass) {
+        case KeyValueBasicInformation:
+            SAR_LOG("TODO: KeyValueBasicInformation");
+            break;
+        case KeyValueFullInformation:
+            SAR_LOG("TODO: KeyValueFullInformation");
+            break;
+        case KeyValuePartialInformation: {
+            PKEY_VALUE_PARTIAL_INFORMATION partialInfo =
+                (PKEY_VALUE_PARTIAL_INFORMATION)queryInfo->KeyValueInformation;
+
+            *queryInfo->ResultLength =
+                sizeof(KEY_VALUE_PARTIAL_INFORMATION) +
+                valueInfo->DataLength;
+
+            if (queryInfo->Length <
+                (sizeof(KEY_VALUE_PARTIAL_INFORMATION) +
+                 valueInfo->DataLength)) {
+
+                status = STATUS_BUFFER_TOO_SMALL;
+                break;
+            }
+
+            RtlCopyMemory(partialInfo->Data,
+                (BYTE *)valueInfo + valueInfo->DataOffset,
+                valueInfo->DataLength);
+            partialInfo->DataLength = valueInfo->DataLength;
+            partialInfo->Type = valueInfo->Type;
+            partialInfo->TitleIndex = valueInfo->TitleIndex;
+            status = STATUS_CALLBACK_BYPASS;
+        }
+        case KeyValueFullInformationAlign64:
+            SAR_LOG("TODO: KeyValueFullInformationAlign64");
+            break;
+        case KeyValuePartialInformationAlign64:
+            SAR_LOG("TODO: KeyValuePartialInformationAlign64");
+            break;
+    }
+
+    ExFreePool(valueInfo);
+    ZwClose(wrapperKey);
+    return status;
+}
+
+NTSTATUS SarRegistryCallback(PVOID context, PVOID argument1, PVOID argument2)
+{
+    UNREFERENCED_PARAMETER(argument2);
+
+    UNICODE_STRING mmDeviceRegistrationPath;
+    UNICODE_STRING wrapperRegistrationPath;
+    NTSTATUS status;
+    REG_NOTIFY_CLASS notifyClass = (REG_NOTIFY_CLASS)(ULONG_PTR)argument1;
+    SarDriverExtension *extension = (SarDriverExtension *)context;
+
+    RtlUnicodeStringInit(&mmDeviceRegistrationPath,
+        CLSID_ROOT L"{BCDE0395-E52F-467C-8E3D-C4579291692E}\\InprocServer32");
+    RtlUnicodeStringInit(&wrapperRegistrationPath,
+        CLSID_ROOT L"{9FB96668-9EDD-4574-AD77-76BD89659D5D}\\InprocServer32");
+
+    switch (notifyClass) {
+        case RegNtQueryValueKey:
+            if (!extension->hasWrittenRegistryFilterHello) {
+                PREG_QUERY_VALUE_KEY_INFORMATION queryInfo =
+                    (PREG_QUERY_VALUE_KEY_INFORMATION)argument2;
+                PCUNICODE_STRING objectName;
+
+                status = CmCallbackGetKeyObjectID(
+                    &extension->filterCookie, queryInfo->Object,
+                    nullptr, &objectName);
+
+                if (!NT_SUCCESS(status)) {
+                    break;
+                }
+
+                if (RtlCompareUnicodeString(
+                    &mmDeviceRegistrationPath, objectName, TRUE)) {
+
+                    break;
+                }
+
+                // Only filter the default value
+                if (queryInfo->ValueName->Length != 0) {
+                    break;
+                }
+
+                __try {
+                    return SarFilterMMDeviceQuery(
+                        queryInfo, &wrapperRegistrationPath);
+                } __except (EXCEPTION_EXECUTE_HANDLER) {
+                    return GetExceptionCode();
+                }
+            }
+
+            break;
+    }
+
+    return STATUS_SUCCESS;
+}
 
 extern "C" NTSTATUS DriverEntry(
     IN PDRIVER_OBJECT driverObject,
@@ -358,7 +533,8 @@ extern "C" NTSTATUS DriverEntry(
         return status;
     }
 
-    ExInitializeFastMutex(&extension->controlContextLock);
+    RtlZeroMemory(extension, sizeof(SarDriverExtension));
+    ExInitializeFastMutex(&extension->mutex);
     SarInitializeTable(&extension->controlContextTable);
     extension->ksDispatchCreate = driverObject->MajorFunction[IRP_MJ_CREATE];
     extension->ksDispatchClose = driverObject->MajorFunction[IRP_MJ_CLOSE];
@@ -366,6 +542,7 @@ extern "C" NTSTATUS DriverEntry(
     extension->ksDispatchDeviceControl =
         driverObject->MajorFunction[IRP_MJ_DEVICE_CONTROL];
     extension->sarInterfaceName = {};
+    driverObject->DriverUnload = SarUnload;
     driverObject->MajorFunction[IRP_MJ_CREATE] = SarIrpCreate;
     driverObject->MajorFunction[IRP_MJ_DEVICE_CONTROL] = SarIrpDeviceControl;
     driverObject->MajorFunction[IRP_MJ_CLOSE] = SarIrpClose;

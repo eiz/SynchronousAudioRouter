@@ -25,6 +25,7 @@
 #include <ShlObj.h>
 #include <Shlwapi.h>
 #include <SetupAPI.h>
+#include <mmdeviceapi.h>
 
 #define _ATL_CSTRING_EXPLICIT_CONSTRUCTORS
 
