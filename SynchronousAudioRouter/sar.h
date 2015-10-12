@@ -165,7 +165,6 @@ typedef struct SarDriverExtension
     UNICODE_STRING sarInterfaceName;
     FAST_MUTEX mutex;
     RTL_GENERIC_TABLE controlContextTable;
-    BOOL hasWrittenRegistryFilterHello;
     LARGE_INTEGER filterCookie;
 } SarDriverExtension;
 

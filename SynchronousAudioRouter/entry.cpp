@@ -472,36 +472,34 @@ NTSTATUS SarRegistryCallback(PVOID context, PVOID argument1, PVOID argument2)
 
     switch (notifyClass) {
         case RegNtQueryValueKey:
-            if (!extension->hasWrittenRegistryFilterHello) {
-                PREG_QUERY_VALUE_KEY_INFORMATION queryInfo =
-                    (PREG_QUERY_VALUE_KEY_INFORMATION)argument2;
-                PCUNICODE_STRING objectName;
+            PREG_QUERY_VALUE_KEY_INFORMATION queryInfo =
+                (PREG_QUERY_VALUE_KEY_INFORMATION)argument2;
+            PCUNICODE_STRING objectName;
 
-                status = CmCallbackGetKeyObjectID(
-                    &extension->filterCookie, queryInfo->Object,
-                    nullptr, &objectName);
+            status = CmCallbackGetKeyObjectID(
+                &extension->filterCookie, queryInfo->Object,
+                nullptr, &objectName);
 
-                if (!NT_SUCCESS(status)) {
-                    break;
-                }
+            if (!NT_SUCCESS(status)) {
+                break;
+            }
 
-                if (RtlCompareUnicodeString(
-                    &mmDeviceRegistrationPath, objectName, TRUE)) {
+            if (RtlCompareUnicodeString(
+                &mmDeviceRegistrationPath, objectName, TRUE)) {
 
-                    break;
-                }
+                break;
+            }
 
-                // Only filter the default value
-                if (queryInfo->ValueName->Length != 0) {
-                    break;
-                }
+            // Only filter the default value
+            if (queryInfo->ValueName->Length != 0) {
+                break;
+            }
 
-                __try {
-                    return SarFilterMMDeviceQuery(
-                        queryInfo, &wrapperRegistrationPath);
-                } __except (EXCEPTION_EXECUTE_HANDLER) {
-                    return GetExceptionCode();
-                }
+            __try {
+                return SarFilterMMDeviceQuery(
+                    queryInfo, &wrapperRegistrationPath);
+            } __except (EXCEPTION_EXECUTE_HANDLER) {
+                return GetExceptionCode();
             }
 
             break;
