@@ -412,42 +412,82 @@ NTSTATUS SarFilterMMDeviceQuery(
     }
 
     switch (queryInfo->KeyValueInformationClass) {
-        case KeyValueBasicInformation:
-            SAR_LOG("TODO: KeyValueBasicInformation");
+        case KeyValueBasicInformation: {
+            PKEY_VALUE_BASIC_INFORMATION basicInfo =
+                (PKEY_VALUE_BASIC_INFORMATION)queryInfo->KeyValueInformation;
+
+            *queryInfo->ResultLength =
+                sizeof(KEY_VALUE_BASIC_INFORMATION) - 1 +
+                valueInfo->NameLength;
+
+            if (queryInfo->Length < *queryInfo->ResultLength) {
+                status = STATUS_BUFFER_TOO_SMALL;
+                break;
+            }
+
+            __try {
+                RtlCopyMemory(
+                    basicInfo->Name, valueInfo->Name, valueInfo->NameLength);
+                basicInfo->NameLength = valueInfo->NameLength;
+                basicInfo->TitleIndex = valueInfo->TitleIndex;
+                basicInfo->Type = valueInfo->Type;
+                status = STATUS_CALLBACK_BYPASS;
+            } __except(EXCEPTION_EXECUTE_HANDLER) {
+                status = GetExceptionCode();
+            }
+
             break;
-        case KeyValueFullInformation:
-            SAR_LOG("TODO: KeyValueFullInformation");
+        }
+        case KeyValueFullInformationAlign64:
+        case KeyValueFullInformation: {
+            PKEY_VALUE_FULL_INFORMATION fullInfo =
+                (PKEY_VALUE_FULL_INFORMATION)queryInfo->KeyValueInformation;
+
+            *queryInfo->ResultLength =
+                sizeof(KEY_VALUE_FULL_INFORMATION) - 1 +
+                valueInfo->NameLength +
+                valueInfo->DataLength;
+
+            if (queryInfo->Length < *queryInfo->ResultLength) {
+                status = STATUS_BUFFER_TOO_SMALL;
+                break;
+            }
+
+            __try {
+                RtlCopyMemory(fullInfo, valueInfo, *queryInfo->ResultLength);
+                status = STATUS_CALLBACK_BYPASS;
+            } __except(EXCEPTION_EXECUTE_HANDLER) {
+                status = GetExceptionCode();
+            }
+
             break;
+        }
+        case KeyValuePartialInformationAlign64:
         case KeyValuePartialInformation: {
             PKEY_VALUE_PARTIAL_INFORMATION partialInfo =
                 (PKEY_VALUE_PARTIAL_INFORMATION)queryInfo->KeyValueInformation;
 
             *queryInfo->ResultLength =
-                sizeof(KEY_VALUE_PARTIAL_INFORMATION) +
+                sizeof(KEY_VALUE_PARTIAL_INFORMATION) - 1 +
                 valueInfo->DataLength;
 
-            if (queryInfo->Length <
-                (sizeof(KEY_VALUE_PARTIAL_INFORMATION) +
-                 valueInfo->DataLength)) {
-
+            if (queryInfo->Length < *queryInfo->ResultLength) {
                 status = STATUS_BUFFER_TOO_SMALL;
                 break;
             }
 
-            RtlCopyMemory(partialInfo->Data,
-                (BYTE *)valueInfo + valueInfo->DataOffset,
-                valueInfo->DataLength);
-            partialInfo->DataLength = valueInfo->DataLength;
-            partialInfo->Type = valueInfo->Type;
-            partialInfo->TitleIndex = valueInfo->TitleIndex;
-            status = STATUS_CALLBACK_BYPASS;
+            __try {
+                RtlCopyMemory(partialInfo->Data,
+                    (BYTE *)valueInfo + valueInfo->DataOffset,
+                    valueInfo->DataLength);
+                partialInfo->DataLength = valueInfo->DataLength;
+                partialInfo->Type = valueInfo->Type;
+                partialInfo->TitleIndex = valueInfo->TitleIndex;
+                status = STATUS_CALLBACK_BYPASS;
+            } __except(EXCEPTION_EXECUTE_HANDLER) {
+                status = GetExceptionCode();
+            }
         }
-        case KeyValueFullInformationAlign64:
-            SAR_LOG("TODO: KeyValueFullInformationAlign64");
-            break;
-        case KeyValuePartialInformationAlign64:
-            SAR_LOG("TODO: KeyValuePartialInformationAlign64");
-            break;
     }
 
     ExFreePool(valueInfo);
@@ -476,6 +516,11 @@ NTSTATUS SarRegistryCallback(PVOID context, PVOID argument1, PVOID argument2)
                 (PREG_QUERY_VALUE_KEY_INFORMATION)argument2;
             PCUNICODE_STRING objectName;
 
+            // Only filter the default value
+            if (queryInfo->ValueName->Length != 0) {
+                break;
+            }
+
             status = CmCallbackGetKeyObjectID(
                 &extension->filterCookie, queryInfo->Object,
                 nullptr, &objectName);
@@ -490,17 +535,8 @@ NTSTATUS SarRegistryCallback(PVOID context, PVOID argument1, PVOID argument2)
                 break;
             }
 
-            // Only filter the default value
-            if (queryInfo->ValueName->Length != 0) {
-                break;
-            }
-
-            __try {
-                return SarFilterMMDeviceQuery(
-                    queryInfo, &wrapperRegistrationPath);
-            } __except (EXCEPTION_EXECUTE_HANDLER) {
-                return GetExceptionCode();
-            }
+            return SarFilterMMDeviceQuery(
+                queryInfo, &wrapperRegistrationPath);
 
             break;
     }

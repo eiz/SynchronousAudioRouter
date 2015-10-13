@@ -21,13 +21,9 @@
 
 namespace Sar {
 
-// {9FB96668-9EDD-4574-AD77-76BD89659D5D}
-DEFINE_GUID(CLSID_SarMMDeviceEnumerator,
-    0x9fb96668, 0x9edd, 0x4574, 0xad, 0x77, 0x76, 0xbd, 0x89, 0x65, 0x9d, 0x5d);
-
 struct ATL_NO_VTABLE SarMMDeviceEnumerator:
     public CComObjectRootEx<CComSingleThreadModel>,
-    public CComCoClass<SarMMDeviceEnumerator, &CLSID_SarMMDeviceEnumerator>,
+    public CComCoClass<SarMMDeviceEnumerator, &__uuidof(MMDeviceEnumerator)>,
     public IMMDeviceEnumerator
 {
     BEGIN_COM_MAP(SarMMDeviceEnumerator)
@@ -37,6 +33,7 @@ struct ATL_NO_VTABLE SarMMDeviceEnumerator:
     DECLARE_REGISTRY_RESOURCEID(IDR_SARMMDEVICE)
 
     SarMMDeviceEnumerator();
+    virtual ~SarMMDeviceEnumerator();
 
     virtual HRESULT STDMETHODCALLTYPE EnumAudioEndpoints(
         _In_ EDataFlow dataFlow,
@@ -53,9 +50,13 @@ struct ATL_NO_VTABLE SarMMDeviceEnumerator:
         _In_ IMMNotificationClient *pClient) override;
     virtual HRESULT STDMETHODCALLTYPE UnregisterEndpointNotificationCallback(
         _In_ IMMNotificationClient *pClient) override;
+
+private:
+    HMODULE _lib;
+    CComPtr<IMMDeviceEnumerator> _innerEnumerator;
 };
 
-OBJECT_ENTRY_AUTO(CLSID_SarMMDeviceEnumerator, SarMMDeviceEnumerator)
+OBJECT_ENTRY_AUTO(__uuidof(MMDeviceEnumerator), SarMMDeviceEnumerator)
 
 } // namespace Sar
 

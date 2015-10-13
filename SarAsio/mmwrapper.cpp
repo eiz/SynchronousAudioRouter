@@ -20,9 +20,46 @@
 
 namespace Sar {
 
-SarMMDeviceEnumerator::SarMMDeviceEnumerator()
+typedef HRESULT STDAPICALLTYPE DllGetClassObjectFn(
+    REFCLSID rclsid, REFIID riid, LPVOID *ppv);
+
+SarMMDeviceEnumerator::SarMMDeviceEnumerator():
+    _lib(nullptr)
 {
+    char buf[256] = {};
+    DllGetClassObjectFn *fn_DllGetClassObject;
+    CComPtr<IClassFactory> cf;
+
     OutputDebugStringA("SarMMDeviceEnumerator::SarMMDeviceEnumerator");
+    ExpandEnvironmentStringsA(
+        "%SystemRoot%\\System32\\MMDevApi.dll", buf, sizeof(buf));
+    _lib = LoadLibraryA(buf);
+
+    if (!_lib) {
+        return;
+    }
+
+    fn_DllGetClassObject =
+        (DllGetClassObjectFn *)GetProcAddress(_lib, "DllGetClassObject");
+
+    if (!fn_DllGetClassObject) {
+        return;
+    }
+
+    if (!SUCCEEDED(fn_DllGetClassObject(
+        __uuidof(MMDeviceEnumerator), IID_IClassFactory, (LPVOID *)&cf))) {
+        return;
+    }
+
+    cf->CreateInstance(
+        0, __uuidof(IMMDeviceEnumerator), (LPVOID *)&_innerEnumerator);
+}
+
+SarMMDeviceEnumerator::~SarMMDeviceEnumerator()
+{
+    if (_lib) {
+        FreeLibrary(_lib);
+    }
 }
 
 HRESULT STDMETHODCALLTYPE SarMMDeviceEnumerator::EnumAudioEndpoints(
@@ -31,6 +68,12 @@ HRESULT STDMETHODCALLTYPE SarMMDeviceEnumerator::EnumAudioEndpoints(
     _Out_ IMMDeviceCollection **ppDevices)
 {
     OutputDebugStringA("SarMMDeviceEnumerator::EnumAudioEndpoints");
+
+    if (_innerEnumerator) {
+        return _innerEnumerator->EnumAudioEndpoints(
+            dataFlow, dwStateMask, ppDevices);
+    }
+
     return E_NOTIMPL;
 }
 
@@ -40,6 +83,12 @@ HRESULT STDMETHODCALLTYPE SarMMDeviceEnumerator::GetDefaultAudioEndpoint(
     _Out_ IMMDevice **ppEndpoint)
 {
     OutputDebugStringA("SarMMDeviceEnumerator::GetDefaultAudioEndpoint");
+
+    if (_innerEnumerator) {
+        return _innerEnumerator->GetDefaultAudioEndpoint(
+            dataFlow, role, ppEndpoint);
+    }
+
     return E_NOTIMPL;
 }
 
@@ -48,20 +97,38 @@ HRESULT STDMETHODCALLTYPE SarMMDeviceEnumerator::GetDevice(
     _Out_ IMMDevice **ppDevice)
 {
     OutputDebugStringA("SarMMDeviceEnumerator::GetDevice");
+
+    if (_innerEnumerator) {
+        return _innerEnumerator->GetDevice(pwstrId, ppDevice);
+    }
+
     return E_NOTIMPL;
 }
 
-HRESULT STDMETHODCALLTYPE SarMMDeviceEnumerator::RegisterEndpointNotificationCallback(
+HRESULT STDMETHODCALLTYPE
+SarMMDeviceEnumerator::RegisterEndpointNotificationCallback(
     _In_ IMMNotificationClient *pClient)
 {
     OutputDebugStringA("SarMMDeviceEnumerator::RegisterEndpointNotificationCallback");
+
+    if (_innerEnumerator) {
+        return _innerEnumerator->RegisterEndpointNotificationCallback(pClient);
+    }
+
     return E_NOTIMPL;
 }
 
-HRESULT STDMETHODCALLTYPE SarMMDeviceEnumerator::UnregisterEndpointNotificationCallback(
+HRESULT STDMETHODCALLTYPE
+SarMMDeviceEnumerator::UnregisterEndpointNotificationCallback(
     _In_ IMMNotificationClient *pClient)
 {
     OutputDebugStringA("SarMMDeviceEnumerator::UnregisterEndpointNotificationCallback");
+
+    if (_innerEnumerator) {
+        return _innerEnumerator->UnregisterEndpointNotificationCallback(
+            pClient);
+    }
+
     return E_NOTIMPL;
 }
 
