@@ -417,7 +417,7 @@ NTSTATUS SarFilterMMDeviceQuery(
                 (PKEY_VALUE_BASIC_INFORMATION)queryInfo->KeyValueInformation;
 
             *queryInfo->ResultLength =
-                sizeof(KEY_VALUE_BASIC_INFORMATION) - 1 +
+                sizeof(KEY_VALUE_BASIC_INFORMATION) - 2 +
                 valueInfo->NameLength;
 
             if (queryInfo->Length < *queryInfo->ResultLength) {
@@ -444,7 +444,7 @@ NTSTATUS SarFilterMMDeviceQuery(
                 (PKEY_VALUE_FULL_INFORMATION)queryInfo->KeyValueInformation;
 
             *queryInfo->ResultLength =
-                sizeof(KEY_VALUE_FULL_INFORMATION) - 1 +
+                sizeof(KEY_VALUE_FULL_INFORMATION) - 2 +
                 valueInfo->NameLength +
                 valueInfo->DataLength;
 
@@ -468,7 +468,7 @@ NTSTATUS SarFilterMMDeviceQuery(
                 (PKEY_VALUE_PARTIAL_INFORMATION)queryInfo->KeyValueInformation;
 
             *queryInfo->ResultLength =
-                sizeof(KEY_VALUE_PARTIAL_INFORMATION) - 1 +
+                sizeof(KEY_VALUE_PARTIAL_INFORMATION) - 2 +
                 valueInfo->DataLength;
 
             if (queryInfo->Length < *queryInfo->ResultLength) {
