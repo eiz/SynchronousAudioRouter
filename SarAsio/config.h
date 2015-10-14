@@ -38,11 +38,20 @@ struct EndpointConfig
     picojson::object save();
 };
 
+struct DefaultEndpointConfig
+{
+    EDataFlow type = EDataFlow::eRender;
+    ERole role = ERole::eMultimedia;
+    std::string id;
+
+    bool load(picojson::object& obj);
+    picojson::object save();
+};
+
 struct ApplicationConfig
 {
-    std::string processName;
-    std::string defaultEndpointId;
-    bool startAutomatically;
+    std::string path;
+    std::vector<DefaultEndpointConfig> defaults;
 
     bool load(picojson::object& obj);
     picojson::object save();

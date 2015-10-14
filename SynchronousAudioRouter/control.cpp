@@ -295,6 +295,7 @@ NTSTATUS SarSetDeviceInterfaceProperties(
     UNICODE_STRING clsidValue, clsidData = {}, aliasLink = {};
     UNICODE_STRING epSubKeyStr, zeroSubKeyStr, supportsEventModeValue;
     UNICODE_STRING associationValue, guidEmpty;
+    UNICODE_STRING sarIdValue;
     OBJECT_ATTRIBUTES oa;
     DWORD one = 1;
 
@@ -305,6 +306,8 @@ NTSTATUS SarSetDeviceInterfaceProperties(
         &supportsEventModeValue, L"{1DA5D803-D492-4EDD-8C23-E0C0FFEE7F0E},7");
     RtlUnicodeStringInit(
         &associationValue, L"{1DA5D803-D492-4EDD-8C23-E0C0FFEE7F0E},2");
+    RtlUnicodeStringInit(
+        &sarIdValue, L"{F4B15B6F-8C3F-48B6-A115-42FDE19EF05B},0");
     RtlUnicodeStringInit(
         &guidEmpty, L"{00000000-0000-0000-0000-000000000000}");
 
@@ -385,6 +388,14 @@ NTSTATUS SarSetDeviceInterfaceProperties(
 
     if (!NT_SUCCESS(status)) {
         SAR_LOG("Couldn't set kscategory association for endpoint");
+    }
+
+    status = ZwSetValueKey(
+        zeroSubKey, &sarIdValue, 0, REG_SZ, endpoint->deviceId.Buffer,
+        endpoint->deviceId.Length + sizeof(UNICODE_NULL));
+
+    if (!NT_SUCCESS(status)) {
+        SAR_LOG("Couldn't set sar endpoint id for endpoint");
     }
 
 out:

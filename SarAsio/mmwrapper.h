@@ -52,6 +52,7 @@ struct ATL_NO_VTABLE SarMMDeviceEnumerator:
         _In_ IMMNotificationClient *pClient) override;
 
 private:
+    DriverConfig _config;
     HMODULE _lib;
     CComPtr<IMMDeviceEnumerator> _innerEnumerator;
 };

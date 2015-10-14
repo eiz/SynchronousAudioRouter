@@ -67,28 +67,119 @@ picojson::object EndpointConfig::save()
     return result;
 }
 
+bool DefaultEndpointConfig::load(picojson::object& obj)
+{
+    auto poRole = obj.find("role");
+    auto poType = obj.find("type");
+    auto poId = obj.find("id");
+
+    if (poRole == obj.end() || poType == obj.end() || poId == obj.end()) {
+        return false;
+    }
+
+    if (!poRole->second.is<std::string>() ||
+        !poType->second.is<std::string>() ||
+        !poId->second.is<std::string>()) {
+
+        return false;
+    }
+
+    auto roleStr = poRole->second.get<std::string>();
+    auto typeStr = poType->second.get<std::string>();
+
+    id = poId->second.get<std::string>();
+
+    if (roleStr == "console") {
+        role = ERole::eConsole;
+    } else if (roleStr == "communications") {
+        role = ERole::eCommunications;
+    } else if (roleStr == "media") {
+        role = ERole::eMultimedia;
+    } else {
+        return false;
+    }
+
+    if (typeStr == "playback") {
+        type = EDataFlow::eRender;
+    } else if (typeStr == "recording") {
+        type = EDataFlow::eCapture;
+    } else {
+        return false;
+    }
+
+    return true;
+}
+
+picojson::object DefaultEndpointConfig::save()
+{
+    picojson::object result;
+    std::string roleStr;
+    std::string typeStr;
+
+    result.insert(std::make_pair("id", picojson::value(id)));
+
+    switch (role) {
+        case ERole::eConsole: roleStr = "console"; break;
+        case ERole::eCommunications: roleStr = "communications"; break;
+        case ERole::eMultimedia: roleStr = "multimedia"; break;
+    }
+
+    switch (type) {
+        case EDataFlow::eRender: typeStr = "playback"; break;
+        case EDataFlow::eCapture: typeStr = "recording"; break;
+    }
+
+    result.insert(std::make_pair("role", picojson::value(roleStr)));
+    result.insert(std::make_pair("type", picojson::value(typeStr)));
+    return result;
+}
+
 bool ApplicationConfig::load(picojson::object& obj)
 {
-    auto poProcessName = obj.find("processName");
-    auto poDefaultEndpointId = obj.find("defaultEndpointId");
+    auto poPath = obj.find("path");
+    auto poDefaults = obj.find("defaults");
 
-    if (poProcessName == obj.end() || poDefaultEndpointId == obj.end()) {
+    if (poPath == obj.end()) {
         return false;
     }
 
-    if (!poProcessName->second.is<std::string>() ||
-        !poDefaultEndpointId->second.is<std::string>()) {
+    if (!poPath->second.is<std::string>()) {
         return false;
     }
 
-    processName = poProcessName->second.get<std::string>();
-    defaultEndpointId = poDefaultEndpointId->second.get<std::string>();
+    if (poDefaults != obj.end() && poDefaults->second.is<picojson::array>()) {
+        for (auto& item : poDefaults->second.get<picojson::array>()) {
+            if (!item.is<picojson::object>()) {
+                continue;
+            }
+
+            DefaultEndpointConfig defaultEndpoint;
+
+            if (defaultEndpoint.load(item.get<picojson::object>())) {
+                defaults.push_back(defaultEndpoint);
+            }
+        }
+    }
+
+    path = poPath->second.get<std::string>();
     return true;
 }
 
 picojson::object ApplicationConfig::save()
 {
     picojson::object result;
+
+    result.insert(std::make_pair("path", picojson::value(path)));
+
+    if (defaults.size()) {
+        picojson::array arr;
+
+        for (auto& defaultEndpoint : defaults) {
+            arr.push_back(picojson::value(defaultEndpoint.save()));
+        }
+
+        result.insert(std::make_pair("defaults", picojson::value(arr)));
+    }
 
     return result;
 }
@@ -114,8 +205,9 @@ void DriverConfig::load(picojson::object& obj)
 
             EndpointConfig endpoint;
 
-            endpoint.load(item.get<picojson::object>());
-            endpoints.emplace_back(endpoint);
+            if (endpoint.load(item.get<picojson::object>())) {
+                endpoints.emplace_back(endpoint);
+            }
         }
     }
 
@@ -128,8 +220,9 @@ void DriverConfig::load(picojson::object& obj)
 
             ApplicationConfig application;
 
-            application.load(item.get<picojson::object>());
-            applications.emplace_back(application);
+            if (application.load(item.get<picojson::object>())) {
+                applications.emplace_back(application);
+            }
         }
     }
 
@@ -177,7 +270,7 @@ bool DriverConfig::writeFile(const std::string& path)
         return false;
     }
 
-    fp << picojson::value(save());
+    picojson::value(save()).serialize(std::ostream_iterator<char>(fp), true);
     return true;
 }
 

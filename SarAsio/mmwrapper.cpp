@@ -15,13 +15,27 @@
 // along with SynchronousAudioRouter.  If not, see <http://www.gnu.org/licenses/>.
 
 #include "stdafx.h"
+#include <functiondiscoverykeys_devpkey.h>
+#include <propvarutil.h>
 #include <initguid.h>
 #include "mmwrapper.h"
+#include "utility.h"
 
 namespace Sar {
 
 typedef HRESULT STDAPICALLTYPE DllGetClassObjectFn(
     REFCLSID rclsid, REFIID riid, LPVOID *ppv);
+
+#define MMDEVAPI_PATH "%SystemRoot%\\System32\\MMDevApi.dll"
+
+#undef DEFINE_PROPERTYKEY
+#define DEFINE_PROPERTYKEY(name,l,w1,w2,b1,b2,b3,b4,b5,b6,b7,b8,pid) \
+    EXTERN_C const PROPERTYKEY name = {\
+        { l, w1, w2, { b1, b2,  b3,  b4,  b5,  b6,  b7,  b8 } }, pid }
+
+DEFINE_PROPERTYKEY(PKEY_SynchronousAudioRouter_EndpointId,
+    0xf4b15b6f, 0x8c3f, 0x48b6, 0xa1, 0x15, 0x42, 0xfd, 0xe1, 0x9e, 0xf0, 0x5b,
+    0);
 
 SarMMDeviceEnumerator::SarMMDeviceEnumerator():
     _lib(nullptr)
@@ -30,9 +44,12 @@ SarMMDeviceEnumerator::SarMMDeviceEnumerator():
     DllGetClassObjectFn *fn_DllGetClassObject;
     CComPtr<IClassFactory> cf;
 
-    OutputDebugStringA("SarMMDeviceEnumerator::SarMMDeviceEnumerator");
-    ExpandEnvironmentStringsA(
-        "%SystemRoot%\\System32\\MMDevApi.dll", buf, sizeof(buf));
+    _config = DriverConfig::fromFile(ConfigurationPath("default.json"));
+
+    if (!ExpandEnvironmentStringsA(MMDEVAPI_PATH, buf, sizeof(buf))) {
+        return;
+    }
+
     _lib = LoadLibraryA(buf);
 
     if (!_lib) {
@@ -67,14 +84,12 @@ HRESULT STDMETHODCALLTYPE SarMMDeviceEnumerator::EnumAudioEndpoints(
     _In_ DWORD dwStateMask,
     _Out_ IMMDeviceCollection **ppDevices)
 {
-    OutputDebugStringA("SarMMDeviceEnumerator::EnumAudioEndpoints");
-
-    if (_innerEnumerator) {
-        return _innerEnumerator->EnumAudioEndpoints(
-            dataFlow, dwStateMask, ppDevices);
+    if (!_innerEnumerator) {
+        return E_FAIL;
     }
 
-    return E_NOTIMPL;
+    return _innerEnumerator->EnumAudioEndpoints(
+        dataFlow, dwStateMask, ppDevices);
 }
 
 HRESULT STDMETHODCALLTYPE SarMMDeviceEnumerator::GetDefaultAudioEndpoint(
@@ -82,54 +97,117 @@ HRESULT STDMETHODCALLTYPE SarMMDeviceEnumerator::GetDefaultAudioEndpoint(
     _In_ ERole role,
     _Out_ IMMDevice **ppEndpoint)
 {
-    OutputDebugStringA("SarMMDeviceEnumerator::GetDefaultAudioEndpoint");
-
-    if (_innerEnumerator) {
-        return _innerEnumerator->GetDefaultAudioEndpoint(
-            dataFlow, role, ppEndpoint);
+    if (!_innerEnumerator) {
+        return E_FAIL;
     }
 
-    return E_NOTIMPL;
+    CComPtr<IMMDeviceCollection> devices;
+    CComPtr<IMMDevice> foundDevice;
+    UINT deviceCount;
+    WCHAR processNameWide[512];
+    ApplicationConfig *appConfig = nullptr;
+
+    auto processName = TCHARToUTF8(processNameWide);
+
+    for (auto& candidateApp : _config.applications) {
+        if (processName == candidateApp.path) {
+            appConfig = &candidateApp;
+            break;
+        }
+    }
+
+    if (!appConfig) {
+        return _innerEnumerator->GetDefaultAudioEndpoint(
+                dataFlow, role, ppEndpoint);
+    }
+
+    if (!SUCCEEDED(_innerEnumerator->EnumAudioEndpoints(
+            dataFlow, DEVICE_STATE_ACTIVE, &devices))) {
+
+        return E_FAIL;
+    }
+
+    if (!SUCCEEDED(devices->GetCount(&deviceCount))) {
+        return E_FAIL;
+    }
+
+    for (UINT i = 0; i < deviceCount && !foundDevice; ++i) {
+        CComPtr<IMMDevice> device;
+        CComPtr<IPropertyStore> ps;
+        PROPVARIANT pvalue;
+
+        if (!SUCCEEDED(devices->Item(i, &device))) {
+            continue;
+        }
+
+        if (!SUCCEEDED(device->OpenPropertyStore(STGM_READ, &ps))) {
+            continue;
+        }
+
+        if (!SUCCEEDED(ps->GetValue(
+            PKEY_SynchronousAudioRouter_EndpointId, &pvalue))) {
+
+            continue;
+        }
+
+        if (pvalue.vt == VT_LPWSTR) {
+            auto candidateId = TCHARToUTF8(pvalue.pwszVal);
+
+            for (auto& defaultEndpoint : appConfig->defaults) {
+                if (role == defaultEndpoint.role &&
+                    dataFlow == defaultEndpoint.type &&
+                    candidateId == defaultEndpoint.id) {
+
+                    foundDevice = device;
+                    break;
+                }
+            }
+        }
+
+        PropVariantClear(&pvalue);
+    }
+
+    if (foundDevice) {
+        *ppEndpoint = foundDevice.Detach();
+        return S_OK;
+    }
+
+    return _innerEnumerator->GetDefaultAudioEndpoint(
+        dataFlow, role, ppEndpoint);
 }
 
 HRESULT STDMETHODCALLTYPE SarMMDeviceEnumerator::GetDevice(
     _In_ LPCWSTR pwstrId,
     _Out_ IMMDevice **ppDevice)
 {
-    OutputDebugStringA("SarMMDeviceEnumerator::GetDevice");
-
-    if (_innerEnumerator) {
-        return _innerEnumerator->GetDevice(pwstrId, ppDevice);
+    if (!_innerEnumerator) {
+        return E_FAIL;
     }
 
-    return E_NOTIMPL;
+    return _innerEnumerator->GetDevice(pwstrId, ppDevice);
 }
 
 HRESULT STDMETHODCALLTYPE
 SarMMDeviceEnumerator::RegisterEndpointNotificationCallback(
     _In_ IMMNotificationClient *pClient)
 {
-    OutputDebugStringA("SarMMDeviceEnumerator::RegisterEndpointNotificationCallback");
-
-    if (_innerEnumerator) {
-        return _innerEnumerator->RegisterEndpointNotificationCallback(pClient);
+    if (!_innerEnumerator) {
+        return E_FAIL;
     }
 
-    return E_NOTIMPL;
+    return _innerEnumerator->RegisterEndpointNotificationCallback(pClient);
 }
 
 HRESULT STDMETHODCALLTYPE
 SarMMDeviceEnumerator::UnregisterEndpointNotificationCallback(
     _In_ IMMNotificationClient *pClient)
 {
-    OutputDebugStringA("SarMMDeviceEnumerator::UnregisterEndpointNotificationCallback");
-
-    if (_innerEnumerator) {
-        return _innerEnumerator->UnregisterEndpointNotificationCallback(
-            pClient);
+    if (!_innerEnumerator) {
+        return E_FAIL;
     }
 
-    return E_NOTIMPL;
+    return _innerEnumerator->UnregisterEndpointNotificationCallback(
+        pClient);
 }
 
 } // namespace Sar
