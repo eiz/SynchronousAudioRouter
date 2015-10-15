@@ -48,8 +48,8 @@ void SarClient::tick(long bufferIndex)
     for (size_t i = 0; i < _driverConfig.endpoints.size(); ++i) {
         auto& endpoint = _driverConfig.endpoints[i];
         auto& asioBuffers = _bufferConfig.asioBuffers[i];
-        auto asioBufferSize =
-            _bufferConfig.frameSampleCount * _bufferConfig.sampleSize;
+        auto asioBufferSize = (DWORD)(
+            _bufferConfig.frameSampleCount * _bufferConfig.sampleSize);
         auto generation = _registers[i].generation;
         auto endpointBufferOffset = _registers[i].bufferOffset;
         auto endpointBufferSize = _registers[i].bufferSize;
@@ -74,7 +74,10 @@ void SarClient::tick(long bufferIndex)
             hasUpdatedNotificationHandles = true;
         }
 
-        if (!GENERATION_IS_ACTIVE(generation) || !endpointBufferSize) {
+        if (!GENERATION_IS_ACTIVE(generation) ||
+            !endpointBufferSize ||
+            positionRegister > endpointBufferSize ||
+            endpointBufferOffset + endpointBufferSize > _sharedBufferSize) {
             for (int ti = 0; ti < ntargets; ++ti) {
                 if (targetBuffers[ti]) {
                     ZeroMemory(targetBuffers[ti], asioBufferSize);
@@ -90,22 +93,23 @@ void SarClient::tick(long bufferIndex)
             (positionRegister - frameSize) % endpointBufferSize :
             endpointBufferSize - frameSize;
         auto position = positionRegister + endpointBufferOffset;
-        void *endpointData = ((char *)_sharedBuffer) + position;
-
-        if (endpointBufferOffset + endpointBufferSize > _sharedBufferSize ||
-            position + frameSize > _sharedBufferSize ||
-            positionRegister + frameSize > endpointBufferSize) {
-
-            continue;
-        }
+        void *endpointDataFirst = ((char *)_sharedBuffer) + position;
+        void *endpointDataSecond =
+            ((char *)_sharedBuffer) + endpointBufferOffset;
+        auto firstSize = min(frameSize, endpointBufferSize - positionRegister);
+        auto secondSize = frameSize - firstSize;
 
         if (endpoint.type == EndpointType::Playback) {
             demux(
-                endpointData, targetBuffers, ntargets,
+                endpointDataFirst, firstSize,
+                endpointDataSecond, secondSize,
+                targetBuffers, ntargets,
                 asioBufferSize, _bufferConfig.sampleSize);
         } else {
             mux(
-                endpointData, targetBuffers, ntargets,
+                endpointDataFirst, firstSize,
+                endpointDataSecond, secondSize,
+                targetBuffers, ntargets,
                 asioBufferSize, _bufferConfig.sampleSize);
         }
 
@@ -121,7 +125,9 @@ void SarClient::tick(long bufferIndex)
                 }
             }
         } else {
-            if ((notificationCount >= 1 && nextPositionRegister == 0) ||
+            if ((notificationCount >= 1 &&
+                 positionRegister >= endpointBufferSize / 2 &&
+                 nextPositionRegister < endpointBufferSize / 2) ||
                 (notificationCount >= 2 &&
                  nextPositionRegister >= endpointBufferSize / 2 &&
                  positionRegister < endpointBufferSize / 2)) {
@@ -173,6 +179,10 @@ bool SarClient::start()
         OutputDebugString(_T("Couldn't create endpoints"));
         stop();
         return false;
+    }
+
+    if (!enableRegistryFilter()) {
+        OutputDebugString(_T("Couldn't enable registry filter"));
     }
 
     return true;
@@ -315,6 +325,12 @@ bool SarClient::createEndpoints()
     return true;
 }
 
+bool SarClient::enableRegistryFilter()
+{
+    return DeviceIoControl(_device, SAR_START_REGISTRY_FILTER,
+        nullptr, 0, nullptr, 0, nullptr, nullptr) == TRUE;
+}
+
 void SarClient::updateNotificationHandles()
 {
     bool startNewOperation = false;
@@ -384,40 +400,68 @@ void SarClient::processNotificationHandleUpdates(int updateCount)
 }
 
 void SarClient::demux(
-    void *muxBuffer, void **targetBuffers, int ntargets,
+    void *muxBufferFirst, size_t firstSize,
+    void *muxBufferSecond, size_t secondSize,
+    void **targetBuffers, int ntargets,
     size_t targetSize, int sampleSize)
 {
+    size_t stride = (size_t)(sampleSize * ntargets);
+
     // TODO: gotta go fast
     for (int i = 0; i < ntargets; ++i) {
-        auto buf = ((char *)muxBuffer) + sampleSize * i;
+        auto buf = ((char *)muxBufferFirst) + sampleSize * i;
+        auto remaining = firstSize;
 
         if (!targetBuffers[i]) {
             continue;
         }
 
-        for (size_t j = 0; j < targetSize; j += sampleSize) {
+        for (size_t j = 0;
+             j < targetSize && remaining >= stride;
+             j += sampleSize) {
+
             memcpy((char *)(targetBuffers[i]) + j, buf, sampleSize);
-            buf += sampleSize * ntargets;
+            buf += stride;
+            remaining -= stride;
+
+            if (!remaining) {
+                buf = ((char *)muxBufferSecond) + sampleSize * i;
+                remaining = secondSize;
+            }
         }
     }
 }
 
 // TODO: copypasta
 void SarClient::mux(
-    void *muxBuffer, void **targetBuffers, int ntargets,
+    void *muxBufferFirst, size_t firstSize,
+    void *muxBufferSecond, size_t secondSize,
+    void **targetBuffers, int ntargets,
     size_t targetSize, int sampleSize)
 {
+    size_t stride = (size_t)(sampleSize * ntargets);
+
     // TODO: gotta go fast
     for (int i = 0; i < ntargets; ++i) {
-        auto buf = ((char *)muxBuffer) + sampleSize * i;
+        auto buf = ((char *)muxBufferFirst) + sampleSize * i;
+        auto remaining = firstSize;
 
         if (!targetBuffers[i]) {
             continue;
         }
 
-        for (size_t j = 0; j < targetSize; j += sampleSize) {
+        for (size_t j = 0;
+             j < targetSize && remaining >= stride;
+             j += sampleSize) {
+
             memcpy(buf, (char *)(targetBuffers[i]) + j, sampleSize);
             buf += sampleSize * ntargets;
+            remaining -= sampleSize * ntargets;
+
+            if (!remaining) {
+                buf = ((char *)muxBufferSecond) + sampleSize * i;
+                remaining = secondSize;
+            }
         }
     }
 }

@@ -49,7 +49,7 @@ NTSTATUS SarKsPinRtGetBufferCore(
             controlContext->minimumFrameCount *
             controlContext->frameSize *
             endpoint->channelCount),
-        controlContext->frameSize * endpoint->channelCount);
+        controlContext->sampleSize * endpoint->channelCount);
     SIZE_T viewSize = ROUND_UP(actualSize, SAR_BUFFER_CELL_SIZE);
 
     ExAcquireFastMutex(&controlContext->mutex);

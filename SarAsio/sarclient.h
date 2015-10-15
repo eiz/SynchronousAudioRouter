@@ -62,14 +62,19 @@ private:
     bool openControlDevice();
     bool setBufferLayout();
     bool createEndpoints();
+    bool enableRegistryFilter();
     void updateNotificationHandles();
     void processNotificationHandleUpdates(int updateCount);
 
     void demux(
-        void *muxBuffer, void **targetBuffers, int ntargets,
+        void *muxBufferFirst, size_t firstSize,
+        void *muxBufferSecond, size_t secondSize,
+        void **targetBuffers, int ntargets,
         size_t targetSize, int sampleSize);
     void mux(
-        void *muxBuffer, void **targetBuffers, int ntargets,
+        void *muxBufferFirst, size_t firstSize,
+        void *muxBufferSecond, size_t secondSize,
+        void **targetBuffers, int ntargets,
         size_t targetSize, int sampleSize);
 
     DriverConfig _driverConfig;

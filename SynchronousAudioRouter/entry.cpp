@@ -318,7 +318,8 @@ NTSTATUS SarIrpDeviceControl(PDEVICE_OBJECT deviceObject, PIRP irp)
 
             if (extension->filterCookie.QuadPart) {
                 ExReleaseFastMutex(&extension->mutex);
-                return STATUS_INSUFFICIENT_RESOURCES;
+                ntStatus = STATUS_RESOURCE_IN_USE;
+                break;
             }
 
             ntStatus = CmRegisterCallbackEx(
