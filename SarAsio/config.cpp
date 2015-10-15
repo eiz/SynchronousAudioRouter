@@ -161,7 +161,16 @@ bool ApplicationConfig::load(picojson::object& obj)
         }
     }
 
-    path = poPath->second.get<std::string>();
+    try {
+        path = poPath->second.get<std::string>();
+        // TODO: UTF-8 support on Windows is very sad. This might need ICU or
+        // PCRE.
+        pattern = std::regex(path,
+            std::regex_constants::ECMAScript | std::regex_constants::icase);
+    } catch (std::exception&) {
+        // nom nom
+    }
+
     return true;
 }
 

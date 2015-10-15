@@ -26,6 +26,8 @@
 #include <Shlwapi.h>
 #include <SetupAPI.h>
 #include <mmdeviceapi.h>
+#include <functiondiscoverykeys_devpkey.h>
+#include <propvarutil.h>
 
 #define _ATL_CSTRING_EXPLICIT_CONSTRUCTORS
 
@@ -38,6 +40,7 @@
 #include <cstdint>
 #include <locale>
 #include <memory>
+#include <regex>
 #include <sstream>
 #include <string>
 #include <vector>

@@ -51,6 +51,7 @@ struct DefaultEndpointConfig
 struct ApplicationConfig
 {
     std::string path;
+    std::regex pattern;
     std::vector<DefaultEndpointConfig> defaults;
 
     bool load(picojson::object& obj);

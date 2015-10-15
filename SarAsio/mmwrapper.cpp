@@ -15,8 +15,6 @@
 // along with SynchronousAudioRouter.  If not, see <http://www.gnu.org/licenses/>.
 
 #include "stdafx.h"
-#include <functiondiscoverykeys_devpkey.h>
-#include <propvarutil.h>
 #include <initguid.h>
 #include "mmwrapper.h"
 #include "utility.h"
@@ -104,13 +102,15 @@ HRESULT STDMETHODCALLTYPE SarMMDeviceEnumerator::GetDefaultAudioEndpoint(
     CComPtr<IMMDeviceCollection> devices;
     CComPtr<IMMDevice> foundDevice;
     UINT deviceCount;
-    WCHAR processNameWide[512];
+    WCHAR processNameWide[512] = {};
     ApplicationConfig *appConfig = nullptr;
+
+    GetModuleFileName(nullptr, processNameWide, sizeof(processNameWide));
 
     auto processName = TCHARToUTF8(processNameWide);
 
     for (auto& candidateApp : _config.applications) {
-        if (processName == candidateApp.path) {
+        if (std::regex_match(processName, candidateApp.pattern)) {
             appConfig = &candidateApp;
             break;
         }
