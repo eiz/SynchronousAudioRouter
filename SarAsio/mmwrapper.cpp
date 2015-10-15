@@ -122,7 +122,7 @@ HRESULT STDMETHODCALLTYPE SarMMDeviceEnumerator::GetDefaultAudioEndpoint(
     }
 
     if (!SUCCEEDED(_innerEnumerator->EnumAudioEndpoints(
-            dataFlow, DEVICE_STATE_ACTIVE, &devices))) {
+        dataFlow, DEVICE_STATE_ACTIVE, &devices))) {
 
         return E_FAIL;
     }

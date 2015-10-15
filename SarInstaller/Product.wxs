@@ -14,7 +14,8 @@
 		<Package InstallerVersion="200" Compressed="yes"
              InstallScope="perMachine" />
 
-		<MajorUpgrade DowngradeErrorMessage="A newer version of [ProductName] is already installed." />
+    <WixVariable Id="WixUILicenseRtf" Value="license.rtf" />
+    <MajorUpgrade DowngradeErrorMessage="A newer version of [ProductName] is already installed." />
 		<MediaTemplate EmbedCab="yes" />
     <UIRef Id="WixUI_Minimal"/>
 
