@@ -410,6 +410,7 @@ NTSTATUS SarFilterMMDeviceQuery(
     if (!NT_SUCCESS(status)) {
         ExFreePool(valueInfo);
         ZwClose(wrapperKey);
+        return STATUS_SUCCESS;
     }
 
     switch (queryInfo->KeyValueInformationClass) {
