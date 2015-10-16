@@ -34,13 +34,11 @@ STDAPI DllCanUnloadNow()
 
 STDAPI DllGetClassObject(REFCLSID rclsid, REFIID riid, LPVOID *ppv)
 {
-    OutputDebugString(L"DllGetClassObject");
     return _AtlModule.DllGetClassObject(rclsid, riid, ppv);
 }
 
 STDAPI DllRegisterServer()
 {
-    OutputDebugString(L"DllRegisterServer");
     return _AtlModule.DllRegisterServer(FALSE);
 }
 

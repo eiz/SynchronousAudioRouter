@@ -63,6 +63,7 @@ SarMMDeviceEnumerator::SarMMDeviceEnumerator():
 
     if (!SUCCEEDED(fn_DllGetClassObject(
         __uuidof(MMDeviceEnumerator), IID_IClassFactory, (LPVOID *)&cf))) {
+
         return;
     }
 

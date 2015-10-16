@@ -360,19 +360,19 @@ VOID SarUnload(PDRIVER_OBJECT driverObject)
     }
 }
 
-#define CLSID_ROOT L"\\REGISTRY\\MACHINE\\SOFTWARE\\Classes\\CLSID\\"
-
 NTSTATUS SarFilterMMDeviceQuery(
     PREG_QUERY_VALUE_KEY_INFORMATION queryInfo,
     PUNICODE_STRING wrapperRegistrationPath)
 {
     UNREFERENCED_PARAMETER(queryInfo);
     UNICODE_STRING defaultValue = {};
-    NTSTATUS status;
+    NTSTATUS status = STATUS_SUCCESS;
     OBJECT_ATTRIBUTES oa;
     HANDLE wrapperKey;
     PKEY_VALUE_FULL_INFORMATION valueInfo = nullptr;
     ULONG valueInfoSize = 0, valueInfoSizeNeeded = 0;
+    ULONG pad = 0;
+    PVOID buffer = queryInfo->KeyValueInformation;
 
     InitializeObjectAttributes(
         &oa, wrapperRegistrationPath, OBJ_KERNEL_HANDLE,
@@ -416,10 +416,11 @@ NTSTATUS SarFilterMMDeviceQuery(
     switch (queryInfo->KeyValueInformationClass) {
         case KeyValueBasicInformation: {
             PKEY_VALUE_BASIC_INFORMATION basicInfo =
-                (PKEY_VALUE_BASIC_INFORMATION)queryInfo->KeyValueInformation;
+                (PKEY_VALUE_BASIC_INFORMATION)buffer;
 
             *queryInfo->ResultLength =
-                sizeof(KEY_VALUE_BASIC_INFORMATION) - 2 +
+                sizeof(KEY_VALUE_BASIC_INFORMATION) +
+                pad +
                 valueInfo->NameLength;
 
             if (queryInfo->Length < *queryInfo->ResultLength) {
@@ -428,6 +429,8 @@ NTSTATUS SarFilterMMDeviceQuery(
             }
 
             __try {
+                RtlZeroMemory(queryInfo->KeyValueInformation,
+                    *queryInfo->ResultLength);
                 RtlCopyMemory(
                     basicInfo->Name, valueInfo->Name, valueInfo->NameLength);
                 basicInfo->NameLength = valueInfo->NameLength;
@@ -441,12 +444,16 @@ NTSTATUS SarFilterMMDeviceQuery(
             break;
         }
         case KeyValueFullInformationAlign64:
+            pad = 8 - ((ULONG_PTR)queryInfo->KeyValueInformation) % 8;
+            buffer = ALIGN_UP_POINTER_BY(buffer, 8);
+            // fallthrough
         case KeyValueFullInformation: {
             PKEY_VALUE_FULL_INFORMATION fullInfo =
-                (PKEY_VALUE_FULL_INFORMATION)queryInfo->KeyValueInformation;
+                (PKEY_VALUE_FULL_INFORMATION)buffer;
 
             *queryInfo->ResultLength =
-                sizeof(KEY_VALUE_FULL_INFORMATION) - 2 +
+                sizeof(KEY_VALUE_FULL_INFORMATION) +
+                pad +
                 valueInfo->NameLength +
                 valueInfo->DataLength;
 
@@ -456,7 +463,9 @@ NTSTATUS SarFilterMMDeviceQuery(
             }
 
             __try {
-                RtlCopyMemory(fullInfo, valueInfo, *queryInfo->ResultLength);
+                RtlZeroMemory(queryInfo->KeyValueInformation,
+                    *queryInfo->ResultLength);
+                RtlCopyMemory(fullInfo, valueInfo, valueInfoSize);
                 status = STATUS_CALLBACK_BYPASS;
             } __except(EXCEPTION_EXECUTE_HANDLER) {
                 status = GetExceptionCode();
@@ -465,12 +474,16 @@ NTSTATUS SarFilterMMDeviceQuery(
             break;
         }
         case KeyValuePartialInformationAlign64:
+            pad = 8 - ((ULONG_PTR)queryInfo->KeyValueInformation) % 8;
+            buffer = ALIGN_UP_POINTER_BY(buffer, 8);
+            // fallthrough
         case KeyValuePartialInformation: {
             PKEY_VALUE_PARTIAL_INFORMATION partialInfo =
-                (PKEY_VALUE_PARTIAL_INFORMATION)queryInfo->KeyValueInformation;
+                (PKEY_VALUE_PARTIAL_INFORMATION)buffer;
 
             *queryInfo->ResultLength =
-                sizeof(KEY_VALUE_PARTIAL_INFORMATION) - 2 +
+                sizeof(KEY_VALUE_PARTIAL_INFORMATION) +
+                pad +
                 valueInfo->DataLength;
 
             if (queryInfo->Length < *queryInfo->ResultLength) {
@@ -479,6 +492,8 @@ NTSTATUS SarFilterMMDeviceQuery(
             }
 
             __try {
+                RtlZeroMemory(queryInfo->KeyValueInformation,
+                    *queryInfo->ResultLength);
                 RtlCopyMemory(partialInfo->Data,
                     (BYTE *)valueInfo + valueInfo->DataOffset,
                     valueInfo->DataLength);
@@ -497,6 +512,10 @@ NTSTATUS SarFilterMMDeviceQuery(
     return status;
 }
 
+#define CLSID_ROOT L"\\REGISTRY\\MACHINE\\SOFTWARE\\Classes\\CLSID\\"
+#define WOW64_CLSID_ROOT \
+    L"\\REGISTRY\\MACHINE\\SOFTWARE\\Classes\\Wow6432Node\\CLSID\\"
+
 NTSTATUS SarRegistryCallback(PVOID context, PVOID argument1, PVOID argument2)
 {
     UNREFERENCED_PARAMETER(argument2);
@@ -507,10 +526,25 @@ NTSTATUS SarRegistryCallback(PVOID context, PVOID argument1, PVOID argument2)
     REG_NOTIFY_CLASS notifyClass = (REG_NOTIFY_CLASS)(ULONG_PTR)argument1;
     SarDriverExtension *extension = (SarDriverExtension *)context;
 
-    RtlUnicodeStringInit(&mmDeviceRegistrationPath,
-        CLSID_ROOT L"{BCDE0395-E52F-467C-8E3D-C4579291692E}\\InprocServer32");
-    RtlUnicodeStringInit(&wrapperRegistrationPath,
-        CLSID_ROOT L"{9FB96668-9EDD-4574-AD77-76BD89659D5D}\\InprocServer32");
+#ifdef _WIN64
+    if (IoIs32bitProcess(nullptr)) {
+        RtlUnicodeStringInit(&mmDeviceRegistrationPath,
+            WOW64_CLSID_ROOT
+            L"{BCDE0395-E52F-467C-8E3D-C4579291692E}\\InprocServer32");
+        RtlUnicodeStringInit(&wrapperRegistrationPath,
+            WOW64_CLSID_ROOT
+            L"{9FB96668-9EDD-4574-AD77-76BD89659D5D}\\InprocServer32");
+    } else {
+#endif
+        RtlUnicodeStringInit(&mmDeviceRegistrationPath,
+            CLSID_ROOT
+            L"{BCDE0395-E52F-467C-8E3D-C4579291692E}\\InprocServer32");
+        RtlUnicodeStringInit(&wrapperRegistrationPath,
+            CLSID_ROOT
+            L"{9FB96668-9EDD-4574-AD77-76BD89659D5D}\\InprocServer32");
+#ifdef _WIN64
+    }
+#endif
 
     switch (notifyClass) {
         case RegNtQueryValueKey:
