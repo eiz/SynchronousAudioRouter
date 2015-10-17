@@ -111,7 +111,7 @@ HRESULT STDMETHODCALLTYPE SarMMDeviceEnumerator::GetDefaultAudioEndpoint(
     auto processName = TCHARToUTF8(processNameWide);
 
     for (auto& candidateApp : _config.applications) {
-        if (std::regex_match(processName, candidateApp.pattern)) {
+        if (std::regex_search(processName, candidateApp.pattern)) {
             appConfig = &candidateApp;
             break;
         }
