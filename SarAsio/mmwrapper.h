@@ -22,7 +22,7 @@
 namespace Sar {
 
 struct ATL_NO_VTABLE SarMMDeviceEnumerator:
-    public CComObjectRootEx<CComSingleThreadModel>,
+    public CComObjectRootEx<CComMultiThreadModel>,
     public CComCoClass<SarMMDeviceEnumerator, &__uuidof(MMDeviceEnumerator)>,
     public IMMDeviceEnumerator
 {

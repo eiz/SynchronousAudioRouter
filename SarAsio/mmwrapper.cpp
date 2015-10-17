@@ -73,6 +73,8 @@ SarMMDeviceEnumerator::SarMMDeviceEnumerator():
 
 SarMMDeviceEnumerator::~SarMMDeviceEnumerator()
 {
+    _innerEnumerator = nullptr;
+
     if (_lib) {
         FreeLibrary(_lib);
     }
