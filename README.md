@@ -14,7 +14,9 @@ unique characteristics compared to similar virtual audio cable software:
 * Allows dynamic creation of an unlimited number of Windows audio devices with
   custom names/metadata.
 * Allows per-app override of Windows default audio device for apps which
-  don't include a way to select an audio device.
+  don't include a way to select an audio device. Regex matching lets you set
+  rules for many apps simultaneously, e.g. route every app under your steamapps
+  directory to a specific endpoint.
 * Designed for use with DAW software. Instead of treating all virtual audio
   streams independently, they're mapped to a single multichannel ASIO interface
   which also includes all channels from the physical audio device.
@@ -33,9 +35,17 @@ unique characteristics compared to similar virtual audio cable software:
   native ASIO driver, you may be able to use ASIO4ALL instead.
 * Digital audio workstation software. SAR is mainly tested using [REAPER](http://www.reaper.fm/).
 
-## Building
+## Installation
 
-Currently, a binary release of SAR is not yet available, as the project is still
-in a pre-alpha stage of development. If you'd like to build it from source code,
-you'll need Visual Studio 2015 and the Windows 10 WDK.
+The alpha build of SAR requires test signing mode to be enabled on your machine
+prior to installation. To enable test signing mode, open a command prompt as
+admin, and run the command `bcdedit -set testsigning on`, then reboot.
+
+Once you've installed SAR it will be available as an ASIO driver in any software
+which supports ASIO. Your audio software should have an "ASIO Configuration" or
+"Control Panel" button which will open the SAR user interface and let you select
+your physical audio device and create endpoints. Note that some software may
+need to be restarted to detect changes to the ASIO configuration (e.g. in REAPER
+you need to close and re-open the configuration dialog after adding endpoints
+for them to show up in the first/last dropdowns).
 
