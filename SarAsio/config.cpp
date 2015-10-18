@@ -255,6 +255,13 @@ picojson::object DriverConfig::save()
     picojson::object result;
 
     result.insert(std::make_pair("driverClsid", picojson::value(driverClsid)));
+    result.insert(std::make_pair("enableApplicationRouting",
+        picojson::value(enableApplicationRouting)));
+
+    if (waveRtMinimumFrames > 2) {
+        result.insert(std::make_pair("waveRtMinimumFrames",
+            picojson::value((double)waveRtMinimumFrames)));
+    }
 
     if (endpoints.size()) {
         picojson::array arr;
