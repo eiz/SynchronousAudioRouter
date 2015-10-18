@@ -30,7 +30,7 @@ unique characteristics compared to similar virtual audio cable software:
 
 ## System Requirements
 
-* Windows 10 x64.
+* Windows 10 x64 (testing/backport to Windows 7 32/64-bit is in-progress).
 * An audio interface which supports ASIO. If your hardware doesn't come with a
   native ASIO driver, you may be able to use ASIO4ALL instead.
 * Digital audio workstation software. SAR is mainly tested using [REAPER](http://www.reaper.fm/).
