@@ -49,3 +49,6 @@ need to be restarted to detect changes to the ASIO configuration (e.g. in REAPER
 you need to close and re-open the configuration dialog after adding endpoints
 for them to show up in the first/last dropdowns).
 
+The alpha build also requires your DAW to be run as admin. This restriction will
+be removed for the final release.
+
