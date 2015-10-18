@@ -7,7 +7,8 @@
 
 <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi"
      xmlns:difx="http://schemas.microsoft.com/wix/DifxAppExtension">
-	<Product Id="*" Name="Synchronous Audio Router $(var.bitness)"
+	<Product Id="*"
+           Name="Synchronous Audio Router $(var.bitness)"
            Language="1033" Version="0.5"
            Manufacturer="Many Worlds"
            UpgradeCode="8cae7fd4-4469-4cc1-ba9a-76c00fbb5e05">
@@ -15,7 +16,10 @@
              InstallScope="perMachine" />
 
     <WixVariable Id="WixUILicenseRtf" Value="license.rtf" />
-    <MajorUpgrade DowngradeErrorMessage="A newer version of [ProductName] is already installed." />
+    <MajorUpgrade
+      AllowSameVersionUpgrades="yes"
+      Schedule="afterInstallInitialize"
+      DowngradeErrorMessage="A newer version of [ProductName] is already installed." />
 		<MediaTemplate EmbedCab="yes" />
     <UIRef Id="WixUI_Minimal"/>
 
