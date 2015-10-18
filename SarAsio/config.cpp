@@ -93,7 +93,7 @@ bool DefaultEndpointConfig::load(picojson::object& obj)
         role = ERole::eConsole;
     } else if (roleStr == "communications") {
         role = ERole::eCommunications;
-    } else if (roleStr == "media") {
+    } else if (roleStr == "multimedia") {
         role = ERole::eMultimedia;
     } else {
         return false;
@@ -199,6 +199,7 @@ void DriverConfig::load(picojson::object& obj)
     auto poEndpoints = obj.find("endpoints");
     auto poApplications = obj.find("applications");
     auto poWaveRtMinimumFrames = obj.find("waveRtMinimumFrames");
+    auto poEnableApplicationRouting = obj.find("enableApplicationRouting");
 
     if (poDriverClsid != obj.end() &&
         poDriverClsid->second.is<std::string>()) {
@@ -239,6 +240,13 @@ void DriverConfig::load(picojson::object& obj)
         poWaveRtMinimumFrames->second.is<double>()) {
 
         waveRtMinimumFrames = (int)poWaveRtMinimumFrames->second.get<double>();
+    }
+
+    if (poEnableApplicationRouting != obj.end() &&
+        poEnableApplicationRouting->second.is<bool>()) {
+
+        enableApplicationRouting =
+            poEnableApplicationRouting->second.get<bool>();
     }
 }
 

@@ -181,7 +181,7 @@ bool SarClient::start()
         return false;
     }
 
-    if (!enableRegistryFilter()) {
+    if (_driverConfig.enableApplicationRouting && !enableRegistryFilter()) {
         OutputDebugString(_T("Couldn't enable registry filter"));
     }
 

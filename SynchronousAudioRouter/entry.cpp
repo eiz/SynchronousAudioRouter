@@ -365,14 +365,12 @@ NTSTATUS SarFilterMMDeviceQuery(
     PUNICODE_STRING wrapperRegistrationPath)
 {
     UNREFERENCED_PARAMETER(queryInfo);
-    UNICODE_STRING defaultValue = {};
     NTSTATUS status = STATUS_SUCCESS;
     OBJECT_ATTRIBUTES oa;
     HANDLE wrapperKey;
-    PKEY_VALUE_FULL_INFORMATION valueInfo = nullptr;
-    ULONG valueInfoSize = 0, valueInfoSizeNeeded = 0;
-    ULONG pad = 0;
-    PVOID buffer = queryInfo->KeyValueInformation;
+    ULONG resultLength = 0;
+    UNICODE_STRING valueName = {};
+    PVOID buffer = nullptr;
 
     InitializeObjectAttributes(
         &oa, wrapperRegistrationPath, OBJ_KERNEL_HANDLE,
@@ -383,131 +381,35 @@ NTSTATUS SarFilterMMDeviceQuery(
         return STATUS_SUCCESS;
     }
 
-    status = ZwQueryValueKey(
-        wrapperKey, &defaultValue, KeyValueFullInformation,
-        valueInfo, 0, &valueInfoSizeNeeded);
+    buffer = ExAllocatePoolWithTag(PagedPool, queryInfo->Length, SAR_TAG);
 
-    if (status != STATUS_BUFFER_OVERFLOW &&
-        status != STATUS_BUFFER_TOO_SMALL) {
-
+    if (!buffer) {
         ZwClose(wrapperKey);
         return STATUS_SUCCESS;
     }
 
-    valueInfoSize = valueInfoSizeNeeded;
-    valueInfo = (PKEY_VALUE_FULL_INFORMATION)ExAllocatePoolWithTag(
-        NonPagedPool, valueInfoSize, SAR_TAG);
+    __try {
+        RtlCopyMemory(
+            buffer, queryInfo->KeyValueInformation, queryInfo->Length);
+        status = ZwQueryValueKey(
+            wrapperKey,
+            &valueName,
+            queryInfo->KeyValueInformationClass,
+            buffer,
+            queryInfo->Length,
+            &resultLength);
+        RtlCopyMemory(
+            queryInfo->KeyValueInformation, buffer, queryInfo->Length);
+        *queryInfo->ResultLength = resultLength;
 
-    if (!valueInfo) {
-        ZwClose(wrapperKey);
-        return STATUS_SUCCESS;
+        if (NT_SUCCESS(status)) {
+            status = STATUS_CALLBACK_BYPASS;
+        }
+    } __except(EXCEPTION_EXECUTE_HANDLER) {
+        status = GetExceptionCode();
     }
 
-    status = ZwQueryValueKey(
-        wrapperKey, &defaultValue, KeyValueFullInformation,
-        valueInfo, valueInfoSize, &valueInfoSizeNeeded);
-
-    if (!NT_SUCCESS(status)) {
-        ExFreePool(valueInfo);
-        ZwClose(wrapperKey);
-        return STATUS_SUCCESS;
-    }
-
-    switch (queryInfo->KeyValueInformationClass) {
-        case KeyValueBasicInformation: {
-            PKEY_VALUE_BASIC_INFORMATION basicInfo =
-                (PKEY_VALUE_BASIC_INFORMATION)buffer;
-
-            *queryInfo->ResultLength =
-                sizeof(KEY_VALUE_BASIC_INFORMATION) +
-                pad +
-                valueInfo->NameLength;
-
-            if (queryInfo->Length < *queryInfo->ResultLength) {
-                status = STATUS_BUFFER_TOO_SMALL;
-                break;
-            }
-
-            __try {
-                RtlZeroMemory(queryInfo->KeyValueInformation,
-                    *queryInfo->ResultLength);
-                RtlCopyMemory(
-                    basicInfo->Name, valueInfo->Name, valueInfo->NameLength);
-                basicInfo->NameLength = valueInfo->NameLength;
-                basicInfo->TitleIndex = valueInfo->TitleIndex;
-                basicInfo->Type = valueInfo->Type;
-                status = STATUS_CALLBACK_BYPASS;
-            } __except(EXCEPTION_EXECUTE_HANDLER) {
-                status = GetExceptionCode();
-            }
-
-            break;
-        }
-        case KeyValueFullInformationAlign64:
-            pad = 8 - ((ULONG_PTR)queryInfo->KeyValueInformation) % 8;
-            buffer = ALIGN_UP_POINTER_BY(buffer, 8);
-            // fallthrough
-        case KeyValueFullInformation: {
-            PKEY_VALUE_FULL_INFORMATION fullInfo =
-                (PKEY_VALUE_FULL_INFORMATION)buffer;
-
-            *queryInfo->ResultLength =
-                sizeof(KEY_VALUE_FULL_INFORMATION) +
-                pad +
-                valueInfo->NameLength +
-                valueInfo->DataLength;
-
-            if (queryInfo->Length < *queryInfo->ResultLength) {
-                status = STATUS_BUFFER_TOO_SMALL;
-                break;
-            }
-
-            __try {
-                RtlZeroMemory(queryInfo->KeyValueInformation,
-                    *queryInfo->ResultLength);
-                RtlCopyMemory(fullInfo, valueInfo, valueInfoSize);
-                status = STATUS_CALLBACK_BYPASS;
-            } __except(EXCEPTION_EXECUTE_HANDLER) {
-                status = GetExceptionCode();
-            }
-
-            break;
-        }
-        case KeyValuePartialInformationAlign64:
-            pad = 8 - ((ULONG_PTR)queryInfo->KeyValueInformation) % 8;
-            buffer = ALIGN_UP_POINTER_BY(buffer, 8);
-            // fallthrough
-        case KeyValuePartialInformation: {
-            PKEY_VALUE_PARTIAL_INFORMATION partialInfo =
-                (PKEY_VALUE_PARTIAL_INFORMATION)buffer;
-
-            *queryInfo->ResultLength =
-                sizeof(KEY_VALUE_PARTIAL_INFORMATION) +
-                pad +
-                valueInfo->DataLength;
-
-            if (queryInfo->Length < *queryInfo->ResultLength) {
-                status = STATUS_BUFFER_TOO_SMALL;
-                break;
-            }
-
-            __try {
-                RtlZeroMemory(queryInfo->KeyValueInformation,
-                    *queryInfo->ResultLength);
-                RtlCopyMemory(partialInfo->Data,
-                    (BYTE *)valueInfo + valueInfo->DataOffset,
-                    valueInfo->DataLength);
-                partialInfo->DataLength = valueInfo->DataLength;
-                partialInfo->Type = valueInfo->Type;
-                partialInfo->TitleIndex = valueInfo->TitleIndex;
-                status = STATUS_CALLBACK_BYPASS;
-            } __except(EXCEPTION_EXECUTE_HANDLER) {
-                status = GetExceptionCode();
-            }
-        }
-    }
-
-    ExFreePool(valueInfo);
+    ExFreePool(buffer);
     ZwClose(wrapperKey);
     return status;
 }

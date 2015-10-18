@@ -64,6 +64,7 @@ struct DriverConfig
     std::vector<EndpointConfig> endpoints;
     std::vector<ApplicationConfig> applications;
     int waveRtMinimumFrames = 0;
+    bool enableApplicationRouting = false;
 
     void load(picojson::object& obj);
     picojson::object save();
