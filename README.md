@@ -35,20 +35,27 @@ unique characteristics compared to similar virtual audio cable software:
   native ASIO driver, you may be able to use ASIO4ALL instead.
 * Digital audio workstation software. SAR is mainly tested using [REAPER](http://www.reaper.fm/).
 
-## Installation
+## HOWTO
 
-The alpha build of SAR requires test signing mode to be enabled on your machine
-prior to installation. To enable test signing mode, open a command prompt as
-admin, and run the command `bcdedit -set testsigning on`, then reboot.
+Once you've installed SAR, nothing will immediately happen. To configure it,
+first start your DAW and open its audio configuration settings. Select the
+Synchronous Audio Router ASIO driver and open the ASIO configuration dialog.
+Under Hardware Interface, select the ASIO driver for your physical audio
+device.
 
-Once you've installed SAR it will be available as an ASIO driver in any software
-which supports ASIO. Your audio software should have an "ASIO Configuration" or
-"Control Panel" button which will open the SAR user interface and let you select
-your physical audio device and create endpoints. Note that some software may
-need to be restarted to detect changes to the ASIO configuration (e.g. in REAPER
-you need to close and re-open the configuration dialog after adding endpoints
-for them to show up in the first/last dropdowns).
+You can add an unlimited number of Windows audio endpoints from the SAR
+configuration dialog. "Playback" endpoints will allow Windows applications
+to play sound and show up as corresponding input channels on your ASIO device,
+while "Recording" endpoints allow Windows apps to record output sound and
+correspond to ASIO output channels. Once you've added your channels, make sure
+they're enabled in your DAW -- most have a dialog or dropdown where you can
+select which channels are to be used.
 
-The alpha build also requires your DAW to be run as admin. This restriction will
-be removed for the final release.
+If you receive errors initializing the SAR ASIO driver, make sure you are
+running your DAW as admin. This is a requirement of the SAR alpha build and
+will be relaxed eventually.
+
+Note that the endpoints created by SAR are only active while your DAW is
+running and has started ASIO. They are automatically disconnected when the
+ASIO driver is closed.
 
