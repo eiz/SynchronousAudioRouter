@@ -38,10 +38,10 @@ unique characteristics compared to similar virtual audio cable software:
 ## HOWTO
 
 Once you've installed SAR, nothing will immediately happen. To configure it,
-first start your DAW and open its audio configuration settings. Select the
-Synchronous Audio Router ASIO driver and open the ASIO configuration dialog.
-Under Hardware Interface, select the ASIO driver for your physical audio
-device.
+first start your DAW (for beta: as admin!) and open its audio configuration
+settings. Select the Synchronous Audio Router ASIO driver and open the ASIO
+configuration dialog. Under Hardware Interface, select the ASIO driver for
+your physical audio device.
 
 You can add an unlimited number of Windows audio endpoints from the SAR
 configuration dialog. "Playback" endpoints will allow Windows applications
