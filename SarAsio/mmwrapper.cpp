@@ -35,12 +35,12 @@ DEFINE_PROPERTYKEY(PKEY_SynchronousAudioRouter_EndpointId,
     0xf4b15b6f, 0x8c3f, 0x48b6, 0xa1, 0x15, 0x42, 0xfd, 0xe1, 0x9e, 0xf0, 0x5b,
     0);
 
-SarMMDeviceEnumerator::SarMMDeviceEnumerator():
-    _lib(nullptr)
+SarMMDeviceEnumerator::SarMMDeviceEnumerator()
 {
     char buf[256] = {};
     DllGetClassObjectFn *fn_DllGetClassObject;
     CComPtr<IClassFactory> cf;
+    HMODULE lib, dummy;
 
     _config = DriverConfig::fromFile(ConfigurationPath("default.json"));
 
@@ -48,18 +48,35 @@ SarMMDeviceEnumerator::SarMMDeviceEnumerator():
         return;
     }
 
-    _lib = LoadLibraryA(buf);
+    lib = LoadLibraryA(buf);
 
-    if (!_lib) {
+    if (!lib) {
         return;
     }
 
     fn_DllGetClassObject =
-        (DllGetClassObjectFn *)GetProcAddress(_lib, "DllGetClassObject");
+        (DllGetClassObjectFn *)GetProcAddress(lib, "DllGetClassObject");
 
     if (!fn_DllGetClassObject) {
+        FreeLibrary(lib);
         return;
     }
+
+    // Because of the nasty way we're loading the underlying COM object outside
+    // of CoCreateInstance, we need to make sure that both our dll and the
+    // MMDevAPI dll never unload for the lifetime of the process, so we pin them
+    // here.
+    GetModuleHandleEx(
+        GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_PIN,
+        (LPCTSTR)fn_DllGetClassObject, &dummy);
+
+    GetModuleHandleEx(
+        GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_PIN,
+        (LPCTSTR)DllGetClassObject, &dummy);
+
+    // It probably doesn't matter since we've pinned the library anyway, but
+    // balance the LoadLibraryA call above.
+    FreeLibrary(lib);
 
     if (!SUCCEEDED(fn_DllGetClassObject(
         __uuidof(MMDeviceEnumerator), IID_IClassFactory, (LPVOID *)&cf))) {
@@ -74,10 +91,6 @@ SarMMDeviceEnumerator::SarMMDeviceEnumerator():
 SarMMDeviceEnumerator::~SarMMDeviceEnumerator()
 {
     _innerEnumerator = nullptr;
-
-    if (_lib) {
-        FreeLibrary(_lib);
-    }
 }
 
 HRESULT STDMETHODCALLTYPE SarMMDeviceEnumerator::EnumAudioEndpoints(

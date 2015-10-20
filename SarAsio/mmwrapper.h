@@ -53,7 +53,6 @@ struct ATL_NO_VTABLE SarMMDeviceEnumerator:
 
 private:
     DriverConfig _config;
-    HMODULE _lib;
     CComPtr<IMMDeviceEnumerator> _innerEnumerator;
 };
 
