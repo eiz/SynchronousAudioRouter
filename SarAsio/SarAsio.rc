@@ -64,14 +64,6 @@ FONT 8, "MS Shell Dlg", 400, 0, 0
 }
 
 LANGUAGE LANG_NEUTRAL, SUBLANG_NEUTRAL
-IDD_CONFIG_APPLICATIONS DIALOGEX 0, 0, 320, 180
-STYLE DS_SHELLFONT | WS_CAPTION | WS_CHILDWINDOW | WS_DISABLED
-CAPTION "Applications"
-FONT 8, "MS Shell Dlg", 400, 0, 0
-{
-}
-
-LANGUAGE LANG_NEUTRAL, SUBLANG_NEUTRAL
 IDD_CONFIG_ENDPOINT_DETAILS DIALOGEX 0, 0, 256, 71
 STYLE DS_SHELLFONT | WS_CAPTION | WS_POPUP | WS_SYSMENU | DS_MODALFRAME
 CAPTION "Endpoint Details"
@@ -94,4 +86,87 @@ FONT 8, "MS Shell Dlg", 400, 0, 0
         160, 53, 44, 14
     PUSHBUTTON "&Cancel", IDCANCEL,
         208, 53, 44, 14
+}
+
+LANGUAGE LANG_NEUTRAL, SUBLANG_NEUTRAL
+IDD_CONFIG_APPLICATIONS DIALOGEX 0, 0, 320, 180
+STYLE DS_SHELLFONT | WS_CAPTION | WS_CHILDWINDOW | WS_DISABLED
+CAPTION "Applications"
+FONT 8, "MS Shell Dlg", 400, 0, 0
+{
+    CHECKBOX "Enable per-application audio routing rules", 1200,
+        8, 8, 304, 10
+    GROUPBOX "Applications", 1201,
+        8, 22, 304, 150
+    CONTROL "", 1202,
+        WC_LISTVIEW, WS_TABSTOP | WS_BORDER | LVS_ALIGNLEFT | LVS_REPORT,
+        14, 32, 292, 118
+    PUSHBUTTON "&Add", 1203,
+        14, 154, 44, 14,
+        0, WS_EX_LEFT
+    PUSHBUTTON "&Remove", 1204,
+        62, 154, 44, 14,
+        0, WS_EX_LEFT
+}
+
+LANGUAGE LANG_NEUTRAL, SUBLANG_NEUTRAL
+IDD_CONFIG_APPLICATION_DETAILS DIALOGEX 0, 0, 260, 180
+STYLE DS_SHELLFONT | WS_CAPTION | WS_POPUP | WS_SYSMENU | DS_MODALFRAME
+CAPTION "Application Details"
+FONT 8, "MS Shell Dlg", 400, 0, 0
+{
+    LTEXT "Path:", 1300,
+        8, 8, 20, 12
+    EDITTEXT 1301,
+        32, 6, 220, 12
+    CHECKBOX "Use regular expressions", 1302,
+        8, 22, 100, 14
+    PUSHBUTTON "&Running Applications...", 1303,
+        116, 22, 88, 14,
+        0, WS_EX_LEFT
+    PUSHBUTTON "&Browse...", 1304,
+        208, 22, 44, 14,
+        0, WS_EX_LEFT
+    GROUPBOX "Default Endpoints", 1305,
+        8, 40, 244, 114
+    LTEXT "Application restart may be required.", 1306,
+        8, 161, 156, 12
+    PUSHBUTTON "&OK", IDOK,
+        160, 158, 44, 14,
+        0, WS_EX_LEFT
+    PUSHBUTTON "&Cancel", IDCANCEL,
+        208, 158, 44, 14,
+        0, WS_EX_LEFT
+
+    LTEXT "Playback (System):", 1310,
+        14, 52, 98, 12
+    LTEXT "Playback (Communications):", 1311,
+        14, 68, 98, 12
+    LTEXT "Playback (Multimedia):", 1312,
+        14, 84, 98, 12
+    LTEXT "Recording (System):", 1313,
+        14, 100, 98, 12
+    LTEXT "Recording (Communications):", 1314,
+        14, 116, 98, 12
+    LTEXT "Recording (Multimedia):", 1315,
+        14, 132, 98, 12
+
+    COMBOBOX 1320,
+        116, 50, 130, 12,
+        CBS_DROPDOWNLIST | CBS_HASSTRINGS, WS_EX_LEFT
+    COMBOBOX 1321,
+        116, 66, 130, 12,
+        CBS_DROPDOWNLIST | CBS_HASSTRINGS, WS_EX_LEFT
+    COMBOBOX 1322,
+        116, 82, 130, 12,
+        CBS_DROPDOWNLIST | CBS_HASSTRINGS, WS_EX_LEFT
+    COMBOBOX 1323,
+        116, 98, 130, 12,
+        CBS_DROPDOWNLIST | CBS_HASSTRINGS, WS_EX_LEFT
+    COMBOBOX 1324,
+        116, 114, 130, 12,
+        CBS_DROPDOWNLIST | CBS_HASSTRINGS, WS_EX_LEFT
+    COMBOBOX 1325,
+        116, 130, 130, 12,
+        CBS_DROPDOWNLIST | CBS_HASSTRINGS, WS_EX_LEFT
 }

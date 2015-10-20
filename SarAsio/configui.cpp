@@ -83,6 +83,35 @@ INT_PTR PropertyDialog::show(HWND parent)
     return ::PropertySheet(this);
 }
 
+SimpleDialog::SimpleDialog(LPCTSTR templateName):
+    _templateName(templateName) { }
+
+INT_PTR SimpleDialog::show(HWND parent)
+{
+    return DialogBoxParam(gDllModule, _templateName, parent,
+        &SimpleDialog::dialogProcStub, (LPARAM)this);
+}
+
+INT_PTR CALLBACK SimpleDialog::dialogProcStub(
+    HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
+{
+    if (msg == WM_INITDIALOG) {
+        SimpleDialog *dlg = (SimpleDialog *)lparam;
+
+        dlg->_hwnd = hwnd;
+        SetWindowLongPtr(hwnd, GWLP_USERDATA, (LONG_PTR)dlg);
+    }
+
+    SimpleDialog *dlg =
+        (SimpleDialog *)GetWindowLongPtr(hwnd, GWLP_USERDATA);
+
+    if (dlg) {
+        return dlg->dialogProc(hwnd, msg, wparam, lparam);
+    }
+
+    return 0;
+}
+
 EndpointsPropertySheetPage::EndpointsPropertySheetPage(DriverConfig& config)
     : _config(config)
 {
@@ -195,7 +224,6 @@ void EndpointsPropertySheetPage::onConfigureHardwareInterface()
 void EndpointsPropertySheetPage::onAddEndpoint()
 {
     _epDialogConfig = EndpointConfig();
-    _epDialogConfigIndex = -1;
 
     int counter = 1;
 
@@ -257,7 +285,7 @@ void EndpointsPropertySheetPage::initControls()
     ListView_InsertColumn(_listView, 1, &col);
     col.pszText = L"Name";
     ListView_InsertColumn(_listView, 2, &col);
-    ListView_SetExtendedListViewStyle(_listView,LVS_EX_FULLROWSELECT);
+    ListView_SetExtendedListViewStyle(_listView, LVS_EX_FULLROWSELECT);
 
     refreshHardwareInterfaceList();
     refreshEndpointList();
@@ -413,7 +441,8 @@ INT_PTR CALLBACK EndpointsPropertySheetPage::epDialogProcStub(
     return 0;
 }
 
-ApplicationsPropertySheetPage::ApplicationsPropertySheetPage()
+ApplicationsPropertySheetPage::ApplicationsPropertySheetPage(
+    DriverConfig& config): _config(config)
 {
     pszTemplate = MAKEINTRESOURCE(IDD_CONFIG_APPLICATIONS);
 }
@@ -421,6 +450,179 @@ ApplicationsPropertySheetPage::ApplicationsPropertySheetPage()
 INT_PTR ApplicationsPropertySheetPage::dialogProc(
     HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
 {
+    switch (msg) {
+        case WM_INITDIALOG:
+            initControls();
+            break;
+        case WM_COMMAND:
+            switch (LOWORD(wparam)) {
+                case 1203: // _addButton
+                    if (HIWORD(wparam) == BN_CLICKED) {
+                        onAddApplication();
+                    }
+
+                    break;
+            }
+
+            break;
+    }
+
+    return 0;
+}
+
+void ApplicationsPropertySheetPage::initControls()
+{
+    _enableRouting = GetDlgItem(_hwnd, 1200);
+    _listView = GetDlgItem(_hwnd, 1202);
+    _addButton = GetDlgItem(_hwnd, 1203);
+    _removeButton = GetDlgItem(_hwnd, 1204);
+
+    LVCOLUMN col = {};
+
+    col.mask = LVCF_TEXT;
+    col.pszText = L"Path";
+    ListView_InsertColumn(_listView, 0, &col);
+    ListView_SetExtendedListViewStyle(_listView, LVS_EX_FULLROWSELECT);
+
+    refreshApplicationList();
+    updateEnabled();
+}
+
+void ApplicationsPropertySheetPage::refreshApplicationList()
+{
+    ListView_DeleteAllItems(_listView);
+
+    int i = 0;
+
+    for (auto& application : _config.applications) {
+        std::wstring path = UTF8ToWide(application.path);
+        LVITEM item = {};
+
+        item.iItem = i;
+        i++;
+
+        ListView_InsertItem(_listView, &item);
+        ListView_SetItemText(_listView, item.iItem, 0, (LPWSTR)path.c_str());
+    }
+}
+
+void ApplicationsPropertySheetPage::updateEnabled()
+{
+    Button_Enable(_removeButton,
+        ListView_GetSelectedCount(_listView) > 0);
+}
+
+void ApplicationsPropertySheetPage::onAddApplication()
+{
+    ApplicationConfigDialog dlg(_config, ApplicationConfig());
+
+    dlg.show(_hwnd);
+}
+
+ApplicationConfigDialog::ApplicationConfigDialog(
+    DriverConfig& driverConfig, ApplicationConfig config):
+    SimpleDialog(MAKEINTRESOURCE(IDD_CONFIG_APPLICATION_DETAILS)),
+    _driverConfig(driverConfig), _config(config)
+{
+}
+
+INT_PTR ApplicationConfigDialog::dialogProc(
+    HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
+{
+    switch (msg) {
+        case WM_INITDIALOG:
+            initControls();
+            break;
+    }
+
+    return 0;
+}
+
+void ApplicationConfigDialog::initControls()
+{
+    _path = GetDlgItem(_hwnd, 1301);
+    _useRegularExpressions = GetDlgItem(_hwnd, 1302);
+    _runningApplicationsButton = GetDlgItem(_hwnd, 1303);
+    _browseButton = GetDlgItem(_hwnd, 1304);
+    _playbackSystem = GetDlgItem(_hwnd, 1320);
+    _playbackCommunications = GetDlgItem(_hwnd, 1321);
+    _playbackMultimedia = GetDlgItem(_hwnd, 1322);
+    _recordingSystem = GetDlgItem(_hwnd, 1323);
+    _recordingCommunications = GetDlgItem(_hwnd, 1324);
+    _recordingMultimedia = GetDlgItem(_hwnd, 1325);
+
+    initEndpointDropdown(_playbackSystem, EndpointType::Playback);
+    initEndpointDropdown(_playbackCommunications, EndpointType::Playback);
+    initEndpointDropdown(_playbackMultimedia, EndpointType::Playback);
+    initEndpointDropdown(_recordingSystem, EndpointType::Recording);
+    initEndpointDropdown(_recordingCommunications, EndpointType::Recording);
+    initEndpointDropdown(_recordingMultimedia, EndpointType::Recording);
+    refreshControls();
+}
+
+void ApplicationConfigDialog::initEndpointDropdown(
+    HWND control, EndpointType type)
+{
+    ComboBox_ResetContent(control);
+    ComboBox_AddString(control, _T("Use system default"));
+
+    for (auto& endpoint : _driverConfig.endpoints) {
+        if (endpoint.type != type) {
+            continue;
+        }
+
+        std::wstring str = UTF8ToWide(endpoint.description);
+
+        ComboBox_AddString(control, str.c_str());
+    }
+}
+
+void ApplicationConfigDialog::refreshControls()
+{
+    refreshEndpointDropdown(
+        _playbackSystem, EDataFlow::eRender, ERole::eConsole);
+    refreshEndpointDropdown(
+        _playbackCommunications, EDataFlow::eRender, ERole::eCommunications);
+    refreshEndpointDropdown(
+        _playbackMultimedia, EDataFlow::eRender, ERole::eMultimedia);
+    refreshEndpointDropdown(
+        _recordingSystem, EDataFlow::eCapture, ERole::eConsole);
+    refreshEndpointDropdown(
+        _recordingCommunications, EDataFlow::eCapture, ERole::eCommunications);
+    refreshEndpointDropdown(
+        _recordingMultimedia, EDataFlow::eCapture, ERole::eMultimedia);
+}
+
+void ApplicationConfigDialog::refreshEndpointDropdown(
+    HWND control, EDataFlow dataFlow, ERole role)
+{
+    for (auto& defaultEndpoint : _config.defaults) {
+        if (defaultEndpoint.role == role && defaultEndpoint.type == dataFlow) {
+            ComboBox_SetCurSel(control, indexOfEndpoint(defaultEndpoint.id));
+            return;
+        }
+    }
+
+    ComboBox_SetCurSel(control, 0);
+}
+
+int ApplicationConfigDialog::indexOfEndpoint(const std::string& id)
+{
+    int playbackIndex = 0, recordingIndex = 0;
+
+    for (auto& endpoint : _driverConfig.endpoints) {
+        if (endpoint.type == EndpointType::Recording) {
+            recordingIndex++;
+        } else {
+            playbackIndex++;
+        }
+
+        if (id == endpoint.id) {
+            return endpoint.type == EndpointType::Recording ?
+                recordingIndex : playbackIndex;
+        }
+    }
+
     return 0;
 }
 
@@ -428,11 +630,9 @@ ConfigurationPropertyDialog::ConfigurationPropertyDialog(DriverConfig& config)
     : _originalConfig(config),
       _newConfig(_originalConfig),
       _endpoints(std::make_shared<EndpointsPropertySheetPage>(_newConfig)),
-      _applications(std::make_shared<ApplicationsPropertySheetPage>())
+      _applications(std::make_shared<ApplicationsPropertySheetPage>(_newConfig))
 {
     pszCaption = TEXT("Synchronous Audio Router");
     addPage(_endpoints);
-
-    // TODO: will re-add once the backend for this actually exists
-    // addPage(_applications);
+    addPage(_applications);
 }

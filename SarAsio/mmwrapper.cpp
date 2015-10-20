@@ -44,6 +44,15 @@ SarMMDeviceEnumerator::SarMMDeviceEnumerator()
 
     _config = DriverConfig::fromFile(ConfigurationPath("default.json"));
 
+    // Our registry filter has replaced the registration for the
+    // MMDeviceEnumerator with our wrapper object, but we need to instantiate
+    // the original coclass. Unfortunately, we can't just bypass the registry
+    // filter to get the original registration back, as CoCreateInstance uses
+    // an internal class cache and won't re-load the registration. So we hack
+    // job it and instantiate the object directly using the DLL's
+    // DllGetClassObject export. This should be mostly safe since we're
+    // mimicking the threading model of MMDeviceEnumerator already, and we never
+    // expose the raw underlying interface pointer to our consumers.
     if (!ExpandEnvironmentStringsA(MMDEVAPI_PATH, buf, sizeof(buf))) {
         return;
     }

@@ -49,6 +49,24 @@ private:
     std::vector<HPROPSHEETPAGE> _pageHandles;
 };
 
+struct SimpleDialog
+{
+    SimpleDialog(LPCTSTR templateName);
+    INT_PTR show(HWND parent = nullptr);
+
+protected:
+    virtual INT_PTR dialogProc(
+        HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) = 0;
+
+    HWND _hwnd;
+
+private:
+    static INT_PTR CALLBACK dialogProcStub(
+        HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam);
+
+    LPCTSTR _templateName;
+};
+
 struct EndpointsPropertySheetPage: public PropertySheetPage
 {
     EndpointsPropertySheetPage(DriverConfig& config);
@@ -87,16 +105,58 @@ private:
     HWND _epDialogType;
     HWND _epDialogChannelCount;
     EndpointConfig _epDialogConfig;
-    int _epDialogConfigIndex;
 };
 
 struct ApplicationsPropertySheetPage: public PropertySheetPage
 {
-    ApplicationsPropertySheetPage();
+    ApplicationsPropertySheetPage(DriverConfig& config);
 
 protected:
     virtual INT_PTR dialogProc(
         HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) override;
+
+private:
+    void initControls();
+    void refreshApplicationList();
+    void updateEnabled();
+    void onAddApplication();
+
+    DriverConfig& _config;
+    HWND _enableRouting;
+    HWND _listView;
+    HWND _addButton;
+    HWND _removeButton;
+};
+
+struct ApplicationConfigDialog: public SimpleDialog
+{
+    ApplicationConfigDialog(
+        DriverConfig& driverConfig, ApplicationConfig config);
+    const ApplicationConfig& config() { return _config; }
+
+protected:
+    virtual INT_PTR dialogProc(
+        HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam) override;
+
+private:
+    void initControls();
+    void initEndpointDropdown(HWND control, EndpointType type);
+    void refreshControls();
+    void refreshEndpointDropdown(HWND control, EDataFlow dataFlow, ERole role);
+    int indexOfEndpoint(const std::string& id);
+
+    DriverConfig& _driverConfig;
+    ApplicationConfig _config;
+    HWND _path;
+    HWND _useRegularExpressions;
+    HWND _runningApplicationsButton;
+    HWND _browseButton;
+    HWND _playbackSystem;
+    HWND _playbackCommunications;
+    HWND _playbackMultimedia;
+    HWND _recordingSystem;
+    HWND _recordingCommunications;
+    HWND _recordingMultimedia;
 };
 
 struct ConfigurationPropertyDialog: public PropertyDialog
