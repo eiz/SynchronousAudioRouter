@@ -19,21 +19,21 @@
 #include <richedit.h>
 #include "resource.h"
 
-///////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
 //
 // Registry Scripts
 //
-///////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
 LANGUAGE LANG_NEUTRAL, SUBLANG_NEUTRAL
 IDR_SARASIO        REGISTRY       "SarAsio.rgs"
 IDR_SARMMDEVICE    REGISTRY       "SarMMDevice.rgs"
 
 
-///////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
 //
 // Dialogs
 //
-///////////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////
 LANGUAGE LANG_NEUTRAL, SUBLANG_NEUTRAL
 IDD_CONFIG_ENDPOINTS DIALOGEX 0, 0, 320, 180
 STYLE DS_SHELLFONT | WS_CAPTION | WS_CHILDWINDOW | WS_DISABLED
@@ -94,7 +94,7 @@ STYLE DS_SHELLFONT | WS_CAPTION | WS_CHILDWINDOW | WS_DISABLED
 CAPTION "Applications"
 FONT 8, "MS Shell Dlg", 400, 0, 0
 {
-    CHECKBOX "Enable per-application audio routing rules", 1200,
+    AUTOCHECKBOX "Enable per-application audio routing rules", 1200,
         8, 8, 304, 10
     GROUPBOX "Applications", 1201,
         8, 22, 304, 150
@@ -110,63 +110,67 @@ FONT 8, "MS Shell Dlg", 400, 0, 0
 }
 
 LANGUAGE LANG_NEUTRAL, SUBLANG_NEUTRAL
-IDD_CONFIG_APPLICATION_DETAILS DIALOGEX 0, 0, 260, 180
+IDD_CONFIG_APPLICATION_DETAILS DIALOGEX 0, 0, 260, 196
 STYLE DS_SHELLFONT | WS_CAPTION | WS_POPUP | WS_SYSMENU | DS_MODALFRAME
 CAPTION "Application Details"
 FONT 8, "MS Shell Dlg", 400, 0, 0
 {
+    LTEXT "Name:", 1307,
+        8, 8, 24, 12
+    EDITTEXT 1308,
+        36, 6, 216, 12
     LTEXT "Path:", 1300,
-        8, 8, 20, 12
+        8, 24, 24, 12
     EDITTEXT 1301,
-        32, 6, 220, 12
-    CHECKBOX "Use regular expressions", 1302,
-        8, 22, 100, 14
+        36, 22, 216, 12
+    AUTOCHECKBOX "Use regular expressions", 1302,
+        8, 38, 100, 14
     PUSHBUTTON "&Running Applications...", 1303,
-        116, 22, 88, 14,
+        116, 38, 88, 14,
         0, WS_EX_LEFT
     PUSHBUTTON "&Browse...", 1304,
-        208, 22, 44, 14,
+        208, 38, 44, 14,
         0, WS_EX_LEFT
     GROUPBOX "Default Endpoints", 1305,
-        8, 40, 244, 114
+        8, 56, 244, 112
     LTEXT "Application restart may be required.", 1306,
-        8, 161, 156, 12
+        8, 177, 156, 12
     PUSHBUTTON "&OK", IDOK,
-        160, 158, 44, 14,
+        160, 174, 44, 14,
         0, WS_EX_LEFT
     PUSHBUTTON "&Cancel", IDCANCEL,
-        208, 158, 44, 14,
+        208, 174, 44, 14,
         0, WS_EX_LEFT
 
     LTEXT "Playback (System):", 1310,
-        14, 52, 98, 12
-    LTEXT "Playback (Communications):", 1311,
         14, 68, 98, 12
-    LTEXT "Playback (Multimedia):", 1312,
+    LTEXT "Playback (Communications):", 1311,
         14, 84, 98, 12
-    LTEXT "Recording (System):", 1313,
+    LTEXT "Playback (Multimedia):", 1312,
         14, 100, 98, 12
-    LTEXT "Recording (Communications):", 1314,
+    LTEXT "Recording (System):", 1313,
         14, 116, 98, 12
-    LTEXT "Recording (Multimedia):", 1315,
+    LTEXT "Recording (Communications):", 1314,
         14, 132, 98, 12
+    LTEXT "Recording (Multimedia):", 1315,
+        14, 148, 98, 12
 
     COMBOBOX 1320,
-        116, 50, 130, 12,
-        CBS_DROPDOWNLIST | CBS_HASSTRINGS, WS_EX_LEFT
-    COMBOBOX 1321,
         116, 66, 130, 12,
         CBS_DROPDOWNLIST | CBS_HASSTRINGS, WS_EX_LEFT
-    COMBOBOX 1322,
+    COMBOBOX 1321,
         116, 82, 130, 12,
         CBS_DROPDOWNLIST | CBS_HASSTRINGS, WS_EX_LEFT
-    COMBOBOX 1323,
+    COMBOBOX 1322,
         116, 98, 130, 12,
         CBS_DROPDOWNLIST | CBS_HASSTRINGS, WS_EX_LEFT
-    COMBOBOX 1324,
+    COMBOBOX 1323,
         116, 114, 130, 12,
         CBS_DROPDOWNLIST | CBS_HASSTRINGS, WS_EX_LEFT
-    COMBOBOX 1325,
+    COMBOBOX 1324,
         116, 130, 130, 12,
+        CBS_DROPDOWNLIST | CBS_HASSTRINGS, WS_EX_LEFT
+    COMBOBOX 1325,
+        116, 146, 130, 12,
         CBS_DROPDOWNLIST | CBS_HASSTRINGS, WS_EX_LEFT
 }

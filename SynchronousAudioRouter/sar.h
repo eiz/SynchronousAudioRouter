@@ -121,6 +121,8 @@ typedef struct SarEndpointRegisters
 #define SAR_CONTROL_REFERENCE_STRING L"\\{0EB287D4-6C04-4926-AE19-3C066A4C3F3A}"
 #define SAR_TAG '1RAS'
 
+#define NO_LOGGING
+
 #ifdef NO_LOGGING
 #define SAR_LOG(...)
 #else

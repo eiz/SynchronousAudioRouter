@@ -411,7 +411,7 @@ INT_PTR EndpointsPropertySheetPage::epDialogProc(
 
                     // fall-through
                 case IDCANCEL:
-                    EndDialog(hwnd, wparam);
+                    EndDialog(hwnd, LOWORD(wparam));
                     break;
             }
 
@@ -465,6 +465,21 @@ INT_PTR ApplicationsPropertySheetPage::dialogProc(
             }
 
             break;
+        case WM_NOTIFY: {
+            LPNMHDR nmh = (LPNMHDR)lparam;
+
+            switch (nmh->idFrom) {
+                case 1202: // _listView
+                    switch (nmh->code) {
+                        case LVN_ITEMCHANGED: updateEnabled(); break;
+                        case LVN_ITEMACTIVATE: onOpenApplication(); break;
+                    }
+
+                    break;
+            }
+
+            break;
+        }
     }
 
     return 0;
@@ -480,8 +495,12 @@ void ApplicationsPropertySheetPage::initControls()
     LVCOLUMN col = {};
 
     col.mask = LVCF_TEXT;
-    col.pszText = L"Path";
+    col.pszText = L"Name";
     ListView_InsertColumn(_listView, 0, &col);
+    col.pszText = L"Regex?";
+    ListView_InsertColumn(_listView, 1, &col);
+    col.pszText = L"Path";
+    ListView_InsertColumn(_listView, 2, &col);
     ListView_SetExtendedListViewStyle(_listView, LVS_EX_FULLROWSELECT);
 
     refreshApplicationList();
@@ -495,6 +514,7 @@ void ApplicationsPropertySheetPage::refreshApplicationList()
     int i = 0;
 
     for (auto& application : _config.applications) {
+        std::wstring description = UTF8ToWide(application.description);
         std::wstring path = UTF8ToWide(application.path);
         LVITEM item = {};
 
@@ -502,8 +522,16 @@ void ApplicationsPropertySheetPage::refreshApplicationList()
         i++;
 
         ListView_InsertItem(_listView, &item);
-        ListView_SetItemText(_listView, item.iItem, 0, (LPWSTR)path.c_str());
+        ListView_SetItemText(
+            _listView, item.iItem, 0, (LPWSTR)description.c_str());
+        ListView_SetItemText(
+            _listView, item.iItem, 1, application.regexMatch ? L"Yes" : L"No");
+        ListView_SetItemText(_listView, item.iItem, 2, (LPWSTR)path.c_str());
     }
+
+    ListView_SetColumnWidth(_listView, 0, LVSCW_AUTOSIZE_USEHEADER);
+    ListView_SetColumnWidth(_listView, 1, LVSCW_AUTOSIZE_USEHEADER);
+    ListView_SetColumnWidth(_listView, 2, LVSCW_AUTOSIZE_USEHEADER);
 }
 
 void ApplicationsPropertySheetPage::updateEnabled()
@@ -512,11 +540,34 @@ void ApplicationsPropertySheetPage::updateEnabled()
         ListView_GetSelectedCount(_listView) > 0);
 }
 
+void ApplicationsPropertySheetPage::onOpenApplication()
+{
+    auto index = ListView_GetNextItem(_listView, -1, LVNI_SELECTED);
+
+    if (index < 0 || index >= _config.applications.size()) {
+        return;
+    }
+
+    ApplicationConfigDialog dlg(_config, _config.applications[index]);
+
+    if (dlg.show(_hwnd) == IDOK) {
+        _config.applications[index] = dlg.config();
+        refreshApplicationList();
+        updateEnabled();
+        changed();
+    }
+}
+
 void ApplicationsPropertySheetPage::onAddApplication()
 {
     ApplicationConfigDialog dlg(_config, ApplicationConfig());
 
-    dlg.show(_hwnd);
+    if (dlg.show(_hwnd) == IDOK) {
+        _config.applications.push_back(dlg.config());
+        refreshApplicationList();
+        updateEnabled();
+        changed();
+    }
 }
 
 ApplicationConfigDialog::ApplicationConfigDialog(
@@ -533,6 +584,17 @@ INT_PTR ApplicationConfigDialog::dialogProc(
         case WM_INITDIALOG:
             initControls();
             break;
+        case WM_COMMAND:
+            switch (LOWORD(wparam)) {
+                case IDOK:
+                    updateConfig();
+                    // fall through
+                case IDCANCEL:
+                    EndDialog(_hwnd, LOWORD(wparam));
+                    break;
+            }
+
+            break;
     }
 
     return 0;
@@ -540,6 +602,7 @@ INT_PTR ApplicationConfigDialog::dialogProc(
 
 void ApplicationConfigDialog::initControls()
 {
+    _name = GetDlgItem(_hwnd, 1308);
     _path = GetDlgItem(_hwnd, 1301);
     _useRegularExpressions = GetDlgItem(_hwnd, 1302);
     _runningApplicationsButton = GetDlgItem(_hwnd, 1303);
@@ -579,6 +642,13 @@ void ApplicationConfigDialog::initEndpointDropdown(
 
 void ApplicationConfigDialog::refreshControls()
 {
+    auto description = UTF8ToWide(_config.description);
+    auto path = UTF8ToWide(_config.path);
+
+    Button_SetCheck(_useRegularExpressions, _config.regexMatch);
+    Edit_SetText(_name, description.c_str());
+    Edit_SetText(_path, path.c_str());
+
     refreshEndpointDropdown(
         _playbackSystem, EDataFlow::eRender, ERole::eConsole);
     refreshEndpointDropdown(
@@ -624,6 +694,53 @@ int ApplicationConfigDialog::indexOfEndpoint(const std::string& id)
     }
 
     return 0;
+}
+
+void ApplicationConfigDialog::updateConfig()
+{
+    _config.regexMatch = Button_GetCheck(_useRegularExpressions) == BST_CHECKED;
+
+    auto len = Edit_GetTextLength(_name);
+    auto buf = new WCHAR[len + 1];
+
+    Edit_GetText(_name, buf, len + 1);
+    _config.description = TCHARToUTF8(buf);
+    delete[] buf;
+
+    len = Edit_GetTextLength(_path);
+    buf = new WCHAR[len + 1];
+    Edit_GetText(_path, buf, len + 1);
+    _config.path = TCHARToUTF8(buf);
+    delete[] buf;
+
+    _config.defaults.clear();
+    updateDefaultEndpoint(
+        _playbackSystem, EDataFlow::eRender, ERole::eConsole);
+    updateDefaultEndpoint(
+        _playbackCommunications, EDataFlow::eRender, ERole::eCommunications);
+    updateDefaultEndpoint(
+        _playbackMultimedia, EDataFlow::eRender, ERole::eMultimedia);
+    updateDefaultEndpoint(
+        _recordingSystem, EDataFlow::eCapture, ERole::eConsole);
+    updateDefaultEndpoint(
+        _recordingCommunications, EDataFlow::eCapture, ERole::eCommunications);
+    updateDefaultEndpoint(
+        _recordingMultimedia, EDataFlow::eCapture, ERole::eMultimedia);
+}
+
+void ApplicationConfigDialog::updateDefaultEndpoint(
+    HWND control, EDataFlow dataFlow, ERole role)
+{
+    auto index = ComboBox_GetCurSel(control);
+
+    if (index > 0 && index - 1 < _driverConfig.endpoints.size()) {
+        DefaultEndpointConfig defaultEndpoint;
+
+        defaultEndpoint.type = dataFlow;
+        defaultEndpoint.role = role;
+        defaultEndpoint.id = _driverConfig.endpoints[index - 1].id;
+        _config.defaults.push_back(defaultEndpoint);
+    }
 }
 
 ConfigurationPropertyDialog::ConfigurationPropertyDialog(DriverConfig& config)

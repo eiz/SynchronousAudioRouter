@@ -50,7 +50,9 @@ struct DefaultEndpointConfig
 
 struct ApplicationConfig
 {
+    std::string description;
     std::string path;
+    bool regexMatch = false;
     std::regex pattern;
     std::vector<DefaultEndpointConfig> defaults;
 

@@ -134,16 +134,33 @@ picojson::object DefaultEndpointConfig::save()
     return result;
 }
 
+static std::string constantRegex(const std::string& path)
+{
+    static const std::regex escape("[.^$|()\\[\\]{}*+?\\\\]");
+    std::ostringstream os;
+
+    os << "^"
+       << std::regex_replace(path, escape, "\\\\&",
+              std::regex_constants::match_default |
+              std::regex_constants::format_sed)
+       << "$";
+    return os.str();
+}
+
 bool ApplicationConfig::load(picojson::object& obj)
 {
+    auto poDescription = obj.find("description");
     auto poPath = obj.find("path");
+    auto poRegexMatch = obj.find("regexMatch");
     auto poDefaults = obj.find("defaults");
 
-    if (poPath == obj.end()) {
+    if (poDescription == obj.end() || poPath == obj.end()) {
         return false;
     }
 
-    if (!poPath->second.is<std::string>()) {
+    if (!poDescription->second.is<std::string>() ||
+        !poPath->second.is<std::string>()) {
+
         return false;
     }
 
@@ -161,11 +178,20 @@ bool ApplicationConfig::load(picojson::object& obj)
         }
     }
 
+    description = poDescription->second.get<std::string>();
+
+    if (poRegexMatch != obj.end() &&
+        poRegexMatch->second.is<bool>()) {
+
+        regexMatch = poRegexMatch->second.get<bool>();
+    }
+
     try {
         path = poPath->second.get<std::string>();
+
         // TODO: UTF-8 support on Windows is very sad. This might need ICU or
         // PCRE.
-        pattern = std::regex(path,
+        pattern = std::regex(regexMatch ? constantRegex(path) : path,
             std::regex_constants::ECMAScript | std::regex_constants::icase);
     } catch (std::exception&) {
         // nom nom
@@ -178,7 +204,12 @@ picojson::object ApplicationConfig::save()
 {
     picojson::object result;
 
+    result.insert(std::make_pair("description", picojson::value(description)));
     result.insert(std::make_pair("path", picojson::value(path)));
+
+    if (regexMatch) {
+        result.insert(std::make_pair("regexMatch", picojson::value(true)));
+    }
 
     if (defaults.size()) {
         picojson::array arr;

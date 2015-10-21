@@ -119,6 +119,7 @@ private:
     void initControls();
     void refreshApplicationList();
     void updateEnabled();
+    void onOpenApplication();
     void onAddApplication();
 
     DriverConfig& _config;
@@ -144,9 +145,12 @@ private:
     void refreshControls();
     void refreshEndpointDropdown(HWND control, EDataFlow dataFlow, ERole role);
     int indexOfEndpoint(const std::string& id);
+    void updateConfig();
+    void updateDefaultEndpoint(HWND control, EDataFlow dataFlow, ERole role);
 
     DriverConfig& _driverConfig;
     ApplicationConfig _config;
+    HWND _name;
     HWND _path;
     HWND _useRegularExpressions;
     HWND _runningApplicationsButton;
