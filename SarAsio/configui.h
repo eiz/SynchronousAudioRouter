@@ -149,6 +149,8 @@ private:
     int indexOfEndpoint(const std::string& id);
     void updateConfig();
     void updateDefaultEndpoint(HWND control, EDataFlow dataFlow, ERole role);
+    void onRunningApplicationsClicked();
+    void onBrowseClicked();
 
     DriverConfig& _driverConfig;
     ApplicationConfig _config;

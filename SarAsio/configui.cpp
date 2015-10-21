@@ -621,6 +621,12 @@ INT_PTR ApplicationConfigDialog::dialogProc(
             break;
         case WM_COMMAND:
             switch (LOWORD(wparam)) {
+                case 1303: // _runningApplicationsButton
+                    onRunningApplicationsClicked();
+                    break;
+                case 1304: // _browseButton
+                    onBrowseClicked();
+                    break;
                 case IDOK:
                     updateConfig();
                     // fall through
@@ -775,6 +781,30 @@ void ApplicationConfigDialog::updateDefaultEndpoint(
         defaultEndpoint.role = role;
         defaultEndpoint.id = _driverConfig.endpoints[index - 1].id;
         _config.defaults.push_back(defaultEndpoint);
+    }
+}
+
+void ApplicationConfigDialog::onRunningApplicationsClicked()
+{
+    MessageBoxA(_hwnd, "Sorry, not yet supported.", "Error",
+        MB_OK | MB_ICONERROR);
+}
+
+void ApplicationConfigDialog::onBrowseClicked()
+{
+    OPENFILENAME ofn = {};
+    WCHAR buf[1024] = {};
+
+    ofn.lStructSize = sizeof(OPENFILENAME);
+    ofn.hwndOwner = _hwnd;
+    ofn.lpstrFilter = L"Executable files\0*.exe\0\0";
+    ofn.lpstrTitle = L"Select Application";
+    ofn.lpstrFile = buf;
+    ofn.nMaxFile = 1024;
+
+    if (GetOpenFileName(&ofn)) {
+        Edit_SetText(_path, buf);
+        Button_SetCheck(_useRegularExpressions, BST_UNCHECKED);
     }
 }
 
