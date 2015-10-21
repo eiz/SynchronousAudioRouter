@@ -456,9 +456,21 @@ INT_PTR ApplicationsPropertySheetPage::dialogProc(
             break;
         case WM_COMMAND:
             switch (LOWORD(wparam)) {
+                case 1200: // _enableRouting
+                    _config.enableApplicationRouting =
+                        Button_GetCheck(_enableRouting) == BST_CHECKED;
+                    refreshControls();
+                    changed();
+                    break;
                 case 1203: // _addButton
                     if (HIWORD(wparam) == BN_CLICKED) {
                         onAddApplication();
+                    }
+
+                    break;
+                case 1204: // _removeButton
+                    if (HIWORD(wparam) == BN_CLICKED) {
+                        onRemoveApplication();
                     }
 
                     break;
@@ -503,8 +515,14 @@ void ApplicationsPropertySheetPage::initControls()
     ListView_InsertColumn(_listView, 2, &col);
     ListView_SetExtendedListViewStyle(_listView, LVS_EX_FULLROWSELECT);
 
-    refreshApplicationList();
+    refreshControls();
     updateEnabled();
+}
+
+void ApplicationsPropertySheetPage::refreshControls()
+{
+    Button_SetCheck(_enableRouting, _config.enableApplicationRouting);
+    refreshApplicationList();
 }
 
 void ApplicationsPropertySheetPage::refreshApplicationList()
@@ -536,7 +554,10 @@ void ApplicationsPropertySheetPage::refreshApplicationList()
 
 void ApplicationsPropertySheetPage::updateEnabled()
 {
+    EnableWindow(_listView, _config.enableApplicationRouting);
+    Button_Enable(_addButton, _config.enableApplicationRouting);
     Button_Enable(_removeButton,
+        _config.enableApplicationRouting &&
         ListView_GetSelectedCount(_listView) > 0);
 }
 
@@ -544,7 +565,7 @@ void ApplicationsPropertySheetPage::onOpenApplication()
 {
     auto index = ListView_GetNextItem(_listView, -1, LVNI_SELECTED);
 
-    if (index < 0 || index >= _config.applications.size()) {
+    if (index < 0 || index >= (int)_config.applications.size()) {
         return;
     }
 
@@ -556,6 +577,20 @@ void ApplicationsPropertySheetPage::onOpenApplication()
         updateEnabled();
         changed();
     }
+}
+
+void ApplicationsPropertySheetPage::onRemoveApplication()
+{
+    auto index = ListView_GetNextItem(_listView, -1, LVNI_SELECTED);
+
+    if (index < 0 || index >= (int)_config.endpoints.size()) {
+        return;
+    }
+
+    _config.applications.erase(_config.applications.begin() + index);
+    refreshApplicationList();
+    updateEnabled();
+    changed();
 }
 
 void ApplicationsPropertySheetPage::onAddApplication()

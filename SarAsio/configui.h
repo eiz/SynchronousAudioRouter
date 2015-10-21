@@ -117,10 +117,12 @@ protected:
 
 private:
     void initControls();
+    void refreshControls();
     void refreshApplicationList();
     void updateEnabled();
     void onOpenApplication();
     void onAddApplication();
+    void onRemoveApplication();
 
     DriverConfig& _config;
     HWND _enableRouting;
