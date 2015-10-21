@@ -191,7 +191,7 @@ bool ApplicationConfig::load(picojson::object& obj)
 
         // TODO: UTF-8 support on Windows is very sad. This might need ICU or
         // PCRE.
-        pattern = std::regex(regexMatch ? constantRegex(path) : path,
+        pattern = std::regex(regexMatch ? path : constantRegex(path),
             std::regex_constants::ECMAScript | std::regex_constants::icase);
     } catch (std::exception&) {
         // nom nom

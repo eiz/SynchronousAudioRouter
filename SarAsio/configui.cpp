@@ -774,7 +774,7 @@ void ApplicationConfigDialog::updateDefaultEndpoint(
 {
     auto index = ComboBox_GetCurSel(control);
 
-    if (index > 0 && index - 1 < _driverConfig.endpoints.size()) {
+    if (index > 0 && index - 1 < (int)_driverConfig.endpoints.size()) {
         DefaultEndpointConfig defaultEndpoint;
 
         defaultEndpoint.type = dataFlow;
