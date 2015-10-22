@@ -787,23 +787,22 @@ void ApplicationConfigDialog::updateDefaultEndpoint(
 void ApplicationConfigDialog::onRunningApplicationsClicked()
 {
     auto apps = RunningApplications();
-
-    if (apps.size() == 0) {
-        MessageBoxA(_hwnd, "Failed to build the running application list.",
-            "Error", MB_OK | MB_ICONERROR);
-        return;
-    }
-
     auto menu = CreatePopupMenu();
     int i = 1;
+    POINT pt;
+
+    if (apps.size() == 0) {
+        MessageBox(_hwnd, L"Failed to build the running application list.",
+            L"Error", MB_OK | MB_ICONERROR);
+        return;
+    }
 
     for (auto& app : apps) {
         AppendMenu(menu, MF_STRING, i++, UTF8ToWide(app.name).c_str());
     }
 
-    POINT pt;
-
     GetCursorPos(&pt);
+
     int result = TrackPopupMenu(menu,
         TPM_LEFTALIGN | TPM_RETURNCMD | TPM_NONOTIFY,
         pt.x, pt.y, 0, _hwnd, nullptr);
