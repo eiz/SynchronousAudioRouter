@@ -72,7 +72,8 @@ FONT 8, "MS Shell Dlg", 400, 0, 0
     LTEXT "Name:", 1100,
         4, 6, 56, 12
     EDITTEXT 1101,
-        68, 5, 184, 12
+        68, 5, 184, 12,
+        ES_LEFT | ES_AUTOHSCROLL | WS_BORDER | WS_TABSTOP
     LTEXT "Type:", 1102,
         4, 22, 56, 12
     COMBOBOX 1103,
@@ -81,7 +82,8 @@ FONT 8, "MS Shell Dlg", 400, 0, 0
     LTEXT "Channel count:", 1104,
         4, 38, 56, 12
     EDITTEXT 1105,
-        68, 37, 16, 12
+        68, 37, 16, 12,
+        ES_LEFT | ES_AUTOHSCROLL | WS_BORDER | WS_TABSTOP
     PUSHBUTTON "&OK", IDOK,
         160, 53, 44, 14
     PUSHBUTTON "&Cancel", IDCANCEL,
@@ -118,11 +120,13 @@ FONT 8, "MS Shell Dlg", 400, 0, 0
     LTEXT "Name:", 1307,
         8, 8, 24, 12
     EDITTEXT 1308,
-        36, 6, 216, 12
+        36, 6, 216, 12,
+        ES_LEFT | ES_AUTOHSCROLL | WS_BORDER | WS_TABSTOP
     LTEXT "Path:", 1300,
         8, 24, 24, 12
     EDITTEXT 1301,
-        36, 22, 216, 12
+        36, 22, 216, 12,
+        ES_LEFT | ES_AUTOHSCROLL | WS_BORDER | WS_TABSTOP
     AUTOCHECKBOX "Use regular expressions", 1302,
         8, 38, 100, 14
     PUSHBUTTON "&Running Applications...", 1303,

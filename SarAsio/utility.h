@@ -27,5 +27,13 @@ std::string TCHARToUTF8(TCHAR *ptr);
 std::string ConfigurationPath(const std::string& name);
 std::wstring UTF8ToWide(const std::string& str);
 
+struct RunningApplication
+{
+    std::string name;
+    std::string path;
+};
+
+std::vector<RunningApplication> RunningApplications();
+
 } // namespace Sar
 #endif // _SAR_ASIO_UTILITY_H

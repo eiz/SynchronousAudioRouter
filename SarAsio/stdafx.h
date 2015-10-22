@@ -28,6 +28,7 @@
 #include <mmdeviceapi.h>
 #include <functiondiscoverykeys_devpkey.h>
 #include <propvarutil.h>
+#include <Psapi.h>
 
 #define _ATL_CSTRING_EXPLICIT_CONSTRUCTORS
 
