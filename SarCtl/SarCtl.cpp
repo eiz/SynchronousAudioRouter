@@ -26,6 +26,7 @@ BOOL createEndpoint(
     LPWSTR name)
 {
     SarCreateEndpointRequest request = {};
+    DWORD dummy;
 
     request.type = endpointType;
     request.index = index;
@@ -33,7 +34,7 @@ BOOL createEndpoint(
     wcscpy_s(request.name, name);
 
     if (!DeviceIoControl(device, SAR_CREATE_ENDPOINT,
-            (LPVOID)&request, sizeof(request), nullptr, 0, nullptr, nullptr)) {
+            (LPVOID)&request, sizeof(request), nullptr, 0, &dummy, nullptr)) {
         return FALSE;
     }
 
@@ -49,6 +50,7 @@ BOOL setBufferLayout(
 {
     SarSetBufferLayoutRequest request = {};
     SarSetBufferLayoutResponse response = {};
+    DWORD dummy;
 
     request.bufferSize = bufferSize;
     request.frameSize = 512;
@@ -57,7 +59,7 @@ BOOL setBufferLayout(
 
     if (!DeviceIoControl(device, SAR_SET_BUFFER_LAYOUT,
         (LPVOID)&request, sizeof(request), (LPVOID)&response, sizeof(response),
-        nullptr, nullptr)) {
+        &dummy, nullptr)) {
 
         return FALSE;
     }
@@ -80,8 +82,10 @@ BOOL setBufferLayout(
 
 BOOL startRegistryFilter(HANDLE device)
 {
+    DWORD dummy;
+
     return DeviceIoControl(device, SAR_START_REGISTRY_FILTER,
-        nullptr, 0, nullptr, 0, nullptr, nullptr);
+        nullptr, 0, nullptr, 0, &dummy, nullptr);
 }
 
 int main(int argc, char *argv[])

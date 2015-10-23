@@ -271,6 +271,7 @@ bool SarClient::setBufferLayout()
 {
     SarSetBufferLayoutRequest request = {};
     SarSetBufferLayoutResponse response = {};
+    DWORD dummy;
 
     request.bufferSize = 1024 * 1024 * 16; // TODO: size based on endpoint config
     request.frameSize =
@@ -284,7 +285,7 @@ bool SarClient::setBufferLayout()
 
     if (!DeviceIoControl(_device, SAR_SET_BUFFER_LAYOUT,
         (LPVOID)&request, sizeof(request), (LPVOID)&response, sizeof(response),
-        nullptr, nullptr)) {
+        &dummy, nullptr)) {
 
         return false;
     }
@@ -299,6 +300,7 @@ bool SarClient::setBufferLayout()
 bool SarClient::createEndpoints()
 {
     int i = 0;
+    DWORD dummy;
 
     for (auto& endpoint : _driverConfig.endpoints) {
         SarCreateEndpointRequest request = {};
@@ -311,7 +313,7 @@ bool SarClient::createEndpoints()
         wcscpy_s(request.id, UTF8ToWide(endpoint.id).c_str());
 
         if (!DeviceIoControl(_device, SAR_CREATE_ENDPOINT,
-            (LPVOID)&request, sizeof(request), nullptr, 0, nullptr, nullptr)) {
+            (LPVOID)&request, sizeof(request), nullptr, 0, &dummy, nullptr)) {
 
             std::ostringstream os;
 
@@ -327,8 +329,10 @@ bool SarClient::createEndpoints()
 
 bool SarClient::enableRegistryFilter()
 {
+    DWORD dummy;
+
     return DeviceIoControl(_device, SAR_START_REGISTRY_FILTER,
-        nullptr, 0, nullptr, 0, nullptr, nullptr) == TRUE;
+        nullptr, 0, nullptr, 0, &dummy, nullptr) == TRUE;
 }
 
 void SarClient::updateNotificationHandles()
