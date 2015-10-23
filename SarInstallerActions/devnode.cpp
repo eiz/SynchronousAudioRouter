@@ -25,14 +25,14 @@
 
 UINT __stdcall CreateDeviceNode(MSIHANDLE hInstall)
 {
-	HRESULT hr = S_OK;
-	UINT er = ERROR_SUCCESS;
+    HRESULT hr = S_OK;
+    UINT er = ERROR_SUCCESS;
     GUID classGuid;
     HDEVINFO deviceInfoSet = INVALID_HANDLE_VALUE;
     SP_DEVINFO_DATA deviceInfoData = {};
     WCHAR *hardwareId = HARDWARE_ID;
 
-	hr = WcaInitialize(hInstall, "CreateDeviceNode");
+    hr = WcaInitialize(hInstall, "CreateDeviceNode");
 
     if (FAILED(hr)) {
         return WcaFinalize(hr);
@@ -80,15 +80,15 @@ UINT __stdcall CreateDeviceNode(MSIHANDLE hInstall)
 
 UINT __stdcall RemoveDeviceNode(MSIHANDLE hInstall)
 {
-	HRESULT hr = S_OK;
-	UINT er = ERROR_SUCCESS;
+    HRESULT hr = S_OK;
+    UINT er = ERROR_SUCCESS;
     GUID classGuid;
     HDEVINFO deviceInfoSet;
     SP_DEVINFO_DATA data;
     DWORD requiredSize;
     DEVPROPTYPE propType;
 
-	hr = WcaInitialize(hInstall, "RemoveDeviceNode");
+    hr = WcaInitialize(hInstall, "RemoveDeviceNode");
 
     if (FAILED(hr)) {
         return WcaFinalize(ERROR_INSTALL_FAILURE);
@@ -134,8 +134,8 @@ UINT __stdcall RemoveDeviceNode(MSIHANDLE hInstall)
         BOOL found = FALSE;
 
         for (WCHAR *p = buffer;
-             p < p + requiredSize / sizeof(WCHAR) && *p;
-             p += lstrlen(p) + 2) {
+        p < p + requiredSize / sizeof(WCHAR) && *p;
+            p += lstrlen(p) + 2) {
 
             if (!lstrcmpi(p, HARDWARE_ID)) {
                 found = TRUE;
@@ -155,7 +155,7 @@ UINT __stdcall RemoveDeviceNode(MSIHANDLE hInstall)
 
                 if (SetupDiGetDeviceInstallParams(
                     deviceInfoSet, &data, &installParams) &&
-                    (installParams.Flags & (DI_NEEDRESTART|DI_NEEDREBOOT))) {
+                    (installParams.Flags & (DI_NEEDRESTART | DI_NEEDREBOOT))) {
 
                     if (MsiSetMode(hInstall, MSIRUNMODE_REBOOTATEND, TRUE)) {
                         WcaLog(LOGMSG_VERBOSE, "Failed to schedule reboot.");
