@@ -322,21 +322,24 @@ NTSTATUS SarKsPinSetDataFormat(
     NT_ASSERT(!oldFormat);
 
     const KSDATARANGE_AUDIO *audioRange = (const KSDATARANGE_AUDIO *)dataRange;
-    PKSDATAFORMAT_WAVEFORMATEX waveFormat =
-        (PKSDATAFORMAT_WAVEFORMATEX)pin->ConnectionFormat;
+    PKSDATAFORMAT_WAVEFORMATEXTENSIBLE waveFormat =
+        (PKSDATAFORMAT_WAVEFORMATEXTENSIBLE)pin->ConnectionFormat;
 
-    if (waveFormat->DataFormat.FormatSize !=
-        sizeof(KSDATAFORMAT_WAVEFORMATEX)) {
+    if (waveFormat->DataFormat.FormatSize <
+        sizeof(KSDATAFORMAT_WAVEFORMATEXTENSIBLE)) {
 
         return STATUS_NO_MATCH;
     }
 
-    if (waveFormat->WaveFormatEx.wFormatTag != WAVE_FORMAT_PCM ||
-        waveFormat->WaveFormatEx.nChannels != audioRange->MaximumChannels ||
-        waveFormat->WaveFormatEx.nSamplesPerSec !=
+    if (waveFormat->WaveFormatExt.Format.wFormatTag !=
+            WAVE_FORMAT_EXTENSIBLE ||
+        waveFormat->WaveFormatExt.Format.nChannels !=
+            audioRange->MaximumChannels ||
+        waveFormat->WaveFormatExt.Format.nSamplesPerSec !=
             audioRange->MaximumSampleFrequency ||
-        waveFormat->WaveFormatEx.wBitsPerSample !=
-            audioRange->MaximumBitsPerSample) {
+        waveFormat->WaveFormatExt.Samples.wValidBitsPerSample !=
+            audioRange->MaximumBitsPerSample ||
+        waveFormat->WaveFormatExt.SubFormat != KSDATAFORMAT_SUBTYPE_PCM) {
 
         return STATUS_NO_MATCH;
     }
@@ -424,7 +427,7 @@ NTSTATUS SarKsPinIntersectHandler(
     PKSDATARANGE_AUDIO callerFormat = nullptr;
     PKSDATARANGE_AUDIO myFormat = nullptr;
 
-    *dataSize = sizeof(KSDATAFORMAT_WAVEFORMATEX);
+    *dataSize = sizeof(KSDATAFORMAT_WAVEFORMATEXTENSIBLE);
 
     if (callerDataRange->FormatSize == sizeof(KSDATARANGE_AUDIO) &&
         callerDataRange->MajorFormat == KSDATAFORMAT_TYPE_AUDIO) {
@@ -452,7 +455,7 @@ NTSTATUS SarKsPinIntersectHandler(
         return STATUS_BUFFER_OVERFLOW;
     }
 
-    if (dataBufferSize < sizeof(KSDATAFORMAT_WAVEFORMATEX)) {
+    if (dataBufferSize < sizeof(KSDATAFORMAT_WAVEFORMATEXTENSIBLE)) {
         return STATUS_BUFFER_TOO_SMALL;
     }
 
@@ -466,23 +469,34 @@ NTSTATUS SarKsPinIntersectHandler(
         return STATUS_NO_MATCH;
     }
 
-    PKSDATAFORMAT_WAVEFORMATEX waveFormat = (PKSDATAFORMAT_WAVEFORMATEX)data;
+    PKSDATAFORMAT_WAVEFORMATEXTENSIBLE waveFormat =
+        (PKSDATAFORMAT_WAVEFORMATEXTENSIBLE)data;
 
     RtlCopyMemory(
         &waveFormat->DataFormat, &myFormat->DataRange, sizeof(KSDATAFORMAT));
-    waveFormat->WaveFormatEx.wFormatTag = WAVE_FORMAT_PCM;
-    waveFormat->WaveFormatEx.nChannels = (WORD)myFormat->MaximumChannels;
-    waveFormat->WaveFormatEx.nSamplesPerSec = myFormat->MaximumSampleFrequency;
-    waveFormat->WaveFormatEx.wBitsPerSample =
+    waveFormat->WaveFormatExt.Format.wFormatTag =
+        WAVE_FORMAT_EXTENSIBLE;
+    waveFormat->WaveFormatExt.Format.nChannels =
+        (WORD)myFormat->MaximumChannels;
+    waveFormat->WaveFormatExt.Format.nSamplesPerSec =
+        myFormat->MaximumSampleFrequency;
+    waveFormat->WaveFormatExt.Format.wBitsPerSample =
         (WORD)myFormat->MaximumBitsPerSample;
-    waveFormat->WaveFormatEx.nBlockAlign =
+    waveFormat->WaveFormatExt.Format.nBlockAlign =
         ((WORD)myFormat->MaximumBitsPerSample / 8) *
         (WORD)myFormat->MaximumChannels;
-    waveFormat->WaveFormatEx.nAvgBytesPerSec =
-        waveFormat->WaveFormatEx.nBlockAlign *
-        waveFormat->WaveFormatEx.nSamplesPerSec;
-    waveFormat->WaveFormatEx.cbSize = 0;
-    waveFormat->DataFormat.SampleSize = waveFormat->WaveFormatEx.nBlockAlign;
+    waveFormat->WaveFormatExt.Format.nAvgBytesPerSec =
+        waveFormat->WaveFormatExt.Format.nBlockAlign *
+        waveFormat->WaveFormatExt.Format.nSamplesPerSec;
+    waveFormat->WaveFormatExt.Format.cbSize =
+        sizeof(WAVEFORMATEXTENSIBLE) - sizeof(WAVEFORMATEX);
+    waveFormat->WaveFormatExt.Samples.wValidBitsPerSample =
+        (WORD)myFormat->MaximumBitsPerSample;
+    waveFormat->WaveFormatExt.dwChannelMask =
+        (1 << myFormat->MaximumChannels) - 1;
+    waveFormat->WaveFormatExt.SubFormat = KSDATAFORMAT_SUBTYPE_PCM;
+    waveFormat->DataFormat.SampleSize =
+        waveFormat->WaveFormatExt.Format.nBlockAlign;
     waveFormat->DataFormat.FormatSize = *dataSize;
     return STATUS_SUCCESS;
 }
@@ -528,32 +542,43 @@ NTSTATUS SarKsPinGetDefaultDataFormat(
         return STATUS_NOT_FOUND;
     }
 
-    if (outputLength < sizeof(KSDATAFORMAT_WAVEFORMATEX)) {
-        irp->IoStatus.Information = sizeof(KSDATAFORMAT_WAVEFORMATEX);
+    if (outputLength < sizeof(KSDATAFORMAT_WAVEFORMATEXTENSIBLE)) {
+        irp->IoStatus.Information = sizeof(KSDATAFORMAT_WAVEFORMATEXTENSIBLE);
         SarReleaseEndpointAndContext(endpoint);
         return STATUS_BUFFER_OVERFLOW;
     }
 
-    PKSDATAFORMAT_WAVEFORMATEX waveFormat = (PKSDATAFORMAT_WAVEFORMATEX)data;
+    PKSDATAFORMAT_WAVEFORMATEXTENSIBLE waveFormat =
+        (PKSDATAFORMAT_WAVEFORMATEXTENSIBLE)data;
     PKSDATARANGE_AUDIO myFormat = endpoint->dataRange;
 
     RtlCopyMemory(
-        &waveFormat->DataFormat, endpoint->dataRange, sizeof(KSDATAFORMAT));
-
-    waveFormat->WaveFormatEx.wFormatTag = WAVE_FORMAT_PCM;
-    waveFormat->WaveFormatEx.nChannels = (WORD)myFormat->MaximumChannels;
-    waveFormat->WaveFormatEx.nSamplesPerSec = myFormat->MaximumSampleFrequency;
-    waveFormat->WaveFormatEx.wBitsPerSample =
+        &waveFormat->DataFormat, &myFormat->DataRange, sizeof(KSDATAFORMAT));
+    waveFormat->WaveFormatExt.Format.wFormatTag =
+        WAVE_FORMAT_EXTENSIBLE;
+    waveFormat->WaveFormatExt.Format.nChannels =
+        (WORD)myFormat->MaximumChannels;
+    waveFormat->WaveFormatExt.Format.nSamplesPerSec =
+        myFormat->MaximumSampleFrequency;
+    waveFormat->WaveFormatExt.Format.wBitsPerSample =
         (WORD)myFormat->MaximumBitsPerSample;
-    waveFormat->WaveFormatEx.nBlockAlign =
+    waveFormat->WaveFormatExt.Format.nBlockAlign =
         ((WORD)myFormat->MaximumBitsPerSample / 8) *
         (WORD)myFormat->MaximumChannels;
-    waveFormat->WaveFormatEx.nAvgBytesPerSec =
-        waveFormat->WaveFormatEx.nBlockAlign *
-        waveFormat->WaveFormatEx.nSamplesPerSec;
-    waveFormat->WaveFormatEx.cbSize = 0;
-    waveFormat->DataFormat.SampleSize = waveFormat->WaveFormatEx.nBlockAlign;
-    waveFormat->DataFormat.FormatSize = sizeof(KSDATAFORMAT_WAVEFORMATEX);
+    waveFormat->WaveFormatExt.Format.nAvgBytesPerSec =
+        waveFormat->WaveFormatExt.Format.nBlockAlign *
+        waveFormat->WaveFormatExt.Format.nSamplesPerSec;
+    waveFormat->WaveFormatExt.Format.cbSize =
+        sizeof(WAVEFORMATEXTENSIBLE) - sizeof(WAVEFORMATEX);
+    waveFormat->WaveFormatExt.Samples.wValidBitsPerSample =
+        (WORD)myFormat->MaximumBitsPerSample;
+    waveFormat->WaveFormatExt.dwChannelMask =
+        (1 << myFormat->MaximumChannels) - 1;
+    waveFormat->WaveFormatExt.SubFormat = KSDATAFORMAT_SUBTYPE_PCM;
+    waveFormat->DataFormat.SampleSize =
+        waveFormat->WaveFormatExt.Format.nBlockAlign;
+    waveFormat->DataFormat.FormatSize =
+        sizeof(KSDATAFORMAT_WAVEFORMATEXTENSIBLE);
     SarReleaseEndpointAndContext(endpoint);
     return STATUS_SUCCESS;
 }
@@ -581,7 +606,8 @@ NTSTATUS SarKsPinProposeDataFormat(
         return STATUS_BUFFER_TOO_SMALL;
     }
 
-    PKSDATAFORMAT_WAVEFORMATEX format = (PKSDATAFORMAT_WAVEFORMATEX)data;
+    PKSDATAFORMAT_WAVEFORMATEXTENSIBLE format =
+        (PKSDATAFORMAT_WAVEFORMATEXTENSIBLE)data;
 
     if (format->DataFormat.MajorFormat != KSDATAFORMAT_TYPE_AUDIO ||
         format->DataFormat.SubFormat != KSDATAFORMAT_SUBTYPE_PCM ||
@@ -598,17 +624,19 @@ NTSTATUS SarKsPinProposeDataFormat(
         return STATUS_NO_MATCH;
     }
 
-    if (outputLength < sizeof(KSDATAFORMAT_WAVEFORMATEX)) {
+    if (outputLength < sizeof(KSDATAFORMAT_WAVEFORMATEXTENSIBLE)) {
         SarReleaseEndpointAndContext(endpoint);
         return STATUS_BUFFER_TOO_SMALL;
     }
 
-    if (format->WaveFormatEx.nChannels != endpoint->channelCount ||
-        (format->WaveFormatEx.wBitsPerSample !=
+    if (format->WaveFormatExt.Format.nChannels != endpoint->channelCount ||
+        (format->WaveFormatExt.Format.wBitsPerSample !=
          endpoint->owner->sampleSize * 8) ||
-        (format->WaveFormatEx.wFormatTag != WAVE_FORMAT_PCM &&
-         format->WaveFormatEx.wFormatTag != WAVE_FORMAT_EXTENSIBLE) ||
-        format->WaveFormatEx.nSamplesPerSec != endpoint->owner->sampleRate) {
+        format->WaveFormatExt.Format.wFormatTag != WAVE_FORMAT_EXTENSIBLE ||
+        (format->WaveFormatExt.Format.nSamplesPerSec !=
+         endpoint->owner->sampleRate) ||
+        format->WaveFormatExt.SubFormat != KSDATAFORMAT_SUBTYPE_PCM) {
+
         SarReleaseEndpointAndContext(endpoint);
         return STATUS_NO_MATCH;
     }
