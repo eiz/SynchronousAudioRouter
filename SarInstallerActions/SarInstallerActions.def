@@ -1,0 +1,6 @@
+LIBRARY "SarInstallerActions"
+
+EXPORTS
+
+CreateDeviceNode
+RemoveDeviceNode

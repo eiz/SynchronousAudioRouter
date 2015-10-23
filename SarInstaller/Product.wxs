@@ -33,6 +33,32 @@
       <!--<ComponentRef Id="AsioDriver32"/>-->
 		</Feature>
 
+    <Binary Id="SarInstallerActions"
+            SourceFile="..\x64\Release\SarInstallerActions.dll"/>
+
+    <CustomAction Id="CreateDeviceNode"
+                  BinaryKey="SarInstallerActions"
+                  DllEntry="CreateDeviceNode"
+                  Execute="deferred"
+                  Impersonate="no"
+                  Return="check"/>
+
+    <CustomAction Id="RemoveDeviceNode"
+                  BinaryKey="SarInstallerActions"
+                  DllEntry="RemoveDeviceNode"
+                  Execute="deferred"
+                  Impersonate="no"
+                  Return="check"/>
+
+    <InstallExecuteSequence>
+      <Custom Action="CreateDeviceNode" After="InstallFiles">
+        NOT Installed AND NOT REMOVE
+      </Custom>
+      <Custom Action="RemoveDeviceNode" Before="RemoveFiles">
+        REMOVE
+      </Custom>
+    </InstallExecuteSequence>
+
     <Directory Id="TARGETDIR" Name="SourceDir">
       <Directory Id="ProgramFiles64Folder">
         <Directory Id="INSTALLDIR64" Name="Synchronous Audio Router"/>
@@ -58,7 +84,7 @@
               Name="SynchronousAudioRouter.inf"
               Source="..\x64\Release\SynchronousAudioRouter\SynchronousAudioRouter.inf"
               KeyPath="no"/>
-        <difx:Driver Legacy="yes"/>
+        <difx:Driver PlugAndPlayPrompt="no"/>
       </Component>
 
       <Component Id="AsioDriver64"

@@ -295,11 +295,12 @@ NTSTATUS SarSetDeviceInterfaceProperties(
     UNICODE_STRING clsidValue, clsidData = {}, aliasLink = {};
     UNICODE_STRING epSubKeyStr, zeroSubKeyStr, supportsEventModeValue;
     UNICODE_STRING associationValue, guidEmpty;
-    UNICODE_STRING sarIdValue;
+    UNICODE_STRING sarIdValue, friendlyNameValue;
     OBJECT_ATTRIBUTES oa;
     DWORD one = 1;
 
     RtlUnicodeStringInit(&clsidValue, L"CLSID");
+    RtlUnicodeStringInit(&friendlyNameValue, L"FriendlyName");
     RtlUnicodeStringInit(&epSubKeyStr, L"MSEP");
     RtlUnicodeStringInit(&zeroSubKeyStr, L"0");
     RtlUnicodeStringInit(
@@ -319,17 +320,6 @@ NTSTATUS SarSetDeviceInterfaceProperties(
         goto out;
     }
 
-    status = IoSetDeviceInterfacePropertyData(&aliasLink,
-        &DEVPKEY_DeviceInterface_FriendlyName, LOCALE_NEUTRAL, 0,
-        DEVPROP_TYPE_STRING,
-        endpoint->deviceName.Length + sizeof(WCHAR),
-        endpoint->deviceName.Buffer);
-
-    if (!NT_SUCCESS(status)) {
-        SAR_LOG("Couldn't set friendly name: %08X", status);
-        goto out;
-    }
-
     status = IoOpenDeviceInterfaceRegistryKey(
         &aliasLink, KEY_ALL_ACCESS, &deviceInterfaceKey);
 
@@ -342,6 +332,16 @@ NTSTATUS SarSetDeviceInterfaceProperties(
 
     if (!NT_SUCCESS(status)) {
         SAR_LOG("Couldn't convert GUID to string: %08X", status);
+        goto out;
+    }
+
+    status = ZwSetValueKey(
+        deviceInterfaceKey, &friendlyNameValue, 0, REG_SZ,
+        endpoint->deviceName.Buffer,
+        endpoint->deviceName.Length + sizeof(UNICODE_NULL));
+
+    if (!NT_SUCCESS(status)) {
+        SAR_LOG("Couldn't set friendly name: %08X", status);
         goto out;
     }
 

@@ -36,10 +36,6 @@ extern "C" {
 #include <windows.h>
 #endif
 
-#ifdef SAR_INIT_GUID
-//#include <initguid.h>
-#endif
-
 #pragma warning(push)
 #pragma warning(disable:4200)
 

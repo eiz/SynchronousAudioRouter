@@ -4,7 +4,7 @@
 
 [Version]
 Signature="$WINDOWS NT$"
-Class=Media
+Class=MEDIA
 ClassGuid={4d36e96c-e325-11ce-bfc1-08002be10318}
 Provider=%Provider%
 DriverVer=0.1
@@ -18,12 +18,6 @@ DefaultDestDir = 12
 
 [Manufacturer]
 %Provider%=Standard,NTamd64
-
-[DeviceInstall32]
-AddDevice=ROOT\SW\{0BCFFA5C-E754-48CF-A783-A64C0DC0BB2C},,SAR.RootEnumInstall
-
-[SAR.RootEnumInstall]
-HardwareIds=SW\{0BCFFA5C-E754-48CF-A783-A64C0DC0BB2C}
 
 [Standard.NTamd64]
 %DeviceName%=SAR.Install,SW\{0BCFFA5C-E754-48CF-A783-A64C0DC0BB2C}
