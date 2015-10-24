@@ -30,7 +30,7 @@ unique characteristics compared to similar virtual audio cable software:
 
 ## System Requirements
 
-* Windows 10 x64 (testing/backport to Windows 7 32/64-bit is in-progress).
+* Windows 7 x64 or later (32-bit port is in progress).
 * An audio interface which supports ASIO. If your hardware doesn't come with a
   native ASIO driver, you may be able to use ASIO4ALL instead.
 * Digital audio workstation software. SAR is mainly tested using [REAPER](http://www.reaper.fm/).
@@ -58,4 +58,11 @@ will be relaxed eventually.
 Note that the endpoints created by SAR are only active while your DAW is
 running and has started ASIO. They are automatically disconnected when the
 ASIO driver is closed.
+
+## Windows 7 Installation Note
+
+Make sure you have Windows update [KB3033929](https://technet.microsoft.com/en-us/library/security/3033929.aspx)
+installed prior to installing SAR, otherwise you will receive an error about
+an unsigned driver.
+
 
