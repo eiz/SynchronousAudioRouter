@@ -137,8 +137,45 @@ AsioStatus SarAsioWrapper::getBufferSize(
         return AsioStatus::NotPresent;
     }
 
-    return _innerDriver->getBufferSize(
+    auto status = _innerDriver->getBufferSize(
         minSize, maxSize, preferredSize, granularity);
+
+    if (status != AsioStatus::OK) {
+        return status;
+    }
+
+    // Limit the maximum buffer size to 1/10th the system audio engine's
+    // periodicity if possible. This prevents audio glitches caused by the ASIO
+    // event loop not keeping up with the audio engine's event loop.
+    double sampleRate;
+
+    status = getSampleRate(&sampleRate);
+
+    if (status != AsioStatus::OK) {
+        return status;
+    }
+
+    // The audio engine's periodicity is always 10ms unless overriden by the
+    // audio driver, which we don't do.
+    long maxBufferSize = (long)(sampleRate / 100.0);
+
+    // If we can't effectively limit the sample rate, give up and force the
+    // minimum buffer size to be used.
+    if (*minSize > maxBufferSize || !*granularity) {
+        *minSize = *preferredSize = *maxSize;
+        *granularity = 0;
+        return AsioStatus::OK;
+    }
+
+    while (*maxSize > maxBufferSize && *maxSize - *minSize >= *granularity) {
+        *maxSize -= *granularity;
+    }
+
+    if (*preferredSize > *maxSize) {
+        *preferredSize = *maxSize;
+    }
+
+    return AsioStatus::OK;
 }
 
 AsioStatus SarAsioWrapper::canSampleRate(double sampleRate)
@@ -265,10 +302,6 @@ AsioStatus SarAsioWrapper::createBuffers(
     os << "SarAsioWrapper::createBuffers(infos, " << channelCount
        << ", " << bufferSize << ", callbacks)";
     OutputDebugStringA(os.str().c_str());
-    _callbacks.tick = &SarAsioWrapper::onTickStub;
-    _callbacks.tickWithTime = nullptr;
-    _callbacks.asioMessage = callbacks->asioMessage;
-    _callbacks.sampleRateDidChange = callbacks->sampleRateDidChange;
 
     std::vector<AsioBufferInfo> physicalChannelBuffers;
     std::vector<int> physicalChannelIndices;
@@ -281,6 +314,11 @@ AsioStatus SarAsioWrapper::createBuffers(
         return AsioStatus::NotPresent;
     }
 
+    _callbacks.tick = &SarAsioWrapper::onTickStub;
+    _callbacks.tickWithTime = nullptr;
+    _callbacks.asioMessage = callbacks->asioMessage;
+    _callbacks.sampleRateDidChange = callbacks->sampleRateDidChange;
+
     status = _innerDriver->getChannels(
         &physicalInputCount, &physicalOutputCount);
 
@@ -292,6 +330,12 @@ AsioStatus SarAsioWrapper::createBuffers(
 
     if (status != AsioStatus::OK) {
         return status;
+    }
+
+    // See comment in SarAsioWrapper::getBufferSize for details.
+    if (bufferSize > (long)(sampleRate / 100.0)) {
+        OutputDebugStringA("Invalid buffer size: larger than system audio engine periodicity");
+        return AsioStatus::InvalidMode;
     }
 
     for (long i = 0; i < channelCount; ++i) {
