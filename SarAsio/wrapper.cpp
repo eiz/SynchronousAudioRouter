@@ -144,9 +144,9 @@ AsioStatus SarAsioWrapper::getBufferSize(
         return status;
     }
 
-    // Limit the maximum buffer size to 1/10th the system audio engine's
-    // periodicity if possible. This prevents audio glitches caused by the ASIO
-    // event loop not keeping up with the audio engine's event loop.
+    // Limit the maximum buffer size to the system audio engine's periodicity if
+    // possible. This prevents audio glitches caused by the ASIO event loop not
+    // keeping up with the audio engine's event loop.
     double sampleRate;
 
     status = getSampleRate(&sampleRate);
