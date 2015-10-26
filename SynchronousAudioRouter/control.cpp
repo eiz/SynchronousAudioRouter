@@ -86,7 +86,7 @@ DEFINE_KSPROPERTY_SET_TABLE(gPinPropertySets) {
 DEFINE_KSAUTOMATION_TABLE(gPinAutomation) {
     DEFINE_KSAUTOMATION_PROPERTIES(gPinPropertySets),
     DEFINE_KSAUTOMATION_METHODS_NULL,
-    DEFINE_KSAUTOMATION_EVENTS_NULL,
+    DEFINE_KSAUTOMATION_EVENTS_NULL
 };
 
 const KSPIN_INTERFACE gPinInterfaces[] = {
@@ -167,10 +167,24 @@ DEFINE_KSPROPERTY_SET_TABLE(gFilterPropertySets) {
         nullptr)
 };
 
+DEFINE_KSEVENT_TABLE(gFilterEvents) {
+    DEFINE_KSEVENT_ITEM(
+        KSEVENT_PINCAPS_FORMATCHANGE,
+        sizeof(KSEVENTDATA), 0,
+        nullptr, nullptr, nullptr)
+};
+
+DEFINE_KSEVENT_SET_TABLE(gFilterEventSets) {
+    DEFINE_KSEVENT_SET(
+        &KSEVENTSETID_PinCapsChange,
+        SIZEOF_ARRAY(gFilterEvents),
+        gFilterEvents)
+};
+
 DEFINE_KSAUTOMATION_TABLE(gFilterAutomation) {
     DEFINE_KSAUTOMATION_PROPERTIES(gFilterPropertySets),
     DEFINE_KSAUTOMATION_METHODS_NULL,
-    DEFINE_KSAUTOMATION_EVENTS_NULL,
+    DEFINE_KSAUTOMATION_EVENTS(gFilterEventSets),
 };
 
 static KSFILTER_DESCRIPTOR gFilterDescriptorTemplate = {
