@@ -787,7 +787,8 @@ NTSTATUS SarSendFormatChangeEvent(
     SAR_LOG("SarSendFormatChangeEvent");
     PVOID restartKey = nullptr;
 
-    ExAcquireFastMutex(&extension->mutex);
+    KeEnterCriticalRegion();
+    ExAcquireFastMutexUnsafe(&extension->mutex);
 
     FOR_EACH_GENERIC(
         &extension->controlContextTable, SarTableEntry,
@@ -796,7 +797,7 @@ NTSTATUS SarSendFormatChangeEvent(
         SarControlContext *controlContext =
             (SarControlContext *)tableEntry->value;
 
-        ExAcquireFastMutex(&controlContext->mutex);
+        ExAcquireFastMutexUnsafe(&controlContext->mutex);
 
         PLIST_ENTRY entry = controlContext->endpointList.Flink;
 
@@ -826,9 +827,10 @@ NTSTATUS SarSendFormatChangeEvent(
             KsReleaseDevice(extension->ksDevice);
         }
 
-        ExReleaseFastMutex(&controlContext->mutex);
+        ExReleaseFastMutexUnsafe(&controlContext->mutex);
     }
 
-    ExReleaseFastMutex(&extension->mutex);
+    ExReleaseFastMutexUnsafe(&extension->mutex);
+    KeLeaveCriticalRegion();
     return STATUS_SUCCESS;
 }
