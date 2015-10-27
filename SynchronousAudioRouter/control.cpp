@@ -781,10 +781,8 @@ VOID SarOrphanEndpoint(SarEndpoint *endpoint)
     SarReleaseEndpoint(endpoint);
 }
 
-NTSTATUS SarSendFormatChangeEvent(
-    SarDriverExtension *extension)
+NTSTATUS SarSendFormatChangeEvent(SarDriverExtension *extension)
 {
-    SAR_LOG("SarSendFormatChangeEvent");
     PVOID restartKey = nullptr;
 
     KeEnterCriticalRegion();
@@ -808,15 +806,11 @@ NTSTATUS SarSendFormatChangeEvent(
             entry = entry->Flink;
             KsAcquireDevice(extension->ksDevice);
 
-            SAR_LOG("First filter is %p",
-                KsFilterFactoryGetFirstChildFilter(endpoint->filterFactory));
-
             for (PKSFILTER filter =
                     KsFilterFactoryGetFirstChildFilter(endpoint->filterFactory);
                  filter;
                  filter = KsFilterGetNextSiblingFilter(filter)) {
 
-                SAR_LOG("Sending FORMATCHANGE for filter %p", filter);
                 KsFilterGenerateEvents(filter,
                     &KSEVENTSETID_PinCapsChange,
                     KSEVENT_PINCAPS_FORMATCHANGE,
