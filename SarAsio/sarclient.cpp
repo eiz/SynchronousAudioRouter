@@ -169,6 +169,12 @@ bool SarClient::start()
         return false;
     }
 
+    if (!openMmNotificationClient()) {
+        OutputDebugString(_T("Couldn't open MMDevice notification client"));
+        stop();
+        return false;
+    }
+
     if (!setBufferLayout()) {
         OutputDebugString(_T("Couldn't set layout"));
         stop();
@@ -190,6 +196,21 @@ bool SarClient::start()
 
 void SarClient::stop()
 {
+    if (_mmNotificationClientRegistered) {
+        _mmEnumerator->UnregisterEndpointNotificationCallback(
+            _mmNotificationClient);
+        _mmNotificationClientRegistered = false;
+    }
+
+    if (_mmNotificationClient) {
+        _mmNotificationClient->Release();
+        _mmNotificationClient = nullptr;
+    }
+
+    if (_mmEnumerator) {
+        _mmEnumerator = nullptr;
+    }
+
     if (_device != INVALID_HANDLE_VALUE) {
         CancelIoEx(_device, nullptr);
         CloseHandle(_device);
@@ -264,6 +285,33 @@ bool SarClient::openControlDevice()
     _notificationHandles.clear();
     _notificationHandles.resize(_driverConfig.endpoints.size());
     free(interfaceDetail);
+    return true;
+}
+
+bool SarClient::openMmNotificationClient()
+{
+    if (FAILED(CoCreateInstance(
+        __uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL,
+        __uuidof(IMMDeviceEnumerator), (LPVOID *)&_mmEnumerator))) {
+
+        return false;
+    }
+
+    if (FAILED(CComObject<NotificationClient>::CreateInstance(
+        &_mmNotificationClient))) {
+
+        return false;
+    }
+
+    _mmNotificationClient->AddRef();
+
+    if (FAILED(_mmEnumerator->RegisterEndpointNotificationCallback(
+        _mmNotificationClient))) {
+
+        return false;
+    }
+
+    _mmNotificationClientRegistered = true;
     return true;
 }
 
@@ -468,6 +516,45 @@ void SarClient::mux(
             }
         }
     }
+}
+
+HRESULT STDMETHODCALLTYPE SarClient::NotificationClient::OnDeviceStateChanged(
+    _In_  LPCWSTR pwstrDeviceId,
+    _In_  DWORD dwNewState)
+{
+    OutputDebugString(_T("OnDeviceStateChanged"));
+    return S_OK;
+}
+
+HRESULT STDMETHODCALLTYPE SarClient::NotificationClient::OnDeviceAdded(
+    _In_  LPCWSTR pwstrDeviceId)
+{
+    OutputDebugString(_T("OnDeviceAdded"));
+    return S_OK;
+}
+
+HRESULT STDMETHODCALLTYPE SarClient::NotificationClient::OnDeviceRemoved(
+    _In_  LPCWSTR pwstrDeviceId)
+{
+    OutputDebugString(_T("OnDeviceRemoved"));
+    return S_OK;
+}
+
+HRESULT STDMETHODCALLTYPE SarClient::NotificationClient::OnDefaultDeviceChanged(
+    _In_  EDataFlow flow,
+    _In_  ERole role,
+    _In_  LPCWSTR pwstrDefaultDeviceId)
+{
+    OutputDebugString(_T("OnDefaultDeviceChanged"));
+    return S_OK;
+}
+
+HRESULT STDMETHODCALLTYPE SarClient::NotificationClient::OnPropertyValueChanged(
+    _In_  LPCWSTR pwstrDeviceId,
+    _In_  const PROPERTYKEY key)
+{
+    OutputDebugString(_T("OnPropertyValueChanged"));
+    return S_OK;
 }
 
 } // namespace Sar

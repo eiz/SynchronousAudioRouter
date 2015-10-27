@@ -28,7 +28,7 @@ struct ATL_NO_VTABLE SarMMDeviceEnumerator:
 {
     BEGIN_COM_MAP(SarMMDeviceEnumerator)
         COM_INTERFACE_ENTRY(IMMDeviceEnumerator)
-    END_COM_MAP();
+    END_COM_MAP()
 
     DECLARE_REGISTRY_RESOURCEID(IDR_SARMMDEVICE)
 
