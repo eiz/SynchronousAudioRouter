@@ -56,6 +56,8 @@ DEFINE_GUID(GUID_DEVINTERFACE_SYNCHRONOUSAUDIOROUTER,
     FILE_DEVICE_UNKNOWN, 3, METHOD_BUFFERED, FILE_READ_DATA | FILE_WRITE_DATA)
 #define SAR_START_REGISTRY_FILTER CTL_CODE( \
     FILE_DEVICE_UNKNOWN, 4, METHOD_NEITHER, FILE_READ_DATA | FILE_WRITE_DATA)
+#define SAR_SEND_FORMAT_CHANGE_EVENT CTL_CODE( \
+    FILE_DEVICE_UNKNOWN, 5, METHOD_NEITHER, FILE_READ_DATA | FILE_WRITE_DATA)
 
 #define SAR_MAX_BUFFER_SIZE 1024 * 1024 * 128
 #define SAR_MIN_SAMPLE_SIZE 1
@@ -158,6 +160,7 @@ typedef struct SarDriverExtension
     PDRIVER_DISPATCH ksDispatchClose;
     PDRIVER_DISPATCH ksDispatchCleanup;
     PDRIVER_DISPATCH ksDispatchDeviceControl;
+    PKSDEVICE ksDevice;
     UNICODE_STRING sarInterfaceName;
     FAST_MUTEX mutex;
     RTL_GENERIC_TABLE controlContextTable;
@@ -241,6 +244,8 @@ NTSTATUS SarCreateEndpoint(
     SarCreateEndpointRequest *request);
 VOID SarOrphanEndpoint(SarEndpoint *endpoint);
 VOID SarDeleteEndpoint(SarEndpoint *endpoint);
+NTSTATUS SarSendFormatChangeEvent(
+    SarDriverExtension *extension);
 
 FORCEINLINE VOID SarRetainEndpoint(SarEndpoint *endpoint)
 {

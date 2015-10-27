@@ -33,6 +33,8 @@ NTSTATUS SarKsDeviceAdd(IN PKSDEVICE device)
         return status;
     }
 
+    extension->ksDevice = device;
+
     SAR_LOG("KSDevice was created for %p, dev interface: %wZ",
         device, &extension->sarInterfaceName);
     return status;

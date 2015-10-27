@@ -332,6 +332,9 @@ NTSTATUS SarIrpDeviceControl(PDEVICE_OBJECT deviceObject, PIRP irp)
             ExReleaseFastMutex(&extension->mutex);
             break;
         }
+        case SAR_SEND_FORMAT_CHANGE_EVENT:
+            ntStatus = SarSendFormatChangeEvent(extension);
+            break;
         default:
             SAR_LOG("(SAR) Unknown ioctl %d", ioControlCode);
             break;

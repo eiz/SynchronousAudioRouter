@@ -88,6 +88,14 @@ BOOL startRegistryFilter(HANDLE device)
         nullptr, 0, nullptr, 0, &dummy, nullptr);
 }
 
+BOOL sendFormatChangeEvent(HANDLE device)
+{
+    DWORD dummy;
+
+    return DeviceIoControl(device, SAR_SEND_FORMAT_CHANGE_EVENT,
+        nullptr, 0, nullptr, 0, &dummy, nullptr);
+}
+
 int main(int argc, char *argv[])
 {
     HDEVINFO devinfo;
@@ -146,7 +154,7 @@ int main(int argc, char *argv[])
 
     std::cout << "Opened SAR device." << std::endl;
 
-    startRegistryFilter(device);
+    sendFormatChangeEvent(device);
     while (true) {
         Sleep(1000);
     }

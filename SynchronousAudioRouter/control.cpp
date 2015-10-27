@@ -780,3 +780,55 @@ VOID SarOrphanEndpoint(SarEndpoint *endpoint)
     KsFilterFactorySetDeviceClassesState(endpoint->filterFactory, FALSE);
     SarReleaseEndpoint(endpoint);
 }
+
+NTSTATUS SarSendFormatChangeEvent(
+    SarDriverExtension *extension)
+{
+    SAR_LOG("SarSendFormatChangeEvent");
+    PVOID restartKey = nullptr;
+
+    ExAcquireFastMutex(&extension->mutex);
+
+    FOR_EACH_GENERIC(
+        &extension->controlContextTable, SarTableEntry,
+        tableEntry, restartKey) {
+
+        SarControlContext *controlContext =
+            (SarControlContext *)tableEntry->value;
+
+        ExAcquireFastMutex(&controlContext->mutex);
+
+        PLIST_ENTRY entry = controlContext->endpointList.Flink;
+
+        while (entry != &controlContext->endpointList) {
+            SarEndpoint *endpoint =
+                CONTAINING_RECORD(entry, SarEndpoint, listEntry);
+
+            entry = entry->Flink;
+            KsAcquireDevice(extension->ksDevice);
+
+            SAR_LOG("First filter is %p",
+                KsFilterFactoryGetFirstChildFilter(endpoint->filterFactory));
+
+            for (PKSFILTER filter =
+                    KsFilterFactoryGetFirstChildFilter(endpoint->filterFactory);
+                 filter;
+                 filter = KsFilterGetNextSiblingFilter(filter)) {
+
+                SAR_LOG("Sending FORMATCHANGE for filter %p", filter);
+                KsFilterGenerateEvents(filter,
+                    &KSEVENTSETID_PinCapsChange,
+                    KSEVENT_PINCAPS_FORMATCHANGE,
+                    0, nullptr,
+                    nullptr, nullptr);
+            }
+
+            KsReleaseDevice(extension->ksDevice);
+        }
+
+        ExReleaseFastMutex(&controlContext->mutex);
+    }
+
+    ExReleaseFastMutex(&extension->mutex);
+    return STATUS_SUCCESS;
+}

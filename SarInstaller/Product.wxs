@@ -94,6 +94,7 @@
               Name="SarAsio_x64.dll"
               Source="..\x64\Release\SarAsio.dll"
               KeyPath="yes"/>
+        <!--<File Id="SarCtl.exe" Source="..\x64\Release\SarCtl.exe" KeyPath="no"/>-->
         <RegistryValue Root="HKCR"
                        Key="CLSID\{0569D852-1F6A-44A7-B7B5-EFB78B66BE21}\InProcServer32"
                        Value="[#SarAsio_x64.dll]"
