@@ -98,7 +98,7 @@ private:
     HWND _hwnd;
     DriverConfig _config;
     BufferConfig _bufferConfig;
-    std::unique_ptr<SarClient> _sar;
+    std::shared_ptr<SarClient> _sar;
     CComPtr<IASIO> _innerDriver;
     std::vector<VirtualChannel> _virtualInputs;
     std::vector<VirtualChannel> _virtualOutputs;

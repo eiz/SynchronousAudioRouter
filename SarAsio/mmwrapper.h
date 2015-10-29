@@ -21,6 +21,8 @@
 
 namespace Sar {
 
+extern const PROPERTYKEY PKEY_SynchronousAudioRouter_EndpointId;
+
 struct ATL_NO_VTABLE SarMMDeviceEnumerator:
     public CComObjectRootEx<CComMultiThreadModel>,
     public CComCoClass<SarMMDeviceEnumerator, &__uuidof(MMDeviceEnumerator)>,

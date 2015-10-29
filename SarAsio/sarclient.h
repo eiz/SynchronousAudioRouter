@@ -30,7 +30,7 @@ struct BufferConfig
     std::vector<std::vector<void *>> asioBuffers;
 };
 
-struct SarClient
+struct SarClient: public std::enable_shared_from_this<SarClient>
 {
     SarClient(
         const DriverConfig& driverConfig,
@@ -38,6 +38,10 @@ struct SarClient
     void tick(long bufferIndex);
     bool start();
     void stop();
+    void updateSampleRateOnTick()
+    {
+        _updateSampleRateOnTick = true;
+    }
 
 private:
     struct NotificationHandle
@@ -69,6 +73,11 @@ private:
 
         DECLARE_NO_REGISTRY()
 
+        void setClient(std::weak_ptr<SarClient> client)
+        {
+            _client = client;
+        }
+
         virtual HRESULT STDMETHODCALLTYPE OnDeviceStateChanged(
             _In_  LPCWSTR pwstrDeviceId,
             _In_  DWORD dwNewState) override;
@@ -83,6 +92,9 @@ private:
         virtual HRESULT STDMETHODCALLTYPE OnPropertyValueChanged(
             _In_  LPCWSTR pwstrDeviceId,
             _In_  const PROPERTYKEY key) override;
+
+    private:
+        std::weak_ptr<SarClient> _client;
     };
 
     bool openControlDevice();
@@ -117,6 +129,7 @@ private:
     CComPtr<IMMDeviceEnumerator> _mmEnumerator;
     CComObject<NotificationClient> *_mmNotificationClient = nullptr;
     bool _mmNotificationClientRegistered = false;
+    std::atomic<bool> _updateSampleRateOnTick = false;
 };
 
 } // namespace Sar

@@ -15,6 +15,7 @@
 // along with SynchronousAudioRouter.  If not, see <http://www.gnu.org/licenses/>.
 
 #include "stdafx.h"
+#include "mmwrapper.h"
 #include "sarclient.h"
 #include "utility.h"
 
@@ -34,6 +35,13 @@ void SarClient::tick(long bufferIndex)
 {
     ATLASSERT(bufferIndex == 0 || bufferIndex == 1);
     bool hasUpdatedNotificationHandles = false;
+
+    if (_updateSampleRateOnTick.exchange(false)) {
+        DWORD dummy;
+
+        DeviceIoControl(_device, SAR_SEND_FORMAT_CHANGE_EVENT,
+            nullptr, 0, nullptr, 0, &dummy, nullptr);
+    }
 
     // for each endpoint
     // read isActive, generation and buffer offset/size/position
@@ -304,6 +312,7 @@ bool SarClient::openMmNotificationClient()
     }
 
     _mmNotificationClient->AddRef();
+    _mmNotificationClient->setClient(shared_from_this());
 
     if (FAILED(_mmEnumerator->RegisterEndpointNotificationCallback(
         _mmNotificationClient))) {
@@ -522,31 +531,68 @@ HRESULT STDMETHODCALLTYPE SarClient::NotificationClient::OnDeviceStateChanged(
     _In_  LPCWSTR pwstrDeviceId,
     _In_  DWORD dwNewState)
 {
-    std::ostringstream os;
+    // When a SAR endpoint is re-activated after its initial creation, its
+    // supported sample rate may be different. To force the audio engine to
+    // notice the possible format change, we listen for device state change
+    // events and tell the kernel mode driver to broadcast a
+    // KSEVENT_PINCAPS_FORMATCHANGE event, which causes the audio engine to
+    // re-query the pin capabilities. This isn't needed for newly added
+    // endpoints or non-SAR endpoints, so we filter out those events.
+    if (dwNewState != DEVICE_STATE_ACTIVE) {
+        return S_OK;
+    }
 
-    os << "OnDeviceStateChanged(" << TCHARToUTF8(pwstrDeviceId)
-       << ", " << dwNewState << ")";
-    OutputDebugStringA(os.str().c_str());
+    do {
+        if (auto client = _client.lock()) {
+            CComPtr<IMMDeviceEnumerator> mmEnumerator;
+            CComPtr<IMMDevice> device;
+            CComPtr<IPropertyStore> ps;
+            PROPVARIANT pvalue = {};
+
+            // This seems a bit shady, but MSDN's device events example
+            // initializes COM the same way. It's not clear what the ownership
+            // of the thread that delivers the IMMNotificationClient events is.
+            CoInitialize(NULL);
+
+            if (FAILED(CoCreateInstance(
+                __uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL,
+                __uuidof(IMMDeviceEnumerator), (LPVOID *)&mmEnumerator))) {
+
+                break;
+            }
+
+            if (FAILED(mmEnumerator->GetDevice(pwstrDeviceId, &device))) {
+                break;
+            }
+
+            if (FAILED(device->OpenPropertyStore(STGM_READ, &ps))) {
+                break;
+            }
+
+            if (FAILED(ps->GetValue(
+                PKEY_SynchronousAudioRouter_EndpointId, &pvalue))) {
+
+                break;
+            }
+
+            client->updateSampleRateOnTick();
+            PropVariantClear(&pvalue);
+        }
+    } while(false);
+
+    CoUninitialize();
     return S_OK;
 }
 
 HRESULT STDMETHODCALLTYPE SarClient::NotificationClient::OnDeviceAdded(
     _In_  LPCWSTR pwstrDeviceId)
 {
-    std::ostringstream os;
-
-    os << "OnDeviceAdded(" << TCHARToUTF8(pwstrDeviceId) << ")";
-    OutputDebugStringA(os.str().c_str());
     return S_OK;
 }
 
 HRESULT STDMETHODCALLTYPE SarClient::NotificationClient::OnDeviceRemoved(
     _In_  LPCWSTR pwstrDeviceId)
 {
-    std::ostringstream os;
-
-    os << "OnDeviceRemoved(" << TCHARToUTF8(pwstrDeviceId) << ")";
-    OutputDebugStringA(os.str().c_str());
     return S_OK;
 }
 
@@ -555,11 +601,6 @@ HRESULT STDMETHODCALLTYPE SarClient::NotificationClient::OnDefaultDeviceChanged(
     _In_  ERole role,
     _In_  LPCWSTR pwstrDefaultDeviceId)
 {
-    std::ostringstream os;
-
-    os << "OnDefaultDeviceChanged(" << flow << ", " << role << ", "
-       << TCHARToUTF8(pwstrDefaultDeviceId) << ")";
-    OutputDebugStringA(os.str().c_str());
     return S_OK;
 }
 
@@ -567,13 +608,6 @@ HRESULT STDMETHODCALLTYPE SarClient::NotificationClient::OnPropertyValueChanged(
     _In_  LPCWSTR pwstrDeviceId,
     _In_  const PROPERTYKEY key)
 {
-    std::ostringstream os;
-    CComBSTR bstr(key.fmtid);
-    std::wstring wstr(bstr);
-
-    os << "OnPropertyValueChanged(" << TCHARToUTF8(pwstrDeviceId)
-       << ", " << TCHARToUTF8(wstr.c_str()) << ")";
-    OutputDebugStringA(os.str().c_str());
     return S_OK;
 }
 

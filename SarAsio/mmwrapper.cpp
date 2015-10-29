@@ -26,14 +26,12 @@ typedef HRESULT STDAPICALLTYPE DllGetClassObjectFn(
 
 #define MMDEVAPI_PATH "%SystemRoot%\\System32\\MMDevApi.dll"
 
-#undef DEFINE_PROPERTYKEY
-#define DEFINE_PROPERTYKEY(name,l,w1,w2,b1,b2,b3,b4,b5,b6,b7,b8,pid) \
-    EXTERN_C const PROPERTYKEY name = {\
-        { l, w1, w2, { b1, b2,  b3,  b4,  b5,  b6,  b7,  b8 } }, pid }
-
-DEFINE_PROPERTYKEY(PKEY_SynchronousAudioRouter_EndpointId,
-    0xf4b15b6f, 0x8c3f, 0x48b6, 0xa1, 0x15, 0x42, 0xfd, 0xe1, 0x9e, 0xf0, 0x5b,
-    0);
+const PROPERTYKEY PKEY_SynchronousAudioRouter_EndpointId =
+{
+    { 0xf4b15b6f, 0x8c3f, 0x48b6,
+      { 0xa1, 0x15, 0x42, 0xfd, 0xe1, 0x9e, 0xf0, 0x5b } },
+    0
+};
 
 SarMMDeviceEnumerator::SarMMDeviceEnumerator()
 {
@@ -159,7 +157,7 @@ HRESULT STDMETHODCALLTYPE SarMMDeviceEnumerator::GetDefaultAudioEndpoint(
     for (UINT i = 0; i < deviceCount && !foundDevice; ++i) {
         CComPtr<IMMDevice> device;
         CComPtr<IPropertyStore> ps;
-        PROPVARIANT pvalue;
+        PROPVARIANT pvalue = {};
 
         if (!SUCCEEDED(devices->Item(i, &device))) {
             continue;

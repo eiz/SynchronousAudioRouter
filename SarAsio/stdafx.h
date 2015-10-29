@@ -36,6 +36,7 @@
 #include <atlcom.h>
 #include <atlstr.h>
 
+#include <atomic>
 #include <codecvt>
 #include <cstddef>
 #include <cstdint>

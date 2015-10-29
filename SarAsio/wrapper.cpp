@@ -74,7 +74,7 @@ AsioStatus SarAsioWrapper::start()
         return AsioStatus::NotPresent;
     }
 
-    _sar = std::make_unique<SarClient>(_config, _bufferConfig);
+    _sar = std::make_shared<SarClient>(_config, _bufferConfig);
 
     if (!_sar->start()) {
         OutputDebugString(_T("Failed to start SAR"));
