@@ -19,7 +19,7 @@
 
 namespace Sar {
 
-std::string TCHARToUTF8(TCHAR *ptr)
+std::string TCHARToUTF8(const TCHAR *ptr)
 {
     std::wstring_convert<std::codecvt_utf8<wchar_t>> converter;
 

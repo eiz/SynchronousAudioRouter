@@ -522,21 +522,31 @@ HRESULT STDMETHODCALLTYPE SarClient::NotificationClient::OnDeviceStateChanged(
     _In_  LPCWSTR pwstrDeviceId,
     _In_  DWORD dwNewState)
 {
-    OutputDebugString(_T("OnDeviceStateChanged"));
+    std::ostringstream os;
+
+    os << "OnDeviceStateChanged(" << TCHARToUTF8(pwstrDeviceId)
+       << ", " << dwNewState << ")";
+    OutputDebugStringA(os.str().c_str());
     return S_OK;
 }
 
 HRESULT STDMETHODCALLTYPE SarClient::NotificationClient::OnDeviceAdded(
     _In_  LPCWSTR pwstrDeviceId)
 {
-    OutputDebugString(_T("OnDeviceAdded"));
+    std::ostringstream os;
+
+    os << "OnDeviceAdded(" << TCHARToUTF8(pwstrDeviceId) << ")";
+    OutputDebugStringA(os.str().c_str());
     return S_OK;
 }
 
 HRESULT STDMETHODCALLTYPE SarClient::NotificationClient::OnDeviceRemoved(
     _In_  LPCWSTR pwstrDeviceId)
 {
-    OutputDebugString(_T("OnDeviceRemoved"));
+    std::ostringstream os;
+
+    os << "OnDeviceRemoved(" << TCHARToUTF8(pwstrDeviceId) << ")";
+    OutputDebugStringA(os.str().c_str());
     return S_OK;
 }
 
@@ -545,7 +555,11 @@ HRESULT STDMETHODCALLTYPE SarClient::NotificationClient::OnDefaultDeviceChanged(
     _In_  ERole role,
     _In_  LPCWSTR pwstrDefaultDeviceId)
 {
-    OutputDebugString(_T("OnDefaultDeviceChanged"));
+    std::ostringstream os;
+
+    os << "OnDefaultDeviceChanged(" << flow << ", " << role << ", "
+       << TCHARToUTF8(pwstrDefaultDeviceId) << ")";
+    OutputDebugStringA(os.str().c_str());
     return S_OK;
 }
 
@@ -553,7 +567,13 @@ HRESULT STDMETHODCALLTYPE SarClient::NotificationClient::OnPropertyValueChanged(
     _In_  LPCWSTR pwstrDeviceId,
     _In_  const PROPERTYKEY key)
 {
-    OutputDebugString(_T("OnPropertyValueChanged"));
+    std::ostringstream os;
+    CComBSTR bstr(key.fmtid);
+    std::wstring wstr(bstr);
+
+    os << "OnPropertyValueChanged(" << TCHARToUTF8(pwstrDeviceId)
+       << ", " << TCHARToUTF8(wstr.c_str()) << ")";
+    OutputDebugStringA(os.str().c_str());
     return S_OK;
 }
 
