@@ -167,8 +167,17 @@ AsioStatus SarAsioWrapper::getBufferSize(
         return AsioStatus::OK;
     }
 
-    while (*maxSize > maxBufferSize && *maxSize - *minSize >= *granularity) {
-        *maxSize -= *granularity;
+    // Handle power of 2 buffer sizing.
+    if (*granularity == -1) {
+        while (*maxSize > maxBufferSize && *maxSize > *minSize) {
+            *maxSize /= 2;
+        }
+    } else {
+        while (*maxSize > maxBufferSize &&
+               *maxSize - *minSize >= *granularity) {
+
+            *maxSize -= *granularity;
+        }
     }
 
     if (*preferredSize > *maxSize) {
