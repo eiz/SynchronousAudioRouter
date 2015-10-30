@@ -1,8 +1,3 @@
-# Warning
-
-This software is in early development. It is not ready for end-user consumption.
-Check back soon for updates.
-
 # Synchronous Audio Router
 
 Synchronous Audio Router is a Windows audio driver which allows you to route
@@ -52,7 +47,7 @@ they're enabled in your DAW -- most have a dialog or dropdown where you can
 select which channels are to be used.
 
 If you receive errors initializing the SAR ASIO driver, make sure you are
-running your DAW as admin. This is a requirement of the SAR alpha build and
+running your DAW as admin. This is a requirement of the SAR beta build and
 will be relaxed eventually.
 
 Note that the endpoints created by SAR are only active while your DAW is
