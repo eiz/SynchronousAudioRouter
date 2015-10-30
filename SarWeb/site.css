@@ -1,0 +1,53 @@
+body
+{
+    font-family: "Courier New";
+    background-color: white;
+}
+
+h1
+{
+    font-size: 72px;
+    margin: 0.25em auto;
+}
+
+h1::first-letter
+{
+    color: red;
+}
+
+.title-wrapper { text-align: center; }
+
+.title
+{
+    display: inline-block;
+    text-align: left;
+}
+
+.subtitle
+{
+    text-align: center;
+}
+
+.download
+{
+    text-align: center;
+    font-size: 36px;
+    color: blue;
+    display: block;
+    margin: 2em auto;
+}
+
+.main
+{
+    width: 75%;
+    margin: 0 auto;
+}
+
+.footer
+{
+    text-align: center;
+    font-size: 11px;
+    color: #222;
+    width: 75%;
+    margin: 6em auto 2em auto;
+}

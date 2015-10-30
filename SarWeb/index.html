@@ -1,0 +1,60 @@
+<!doctype html>
+<html>
+    <head>
+        <title>Synchronous Audio Router</title>
+        <link rel="stylesheet" type="text/css" href="site.css"/>
+    </head>
+    <body>
+        <a href="https://github.com/eiz/SynchronousAudioRouter"><img style="position: absolute; top: 0; right: 0; border: 0;" src="https://camo.githubusercontent.com/365986a132ccd6a44c23a9169022c0b5c890c387/68747470733a2f2f73332e616d617a6f6e6177732e636f6d2f6769746875622f726962626f6e732f666f726b6d655f72696768745f7265645f6161303030302e706e67" alt="Fork me on GitHub" data-canonical-src="https://s3.amazonaws.com/github/ribbons/forkme_right_red_aa0000.png"></a>
+
+        <div class="title-wrapper">
+            <div class="title">
+                <h1>Synchronous</h1>
+                <h1>Audio</h1>
+                <h1>Router</h1>
+                <div class="subtitle">
+                    The cause of, and solution to, all your audio problems.
+                </div>
+            </div>
+        </div>
+
+        <a class="download"
+           href="https://github.com/eiz/SynchronousAudioRouter/releases">
+            DOWNLOAD (Windows x64)
+        </a>
+
+        <div class="main">
+            <h2>ok, but what is it?</h2>
+
+            <p>Put simply, Synchronous Audio Router lets you route audio from any Windows application through a DAW (digital audio workstation) application, giving you an immense amount of control over your system's audio. You can apply sophisticated effects, routing and switching, and combine the audio streams from each individual application any way you want, producing any number of output mixes.</p>
+
+            <p>If your applications of choice don't let you select an audio device, SAR has you covered: you can define per-application routing rules which will override the Windows default audio device settings. You can even use pattern matching to define rules for groups of applications.</p>
+
+            <p>It's also fast. SAR operates inline with your existing ASIO driver, adding no additional buffer latency to your DAW, and uses WaveRT for direct low latency transport of audio between applications. This is in contrast to many other "virtual audio cable" type drivers which often require buffer sizes as large as 50-100ms to work reliably.</p>
+
+            <h2>how use?</h2>
+
+            <p>You need 3 things: the SAR driver, an ASIO driver for your sound card (if it's good, it came with one, otherwise get <a href="http://www.asio4all.com/">ASIO4ALL</a>), and DAW software. If you don't already have a DAW, use <a href="http://reaper.fm">REAPER</a>. If you do, I assume you don't need me telling you how to set it up, so have fun.</p>
+
+            <p>Once you've installed all the prerequsites, watch some videos:</p>
+
+            <ul>
+                <li><a href="#todo1">SAR tutorial part 1: Setting up REAPER</a>
+                <li><a href="#todo2">SAR tutorial part 2: Application routing rules</a>
+                <li><a href="#todo3">SAR tutorial part 3: Creating multiple mixes</a>
+                <li><a href="#todo4">SAR tutorial part 4: Creating a delay mix</a>
+                <li><a href="#todo5">SAR tutorial part 5: Equalization, compression and gating</a>
+            </ul>
+
+            <p>If you prefer text, check out the <a href="manual.html">SAR user manual</a>.
+
+            <h2>what's it cost?</h2>
+
+            <p>Nothing. SAR is free software, distributed under the GNU General Public License, version 3 or later.</p>
+        </div>
+
+        <div class="footer">
+            Synchronous Audio Router is copyright &copy; 2015 Mackenzie Straight. See <a href="https://raw.githubusercontent.com/eiz/SynchronousAudioRouter/master/COPYING.txt">COPYING.txt</a> for license details.
+        </div>
+    </body>
+</html>
