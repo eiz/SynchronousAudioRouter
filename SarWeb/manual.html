@@ -1,0 +1,34 @@
+<!doctype html>
+<html>
+    <head>
+        <title>Synchronous Audio Router - User Manual</title>
+        <link rel="stylesheet" type="text/css" href="site.css"/>
+    </head>
+    <body>
+        <div class="title-wrapper">
+            <div class="title">
+                <h1>Synchronous</h1>
+                <h1>Audio</h1>
+                <h1>Router</h1>
+                <div class="subtitle">
+                    User Manual (v0.9)
+                </div>
+            </div>
+        </div>
+
+        <div class="main">
+            <h2>Overview</h2>
+            <h2>Installation</h2>
+            <h2>Endpoint List</h2>
+            <img src="images/sar_endpoints.png" />
+            <img src="images/sar_endpoint_details.png" />
+            <h2>Application List</h2>
+            <img src="images/sar_applications.png" />
+            <h2>Application Details</h2>
+            <img src="images/sar_application_details.png" />
+            <h2>Known Issues / Limitations</h2>
+            <p>SAR is subject to the maximum latency limitation of WaveRT, which attempts to maintain a 10ms processing interval. As such, SAR limits the buffer size that's available to the ASIO host to a maximum of 1/100th of the sample rate. This imposes a latency requirement for the system that not all machines may be able to meet. If you experience buffer underruns at the maximum supported latency, try running a latency testing program such as LatencyMon to determine the cause of the delays.</p>
+            <p>The current version of SAR requires that the host application which is creating endpoints have admin privileges. This is due to some security concerns with allowing applications to dynamically create audio endpoints, as well as the shared memory approach used to implement the WaveRT "hardware registers". The limitation may be removed in the future.</p>
+        </div>
+    </body>
+</html>
