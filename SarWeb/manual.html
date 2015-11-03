@@ -25,23 +25,23 @@
             <p>Once installed, the DAW application should be <a href="#known-issues">run as admin</a>, and SAR will be available in the list of ASIO drivers. Select it and open its control panel to open the endpoint list.</p>
             <h2>Endpoint List</h2>
             <p>The endpoint list contains the most important required configuration options for SAR.</p>
-            <img src="images/sar_endpoints.png" />
+            <img class="screenshot" src="images/sar_endpoints.png" />
             <ul>
                 <li><strong>Hardware Interface</strong> - Select an ASIO driver for the physical audio interface to be used. SAR will not function without a selected ASIO driver. Click <strong>Configure</strong> to open the control panel for the physical audio interface's driver.</li>
                 <li><strong>Windows Audio Devices</strong> - used to define audio endpoints. Any number of endpoints may be created, limited only by the performance of the machine. Endpoints are dynamically created when the host application starts ASIO, so they won't be visible in Windows control panel or applications until the configuration dialog is closed. Two types of endpoint are supported: <strong>Playback</strong> endpoints appear as Windows sound outputs and are mapped to ASIO input channels. Use them to capture audio from applications. <strong>Recording</strong> endpoints appear as Windows sound inputs and are mapped to ASIO output channels. Use them to send audio to applications.</li>
             </ul>
             <p>Selecting <strong>Add</strong> opens the endpoint details dialog.</p>
-            <img src="images/sar_endpoint_details.png" />
+            <img class="screenshot" src="images/sar_endpoint_details.png" />
             <p>Enter the name, type and number of channels for the endpoint and it will be added to the end of the endpoint list. Each endpoint will be mapped to ASIO channels in the order it occurs in the endpoint list, so for example, if the physical audio interface provides 2 input and 2 output channels, the configuration above would present BGM on ASIO inputs 3 and 4, Game on inputs 5 and 6, etc, and OBS on ASIO outputs 3 and 4, while leaving the original channels of the physical interface unmodified.</p>
             <h2>Application List</h2>
             <p>The application list is used to configure per-application overrides of the default Windows audio endpoints. This is useful to isolate audio from applications which don't have a UI for selecting an audio device.</p>
-            <img src="images/sar_applications.png" />
+            <img class="screenshot" src="images/sar_applications.png" />
             <ul>
                 <li><strong>Enable per-application audio routing rules</strong> must be enabled to use this feature. If it's not enabled, applications will see the normal Windows defaults.</li>
                 <li><strong>Applications</strong> displays the defined routing rules. Each entry specifies which default endpoints should be used for one or more applications.</li>
             </ul>
             <p>Selecting <strong>Add</strong> or double clicking a list entry opens the application details dialog.</p>
-            <img src="images/sar_application_details.png" />
+            <img class="screenshot" src="images/sar_application_details.png" />
             <h2><a name="known-issues">Known Issues / Limitations</a></h2>
             <p>SAR is subject to the maximum latency limitation of WaveRT, which attempts to maintain a 10ms processing interval. As such, SAR limits the buffer size that's available to the ASIO host to a maximum of 1/100th of the sample rate. This imposes a latency requirement for the system that not all machines may be able to meet. If you experience buffer underruns at the maximum supported latency, try running a latency testing program such as LatencyMon to determine the cause of the delays.</p>
             <p>The current version of SAR requires that the host application which is creating endpoints have admin privileges. This is due to some security concerns with allowing applications to dynamically create audio endpoints, as well as the shared memory approach used to implement the WaveRT "hardware registers". The limitation may be removed in the future.</p>

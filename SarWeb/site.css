@@ -15,7 +15,7 @@ h1::first-letter
     color: red;
 }
 
-img
+img.screenshot
 {
     margin: 2em auto;
     display: block;
