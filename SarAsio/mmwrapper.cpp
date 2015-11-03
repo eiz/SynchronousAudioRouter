@@ -122,6 +122,11 @@ HRESULT STDMETHODCALLTYPE SarMMDeviceEnumerator::GetDefaultAudioEndpoint(
         return E_FAIL;
     }
 
+    if (!_config.enableApplicationRouting) {
+        return _innerEnumerator->GetDefaultAudioEndpoint(
+            dataFlow, role, ppEndpoint);
+    }
+
     CComPtr<IMMDeviceCollection> devices;
     CComPtr<IMMDevice> foundDevice;
     UINT deviceCount;

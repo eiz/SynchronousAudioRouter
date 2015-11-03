@@ -542,8 +542,8 @@ HRESULT STDMETHODCALLTYPE SarClient::NotificationClient::OnDeviceStateChanged(
         return S_OK;
     }
 
-    do {
-        if (auto client = _client.lock()) {
+    if (auto client = _client.lock()) {
+        do {
             CComPtr<IMMDeviceEnumerator> mmEnumerator;
             CComPtr<IMMDevice> device;
             CComPtr<IPropertyStore> ps;
@@ -577,10 +577,11 @@ HRESULT STDMETHODCALLTYPE SarClient::NotificationClient::OnDeviceStateChanged(
 
             client->updateSampleRateOnTick();
             PropVariantClear(&pvalue);
-        }
-    } while(false);
+        } while(false);
 
-    CoUninitialize();
+        CoUninitialize();
+    }
+
     return S_OK;
 }
 
