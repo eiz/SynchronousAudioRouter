@@ -15,6 +15,12 @@ h1::first-letter
     color: red;
 }
 
+img
+{
+    margin: 2em auto;
+    display: block;
+}
+
 .title-wrapper { text-align: center; }
 
 .title
