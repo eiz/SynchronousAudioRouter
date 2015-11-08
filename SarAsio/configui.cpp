@@ -460,6 +460,7 @@ INT_PTR ApplicationsPropertySheetPage::dialogProc(
                     _config.enableApplicationRouting =
                         Button_GetCheck(_enableRouting) == BST_CHECKED;
                     refreshControls();
+                    updateEnabled();
                     changed();
                     break;
                 case 1203: // _addButton
