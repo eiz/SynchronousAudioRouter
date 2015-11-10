@@ -210,11 +210,12 @@ NTSTATUS SarSetBufferLayout(
 {
     HANDLE section = nullptr;
     OBJECT_ATTRIBUTES sectionAttributes;
-    DECLARE_UNICODE_STRING_SIZE(sectionName, 64);
+    DECLARE_UNICODE_STRING_SIZE(sectionName, 128);
     LARGE_INTEGER sectionSize;
     NTSTATUS status;
     SIZE_T viewSize = 0;
     PVOID baseAddress = nullptr;
+    GUID sectionGuid = {};
 
     if (request->bufferSize > SAR_MAX_BUFFER_SIZE ||
         request->sampleSize < SAR_MIN_SAMPLE_SIZE ||
@@ -224,6 +225,10 @@ NTSTATUS SarSetBufferLayout(
         request->frameSize > request->bufferSize ||
         request->frameSize == 0) {
         return STATUS_INVALID_PARAMETER;
+    }
+
+    if (!NT_SUCCESS(status = ExUuidCreate(&sectionGuid))) {
+        return status;
     }
 
     ExAcquireFastMutex(&controlContext->mutex);
@@ -240,10 +245,10 @@ NTSTATUS SarSetBufferLayout(
     controlContext->minimumFrameCount = request->minimumFrameCount;
     ExReleaseFastMutex(&controlContext->mutex);
 
-    // TODO: don't be an aslr bypass
     RtlUnicodeStringPrintf(
         &sectionName,
-        L"\\BaseNamedObjects\\SynchronousAudioRouter_%p", controlContext);
+        L"\\BaseNamedObjects\\SynchronousAudioRouter_" GUID_FORMAT,
+        controlContext, GUID_VALUES(sectionGuid));
     InitializeObjectAttributes(
         &sectionAttributes, &sectionName, OBJ_KERNEL_HANDLE, nullptr, nullptr);
     sectionSize.QuadPart = controlContext->bufferSize + SAR_BUFFER_CELL_SIZE;
