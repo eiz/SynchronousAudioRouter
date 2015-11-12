@@ -388,7 +388,6 @@ AsioStatus SarAsioWrapper::createBuffers(
 
     _bufferConfig.frameSampleCount = bufferSize;
     _bufferConfig.sampleSize = 4; // TODO: handle sample types properly.
-    // TODO: asio can report non-integer sample rates. do we need to care?
     _bufferConfig.sampleRate = (int)sampleRate;
     _bufferConfig.asioBuffers.clear();
     _bufferConfig.asioBuffers.resize(_config.endpoints.size());
@@ -425,7 +424,7 @@ AsioStatus SarAsioWrapper::createBuffers(
     // just use a global reference to our wrapper.
     if (gActiveWrapper != this) {
         disposeBuffers();
-        return AsioStatus::HardwareMalfunction; // TODO: error code?
+        return AsioStatus::HardwareMalfunction;
     }
 
     return AsioStatus::OK;

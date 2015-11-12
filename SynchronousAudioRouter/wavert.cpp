@@ -179,8 +179,6 @@ NTSTATUS SarKsPinRtGetClockRegister(
     return STATUS_SUCCESS;
 }
 
-#define UNITS_PER_SECOND 10000000
-
 NTSTATUS SarKsPinRtGetHwLatency(
     PIRP irp, PKSIDENTIFIER request, PVOID data)
 {
@@ -194,23 +192,7 @@ NTSTATUS SarKsPinRtGetHwLatency(
         return STATUS_UNSUCCESSFUL;
     }
 
-    // TODO: This seems like it should be accurate, but results in weird WASAPI
-    // errors. Why?
-    //ULONG sampleRate = endpoint->owner->sampleRate;
-    //ULONG errPerSample = UNITS_PER_SECOND % sampleRate;
-    //ULONG unitsPerSample =
-    //    ((sampleRate - errPerSample) + UNITS_PER_SECOND) / sampleRate;
-
-    //latency->FifoSize =
-    //    endpoint->channelCount *
-    //    endpoint->owner->frameSize;
-    latency->ChipsetDelay = 0;
-    //latency->CodecDelay =
-    //    unitsPerSample *
-    //    (endpoint->owner->frameSize / endpoint->owner->sampleSize);
-    latency->CodecDelay = latency->FifoSize = 0;
-    //SAR_LOG("FifoSize %lu CodecDelay %lu",
-    //    latency->FifoSize, latency->CodecDelay);
+    latency->CodecDelay = latency->ChipsetDelay = latency->FifoSize = 0;
     SarReleaseEndpointAndContext(endpoint);
     return STATUS_SUCCESS;
 }
@@ -251,9 +233,6 @@ NTSTATUS SarKsPinRtGetPositionRegister(
     reg->Register =
         &context->registerFileUVA[endpoint->index].positionRegister;
     reg->Width = 32;
-    // TODO: reporting a more 'correct' accuracy here causes odd intermittent
-    // WASAPI errors, specifically AUDCLNT_E_BUFFER_SIZE_ERROR. Or at least,
-    // it seems to be implicated. Why?
     reg->Accuracy = 1;
     reg->Numerator = 0;
     reg->Denominator = 0;

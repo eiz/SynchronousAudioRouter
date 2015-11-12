@@ -410,7 +410,7 @@ void SarClient::updateNotificationHandles()
                 bytes / sizeof(SarHandleQueueResponse));
             startNewOperation = true;
         } else if (overlapped) {
-            OutputDebugStringA("Dequeued a failed operation"); // TODO
+            // Ignore failed operations. Can happen due to tick/stop races.
             startNewOperation = true;
         }
     } else {
@@ -439,7 +439,7 @@ void SarClient::updateNotificationHandles()
     }
 
     if (error != ERROR_IO_PENDING) {
-        OutputDebugStringA("SAR_REQUEST_GET_NOTIFICATION_EVENTS failed");
+        // Ignore failed operations. Can happen due to tick/stop races.
         _handleQueueStarted = false;
     }
 }
