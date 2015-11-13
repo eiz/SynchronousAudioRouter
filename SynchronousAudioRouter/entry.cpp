@@ -417,6 +417,60 @@ NTSTATUS SarFilterMMDeviceQuery(
     return status;
 }
 
+NTSTATUS SarFilterMMDeviceEnum(
+    PREG_ENUMERATE_VALUE_KEY_INFORMATION queryInfo,
+    PUNICODE_STRING wrapperRegistrationPath)
+{
+    UNREFERENCED_PARAMETER(queryInfo);
+    NTSTATUS status = STATUS_SUCCESS;
+    OBJECT_ATTRIBUTES oa;
+    HANDLE wrapperKey;
+    ULONG resultLength = 0;
+    UNICODE_STRING valueName = {};
+    PVOID buffer = nullptr;
+
+    InitializeObjectAttributes(
+        &oa, wrapperRegistrationPath, OBJ_KERNEL_HANDLE,
+        nullptr, nullptr);
+    status = ZwOpenKeyEx(&wrapperKey, KEY_ALL_ACCESS, &oa, 0);
+
+    if (!NT_SUCCESS(status)) {
+        return STATUS_SUCCESS;
+    }
+
+    buffer = ExAllocatePoolWithTag(PagedPool, queryInfo->Length, SAR_TAG);
+
+    if (!buffer) {
+        ZwClose(wrapperKey);
+        return STATUS_SUCCESS;
+    }
+
+    __try {
+        RtlCopyMemory(
+            buffer, queryInfo->KeyValueInformation, queryInfo->Length);
+        status = ZwEnumerateValueKey(
+            wrapperKey,
+            queryInfo->Index,
+            queryInfo->KeyValueInformationClass,
+            buffer,
+            queryInfo->Length,
+            &resultLength);
+        RtlCopyMemory(
+            queryInfo->KeyValueInformation, buffer, queryInfo->Length);
+        *queryInfo->ResultLength = resultLength;
+
+        if (NT_SUCCESS(status)) {
+            status = STATUS_CALLBACK_BYPASS;
+        }
+    } __except(EXCEPTION_EXECUTE_HANDLER) {
+        status = GetExceptionCode();
+    }
+
+    ExFreePool(buffer);
+    ZwClose(wrapperKey);
+    return status;
+}
+
 #define CLSID_ROOT L"\\REGISTRY\\MACHINE\\SOFTWARE\\Classes\\CLSID\\"
 #define WOW64_CLSID_ROOT \
     L"\\REGISTRY\\MACHINE\\SOFTWARE\\Classes\\Wow6432Node\\CLSID\\"
@@ -452,7 +506,7 @@ NTSTATUS SarRegistryCallback(PVOID context, PVOID argument1, PVOID argument2)
 #endif
 
     switch (notifyClass) {
-        case RegNtQueryValueKey:
+        case RegNtQueryValueKey: {
             PREG_QUERY_VALUE_KEY_INFORMATION queryInfo =
                 (PREG_QUERY_VALUE_KEY_INFORMATION)argument2;
             PCUNICODE_STRING objectName;
@@ -478,8 +532,33 @@ NTSTATUS SarRegistryCallback(PVOID context, PVOID argument1, PVOID argument2)
 
             return SarFilterMMDeviceQuery(
                 queryInfo, &wrapperRegistrationPath);
+        }
+        case RegNtEnumerateValueKey: {
+            PREG_ENUMERATE_VALUE_KEY_INFORMATION queryInfo =
+                (PREG_ENUMERATE_VALUE_KEY_INFORMATION)argument2;
+            PCUNICODE_STRING objectName;
 
-            break;
+            if (queryInfo->Index != 0) {
+                break;
+            }
+
+            status = CmCallbackGetKeyObjectID(
+                &extension->filterCookie, queryInfo->Object,
+                nullptr, &objectName);
+
+            if (!NT_SUCCESS(status)) {
+                break;
+            }
+
+            if (RtlCompareUnicodeString(
+                &mmDeviceRegistrationPath, objectName, TRUE)) {
+
+                break;
+            }
+
+            return SarFilterMMDeviceEnum(
+                queryInfo, &wrapperRegistrationPath);
+        }
     }
 
     return STATUS_SUCCESS;

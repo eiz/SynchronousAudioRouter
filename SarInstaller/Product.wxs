@@ -114,7 +114,7 @@
         <RegistryValue Root="HKCR"
                        Key="CLSID\{9FB96668-9EDD-4574-AD77-76BD89659D5D}\InProcServer32"
                        Name="ThreadingModel"
-                       Value="Apartment"
+                       Value="both"
                        Type="string"
                        Action="write" />
         <RegistryValue Root="HKCR"
