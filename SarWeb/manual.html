@@ -42,6 +42,12 @@
             </ul>
             <p>Selecting <strong>Add</strong> or double clicking a list entry opens the application details dialog.</p>
             <img class="screenshot" src="images/sar_application_details.png" />
+            <ul>
+                <li><strong>Path</strong> is either a filesystem path or regular expression, depending on whether the "Use regular expressions" option is selected. If using regular expressions, SAR performs a substring match using ECMAScript regex syntax to determine whether a path matches the rule.</li>
+                <li><strong>Running Applications</strong> displays a list of running applications. Selecting one will set the path to the location of the application's executable.</li>
+                <li>Six different default endpoint settings are provided. Most applications use the "System" role, except for VoIP applications which may use Communications.</li>
+                <li>Once a rule is defined, the applications matching the rule may need to be restarted. Make sure to apply your changes on the SAR configuration dialog before restarting your apps.</li>
+            </ul>
             <h2><a name="known-issues">Known Issues / Limitations</a></h2>
             <p>SAR is subject to the maximum latency limitation of WaveRT, which attempts to maintain a 10ms processing interval. As such, SAR limits the buffer size that's available to the ASIO host to a maximum of 1/100th of the sample rate. This imposes a latency requirement for the system that not all machines may be able to meet. If you experience buffer underruns at the maximum supported latency, try running a latency testing program such as LatencyMon to determine the cause of the delays.</p>
             <p>The current version of SAR requires that the host application which is creating endpoints have admin privileges. This is due to some security concerns with allowing applications to dynamically create audio endpoints, as well as the shared memory approach used to implement the WaveRT "hardware registers". The limitation may be removed in the future.</p>
