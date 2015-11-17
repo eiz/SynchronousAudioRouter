@@ -361,13 +361,19 @@ bool SarClient::createEndpoints()
 
     for (auto& endpoint : _driverConfig.endpoints) {
         SarCreateEndpointRequest request = {};
+        std::wostringstream wos;
 
+        wos << UTF8ToWide(endpoint.id) << L"_"
+            << endpoint.channelCount << L"_"
+            << _bufferConfig.sampleRate << L"_"
+            << _bufferConfig.sampleSize;
+        std::wstring idstr = wos.str();
         request.type = endpoint.type == EndpointType::Playback ?
             SAR_ENDPOINT_TYPE_PLAYBACK : SAR_ENDPOINT_TYPE_RECORDING;
         request.channelCount = endpoint.channelCount;
         request.index = i++;
         wcscpy_s(request.name, UTF8ToWide(endpoint.description).c_str());
-        wcscpy_s(request.id, UTF8ToWide(endpoint.id).c_str());
+        wcscpy_s(request.id, idstr.c_str());
 
         if (!DeviceIoControl(_device, SAR_CREATE_ENDPOINT,
             (LPVOID)&request, sizeof(request), nullptr, 0, &dummy, nullptr)) {
