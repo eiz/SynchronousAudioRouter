@@ -696,6 +696,8 @@ NTSTATUS SarCreateEndpoint(
         goto err_out;
     }
 
+    deviceIdAllocated = TRUE;
+
     // Windows 10 introduces a 'format cache' which at this time appears to
     // not fully invalidate itself when KSEVENT_PINCAPS_FORMATCHANGE is
     // sent. Work around this by encoding information about the sample rate,
