@@ -525,6 +525,7 @@ NTSTATUS SarCreateEndpoint(
     NTSTATUS status = STATUS_SUCCESS;
     PKSDEVICE ksDevice = KsGetDeviceForDeviceObject(device);
     BOOLEAN deviceNameAllocated = FALSE, deviceIdAllocated = FALSE;
+    RTL_OSVERSIONINFOW versionInfo = {};
     SarEndpoint *endpoint;
 
     if (request->type != SAR_ENDPOINT_TYPE_RECORDING &&
@@ -679,18 +680,43 @@ NTSTATUS SarCreateEndpoint(
     request->name[MAX_ENDPOINT_NAME_LENGTH] = '\0';
     request->id[MAX_ENDPOINT_NAME_LENGTH] = '\0';
     RtlInitUnicodeString(&endpoint->deviceName, request->name);
-    RtlInitUnicodeString(&endpoint->deviceId, request->id);
-    status = SarStringDuplicate(&endpoint->deviceName, &endpoint->deviceName);
+    status = SarStringDuplicate(
+        &endpoint->deviceName, &endpoint->deviceName);
 
     if (!NT_SUCCESS(status)) {
         goto err_out;
     }
 
     deviceNameAllocated = TRUE;
-    status = SarStringDuplicate(&endpoint->deviceId, &endpoint->deviceId);
 
-    if (!NT_SUCCESS(status)) {
-        goto err_out;
+    // Windows 10 introduces a 'format cache' which at this time appears to
+    // not fully invalidate itself when KSEVENT_PINCAPS_FORMATCHANGE is
+    // sent. Work around this by encoding information about the sample rate,
+    // channel count and sample resolution into the endpoint ID. This means
+    // that WASAPI endpoints won't be stable across changes to these
+    // parameters on Windows 10 and e.g. applications that store them as
+    // configuration may lose track of them, but that seems better than "it
+    // fully stops working until you reinstall the driver".
+    RtlGetVersion(&versionInfo);
+
+    if (versionInfo.dwMajorVersion >= 10) {
+        DECLARE_UNICODE_STRING_SIZE(deviceIdBuffer, 256);
+
+        RtlUnicodeStringPrintf(&deviceIdBuffer,
+            L"%ws_%d_%d_%d", request->id, request->channelCount,
+            controlContext->sampleRate, controlContext->sampleSize);
+        status = SarStringDuplicate(&endpoint->deviceId, &deviceIdBuffer);
+
+        if (!NT_SUCCESS(status)) {
+            goto err_out;
+        }
+    } else {
+        RtlInitUnicodeString(&endpoint->deviceId, request->id);
+        status = SarStringDuplicate(&endpoint->deviceId, &endpoint->deviceId);
+
+        if (!NT_SUCCESS(status)) {
+            goto err_out;
+        }
     }
 
     deviceIdAllocated = TRUE;
