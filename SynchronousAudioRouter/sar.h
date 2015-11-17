@@ -209,6 +209,7 @@ typedef struct SarEndpoint
     PIRP pendingIrp;
     UNICODE_STRING deviceName;
     UNICODE_STRING deviceId;
+    UNICODE_STRING deviceIdMangled;
     SarControlContext *owner;
     PKSFILTERFACTORY filterFactory;
     PKSFILTER_DESCRIPTOR filterDesc;

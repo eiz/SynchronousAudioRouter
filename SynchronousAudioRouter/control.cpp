@@ -680,6 +680,7 @@ NTSTATUS SarCreateEndpoint(
     request->name[MAX_ENDPOINT_NAME_LENGTH] = '\0';
     request->id[MAX_ENDPOINT_NAME_LENGTH] = '\0';
     RtlInitUnicodeString(&endpoint->deviceName, request->name);
+    RtlInitUnicodeString(&endpoint->deviceId, request->id);
     status = SarStringDuplicate(
         &endpoint->deviceName, &endpoint->deviceName);
 
@@ -688,6 +689,12 @@ NTSTATUS SarCreateEndpoint(
     }
 
     deviceNameAllocated = TRUE;
+    status = SarStringDuplicate(
+        &endpoint->deviceId, &endpoint->deviceId);
+
+    if (!NT_SUCCESS(status)) {
+        goto err_out;
+    }
 
     // Windows 10 introduces a 'format cache' which at this time appears to
     // not fully invalidate itself when KSEVENT_PINCAPS_FORMATCHANGE is
@@ -705,24 +712,24 @@ NTSTATUS SarCreateEndpoint(
         RtlUnicodeStringPrintf(&deviceIdBuffer,
             L"%ws_%d_%d_%d", request->id, request->channelCount,
             controlContext->sampleRate, controlContext->sampleSize);
-        status = SarStringDuplicate(&endpoint->deviceId, &deviceIdBuffer);
+        status = SarStringDuplicate(
+            &endpoint->deviceIdMangled, &deviceIdBuffer);
 
         if (!NT_SUCCESS(status)) {
             goto err_out;
         }
     } else {
-        RtlInitUnicodeString(&endpoint->deviceId, request->id);
-        status = SarStringDuplicate(&endpoint->deviceId, &endpoint->deviceId);
+        status = SarStringDuplicate(
+            &endpoint->deviceIdMangled, &endpoint->deviceId);
 
         if (!NT_SUCCESS(status)) {
             goto err_out;
         }
     }
 
-    deviceIdAllocated = TRUE;
     KsAcquireDevice(ksDevice);
     status = KsCreateFilterFactory(
-        device, endpoint->filterDesc, endpoint->deviceId.Buffer,
+        device, endpoint->filterDesc, endpoint->deviceIdMangled.Buffer,
         nullptr, KSCREATE_ITEM_FREEONSTOP,
         nullptr, nullptr, &endpoint->filterFactory);
     KsReleaseDevice(ksDevice);
@@ -797,6 +804,10 @@ VOID SarDeleteEndpoint(SarEndpoint *endpoint)
 
     if (endpoint->deviceId.Buffer) {
         SarStringFree(&endpoint->deviceId);
+    }
+
+    if (endpoint->deviceIdMangled.Buffer) {
+        SarStringFree(&endpoint->deviceIdMangled);
     }
 
     ExFreePoolWithTag(endpoint, SAR_TAG);
