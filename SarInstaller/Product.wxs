@@ -9,7 +9,7 @@
      xmlns:difx="http://schemas.microsoft.com/wix/DifxAppExtension">
 	<Product Id="*"
            Name="Synchronous Audio Router $(var.bitness)"
-           Language="1033" Version="0.10"
+           Language="1033" Version="0.11"
            Manufacturer="Many Worlds"
            UpgradeCode="8cae7fd4-4469-4cc1-ba9a-76c00fbb5e05">
 		<Package InstallerVersion="200" Compressed="yes"
