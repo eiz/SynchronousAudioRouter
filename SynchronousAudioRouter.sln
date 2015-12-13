@@ -1,7 +1,7 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio 14
-VisualStudioVersion = 14.0.23107.0
+VisualStudioVersion = 14.0.24720.0
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "SynchronousAudioRouter", "SynchronousAudioRouter\SynchronousAudioRouter.vcxproj", "{E918EA5F-86DD-4175-A879-D0C143290750}"
 EndProject
@@ -80,6 +80,7 @@ Global
 		{C13B0688-9AE1-412F-83C7-1745C303C4B3}.Release|x64.ActiveCfg = Release|x64
 		{C13B0688-9AE1-412F-83C7-1745C303C4B3}.Release|x64.Build.0 = Release|x64
 		{C13B0688-9AE1-412F-83C7-1745C303C4B3}.Release|x86.ActiveCfg = Release|x86
+		{C13B0688-9AE1-412F-83C7-1745C303C4B3}.Release|x86.Build.0 = Release|x86
 		{D7CBDD84-368E-4E50-8196-8BF372DF648E}.Debug|ARM.ActiveCfg = Debug|Win32
 		{D7CBDD84-368E-4E50-8196-8BF372DF648E}.Debug|ARM64.ActiveCfg = Debug|Win32
 		{D7CBDD84-368E-4E50-8196-8BF372DF648E}.Debug|x64.ActiveCfg = Debug|Win32

@@ -24,17 +24,27 @@
     <UIRef Id="WixUI_Minimal"/>
 
 		<Feature Id="Main" Title="Synchronous Audio Router" Level="1">
-      <ComponentRef Id="KernelDriver64"/>
-      <?if $(var.Platform) = x86 ?>
+      <?if $(var.Platform) = x64 ?>
+        <ComponentRef Id="KernelDriver64"/>
+      <?else ?>
         <ComponentRef Id="KernelDriver32"/>
       <?endif ?>
-      <ComponentRef Id="AsioDriver64"/>
-      <ComponentRef Id="AsioDriver64_32"/>
-      <!--<ComponentRef Id="AsioDriver32"/>-->
+
+      <?if $(var.Platform) = x64 ?>
+        <ComponentRef Id="AsioDriver64"/>
+        <ComponentRef Id="AsioDriver64_32"/>
+      <?else ?>
+        <ComponentRef Id="AsioDriver32"/>
+      <?endif ?>
 		</Feature>
 
-    <Binary Id="SarInstallerActions"
-            SourceFile="..\x64\Release\SarInstallerActions.dll"/>
+    <?if $(var.Platform) = x64 ?>
+      <Binary Id="SarInstallerActions"
+              SourceFile="..\x64\Release\SarInstallerActions.dll"/>
+    <?else ?>
+      <Binary Id="SarInstallerActions"
+              SourceFile="..\Release\SarInstallerActions.dll"/>
+    <?endif ?>
 
     <CustomAction Id="CreateDeviceNode"
                   BinaryKey="SarInstallerActions"
@@ -68,6 +78,7 @@
       </Directory>
     </Directory>
 
+    <?if $(var.Platform) = x64 ?>
     <DirectoryRef Id="INSTALLDIR64">
       <Component Id="KernelDriver64"
                  Guid="{48C7E358-9797-42F7-B86D-5AA1DD3E0E44}"
@@ -190,24 +201,34 @@
                        Action="write" />
       </Component>
     </DirectoryRef>
-
+    <?else ?>
     <DirectoryRef Id="INSTALLDIR">
-      <?if $(var.Platform) = x86 ?>
-        <Component Id="KernelDriver32"
-             Guid="{865DF004-18BD-448C-A63B-BF3B758CAE99}"
-             Win64="no">
-          <File Id="SynchronousAudioRouter.sys"
-                Source="..\Release\SynchronousAudioRouter.sys"
-                KeyPath="yes"/>
-        </Component>
-      <?endif ?>
-
-      <!--<Component Id="AsioDriver32"
-                 Guid="{FFBEFDDB-FBC6-4CE5-9187-267DE9BB93D9}"
+      <Component Id="KernelDriver32"
+                 Guid="{865DF004-18BD-448C-A63B-BF3B758CAE99}"
                  Win64="no">
+        <File Id="SynchronousAudioRouter.sys"
+              Name="SynchronousAudioRouter.sys"
+              Source="..\Release\SynchronousAudioRouter.sys"
+              KeyPath="yes"/>
+        <File Id="SynchronousAudioRouter.cat"
+              Name="SynchronousAudioRouter.cat"
+              Source="..\Release\SynchronousAudioRouter\SynchronousAudioRouter.cat"
+              KeyPath="no"/>
+        <File Id="SynchronousAudioRouter.inf"
+              Name="SynchronousAudioRouter.inf"
+              Source="..\Release\SynchronousAudioRouter\SynchronousAudioRouter.inf"
+              KeyPath="no"/>
+        <difx:Driver PlugAndPlayPrompt="no"/>
+      </Component>
+
+      <Component Id="AsioDriver32"
+           Guid="{FFBEFDDB-FBC6-4CE5-9187-267DE9BB93D9}"
+           Win64="no">
         <File Id="SarAsio.dll"
+              Name="SarAsio.dll"
               Source="..\Release\SarAsio.dll"
               KeyPath="yes"/>
+        <!--<File Id="SarCtl.exe" Source="..\x64\Release\SarCtl.exe" KeyPath="no"/>-->
         <RegistryValue Root="HKCR"
                        Key="CLSID\{0569D852-1F6A-44A7-B7B5-EFB78B66BE21}\InProcServer32"
                        Value="[#SarAsio.dll]"
@@ -220,6 +241,17 @@
                        Type="string"
                        Action="write" />
         <RegistryValue Root="HKCR"
+                       Key="CLSID\{9FB96668-9EDD-4574-AD77-76BD89659D5D}\InProcServer32"
+                       Value="[#SarAsio.dll]"
+                       Type="string"
+                       Action="write" />
+        <RegistryValue Root="HKCR"
+                       Key="CLSID\{9FB96668-9EDD-4574-AD77-76BD89659D5D}\InProcServer32"
+                       Name="ThreadingModel"
+                       Value="both"
+                       Type="string"
+                       Action="write" />
+        <RegistryValue Root="HKCR"
                        Key="CLSID\{0569D852-1F6A-44A7-B7B5-EFB78B66BE21}\ProgID"
                        Value="SynchronousAudioRouter.1"
                        Type="string"
@@ -229,17 +261,18 @@
                        Value="Synchronous Audio Router ASIO"
                        Type="string"
                        Action="write" />
-        <RegistryValue Root="HKLM" Key="Software\ASIO\Synchronous Audio Router"
+        <RegistryValue Root="HKLM" Key="SOFTWARE\ASIO\Synchronous Audio Router"
                        Name="CLSID" Value="{0569D852-1F6A-44A7-B7B5-EFB78B66BE21}"
                        Type="string"
                        Action="write" />
         <RegistryValue Root="HKLM"
-                       Key="Software\ASIO\Synchronous Audio Router"
+                       Key="SOFTWARE\ASIO\Synchronous Audio Router"
                        Name="Description"
                        Value="Synchronous Audio Router"
                        Type="string"
                        Action="write" />
-      </Component>-->
+      </Component>
     </DirectoryRef>
+    <?endif ?>
 	</Product>
 </Wix>
