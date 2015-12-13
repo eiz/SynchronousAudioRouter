@@ -173,6 +173,7 @@ ClientBin/
 *.publishsettings
 node_modules/
 orleans.codegen.cs
+*.opendb
 
 # RIA/Silverlight projects
 Generated_Code/
@@ -213,4 +214,3 @@ ModelManifest.xml
 
 # vim
 *.swp
-
