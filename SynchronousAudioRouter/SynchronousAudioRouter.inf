@@ -17,17 +17,17 @@ ExcludeFromSelect=*
 DefaultDestDir = 12
 
 [Manufacturer]
-%Provider%=Standard,NTamd64
+%Provider%=Standard,NT
 
-[Standard.NTamd64]
+[Standard.NT]
 %DeviceName%=SAR.Install,SW\{0BCFFA5C-E754-48CF-A783-A64C0DC0BB2C}
 
-[SAR.Install.NTamd64]
+[SAR.Install.NT]
 Include=ks.inf,kscaptur.inf
 Needs=KS.Registration,KSCAPTUR.Registration.NT
 CopyFiles=SAR.CopyFiles
 
-[SAR.Install.NTamd64.Services]
+[SAR.Install.NT.Services]
 AddService=%ServiceName%,0x00000002,SAR.Service
 
 [SAR.Service]
