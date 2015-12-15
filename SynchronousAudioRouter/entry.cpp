@@ -314,11 +314,22 @@ NTSTATUS SarIrpDeviceControl(PDEVICE_OBJECT deviceObject, PIRP irp)
             UNICODE_STRING filterAltitude;
 
             RtlUnicodeStringInit(&filterAltitude, L"360000");
-            ExAcquireFastMutex(&extension->mutex);
+            KeEnterCriticalRegion();
+            ExAcquireFastMutexUnsafe(&extension->mutex);
 
             if (extension->filterCookie.QuadPart) {
-                ExReleaseFastMutex(&extension->mutex);
+                ExReleaseFastMutexUnsafe(&extension->mutex);
+                KeLeaveCriticalRegion();
                 ntStatus = STATUS_RESOURCE_IN_USE;
+                break;
+            }
+
+            ntStatus = SarCopyProcessUser(
+                PsGetCurrentProcess(), &extension->filterUser);
+
+            if (!NT_SUCCESS(ntStatus)) {
+                ExReleaseFastMutexUnsafe(&extension->mutex);
+                KeLeaveCriticalRegion();
                 break;
             }
 
@@ -329,7 +340,8 @@ NTSTATUS SarIrpDeviceControl(PDEVICE_OBJECT deviceObject, PIRP irp)
                 extension,
                 &extension->filterCookie,
                 nullptr);
-            ExReleaseFastMutex(&extension->mutex);
+            ExReleaseFastMutexUnsafe(&extension->mutex);
+            KeLeaveCriticalRegion();
             break;
         }
         case SAR_SEND_FORMAT_CHANGE_EVENT:
@@ -361,6 +373,27 @@ VOID SarUnload(PDRIVER_OBJECT driverObject)
     if (extension->filterCookie.QuadPart) {
         CmUnRegisterCallback(extension->filterCookie);
     }
+
+    if (extension->filterUser) {
+        ExFreePool(extension->filterUser);
+    }
+}
+
+BOOL SarFilterMatchesCurrentProcess(SarDriverExtension *extension)
+{
+    PTOKEN_USER tokenUser = nullptr;
+    NTSTATUS status = SarCopyProcessUser(PsGetCurrentProcess(), &tokenUser);
+
+    if (!NT_SUCCESS(status)) {
+        return FALSE;
+    }
+
+    BOOL isMatch = RtlEqualSid(
+        extension->filterUser->User.Sid,
+        tokenUser->User.Sid);
+
+    ExFreePool(tokenUser);
+    return isMatch;
 }
 
 NTSTATUS SarFilterMMDeviceQuery(
@@ -530,6 +563,10 @@ NTSTATUS SarRegistryCallback(PVOID context, PVOID argument1, PVOID argument2)
                 break;
             }
 
+            if (!SarFilterMatchesCurrentProcess(extension)) {
+                break;
+            }
+
             return SarFilterMMDeviceQuery(
                 queryInfo, &wrapperRegistrationPath);
         }
@@ -553,6 +590,10 @@ NTSTATUS SarRegistryCallback(PVOID context, PVOID argument1, PVOID argument2)
             if (RtlCompareUnicodeString(
                 &mmDeviceRegistrationPath, objectName, TRUE)) {
 
+                break;
+            }
+
+            if (!SarFilterMatchesCurrentProcess(extension)) {
                 break;
             }
 

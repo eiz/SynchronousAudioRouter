@@ -165,6 +165,7 @@ typedef struct SarDriverExtension
     FAST_MUTEX mutex;
     RTL_GENERIC_TABLE controlContextTable;
     LARGE_INTEGER filterCookie;
+    PTOKEN_USER filterUser;
 } SarDriverExtension;
 
 typedef struct SarControlContext
@@ -407,6 +408,8 @@ NTSTATUS SarInsertTableEntry(PRTL_GENERIC_TABLE table, PVOID key, PVOID value);
 BOOLEAN SarRemoveTableEntry(PRTL_GENERIC_TABLE table, PVOID key);
 PVOID SarGetTableEntry(PRTL_GENERIC_TABLE table, PVOID key);
 VOID SarInitializeTable(PRTL_GENERIC_TABLE table);
+
+NTSTATUS SarCopyProcessUser(PEPROCESS process, PTOKEN_USER *outTokenUser);
 
 #endif // KERNEL
 

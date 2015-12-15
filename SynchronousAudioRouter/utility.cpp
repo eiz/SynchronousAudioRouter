@@ -512,3 +512,16 @@ PVOID SarGetTableEntry(PRTL_GENERIC_TABLE table, PVOID key)
 
     return nullptr;
 }
+
+NTSTATUS SarCopyProcessUser(PEPROCESS process, PTOKEN_USER *outTokenUser)
+{
+    NT_ASSERT(process);
+    NT_ASSERT(outTokenUser);
+
+    PACCESS_TOKEN token = PsReferencePrimaryToken(process);
+    NTSTATUS status = SeQueryInformationToken(
+        token, TokenUser, (PVOID *)outTokenUser);
+
+    PsDereferencePrimaryToken(token);
+    return status;
+}
