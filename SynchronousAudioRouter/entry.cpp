@@ -400,7 +400,6 @@ NTSTATUS SarFilterMMDeviceQuery(
     PREG_QUERY_VALUE_KEY_INFORMATION queryInfo,
     PUNICODE_STRING wrapperRegistrationPath)
 {
-    UNREFERENCED_PARAMETER(queryInfo);
     NTSTATUS status = STATUS_SUCCESS;
     OBJECT_ATTRIBUTES oa;
     HANDLE wrapperKey;
@@ -454,7 +453,6 @@ NTSTATUS SarFilterMMDeviceEnum(
     PREG_ENUMERATE_VALUE_KEY_INFORMATION queryInfo,
     PUNICODE_STRING wrapperRegistrationPath)
 {
-    UNREFERENCED_PARAMETER(queryInfo);
     NTSTATUS status = STATUS_SUCCESS;
     OBJECT_ATTRIBUTES oa;
     HANDLE wrapperKey;
