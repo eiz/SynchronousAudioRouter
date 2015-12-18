@@ -458,6 +458,7 @@ retry:
         PUNICODE_STRING symlink =
             KsFilterFactoryGetSymbolicLink(endpoint->filterFactory);
         PLIST_ENTRY current = entry;
+        PIRP pendingIrp = endpoint->pendingIrp;
 
         entry = endpoint->listEntry.Flink;
         RemoveEntryList(current);
@@ -499,11 +500,11 @@ out:
         if (NT_SUCCESS(status)) {
             InsertTailList(&controlContext->endpointList, &endpoint->listEntry);
         } else {
-            // TODO: delete failed endpoint
+            SarReleaseEndpoint(endpoint);
         }
 
-        endpoint->pendingIrp->IoStatus.Status = status;
-        IoCompleteRequest(endpoint->pendingIrp, IO_NO_INCREMENT);
+        pendingIrp->IoStatus.Status = status;
+        IoCompleteRequest(pendingIrp, IO_NO_INCREMENT);
     }
 
     // Someone added a new endpoint request while we were working with locks
