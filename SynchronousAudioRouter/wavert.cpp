@@ -125,7 +125,6 @@ NTSTATUS SarKsPinRtGetBufferCore(
 NTSTATUS SarKsPinRtGetBuffer(
     PIRP irp, PKSIDENTIFIER request, PVOID data)
 {
-    SAR_LOG("SarKsPinRtGetBuffer");
     PKSRTAUDIO_BUFFER_PROPERTY prop = (PKSRTAUDIO_BUFFER_PROPERTY)request;
     PKSRTAUDIO_BUFFER buffer = (PKSRTAUDIO_BUFFER)data;
 
@@ -136,7 +135,6 @@ NTSTATUS SarKsPinRtGetBuffer(
 NTSTATUS SarKsPinRtGetBufferWithNotification(
     PIRP irp, PKSIDENTIFIER request, PVOID data)
 {
-    SAR_LOG("SarKsPinRtGetBufferWithNotification");
     PKSRTAUDIO_BUFFER_PROPERTY_WITH_NOTIFICATION prop =
         (PKSRTAUDIO_BUFFER_PROPERTY_WITH_NOTIFICATION)request;
     PKSRTAUDIO_BUFFER buffer = (PKSRTAUDIO_BUFFER)data;
@@ -150,7 +148,6 @@ NTSTATUS SarKsPinRtGetClockRegister(
     PIRP irp, PKSIDENTIFIER request, PVOID data)
 {
     UNREFERENCED_PARAMETER(request);
-    SAR_LOG("SarKsPinRtGetClockRegister");
 
     NTSTATUS status;
     PKSRTAUDIO_HWREGISTER reg = (PKSRTAUDIO_HWREGISTER)data;
@@ -184,7 +181,6 @@ NTSTATUS SarKsPinRtGetHwLatency(
 {
     UNREFERENCED_PARAMETER(irp);
     UNREFERENCED_PARAMETER(request);
-    SAR_LOG("SarKsPinRtGetHwLatency");
     PKSRTAUDIO_HWLATENCY latency = (PKSRTAUDIO_HWLATENCY)data;
     SarEndpoint *endpoint = SarGetEndpointFromIrp(irp, TRUE);
 
@@ -203,7 +199,6 @@ NTSTATUS SarKsPinRtGetPacketCount(
     UNREFERENCED_PARAMETER(irp);
     UNREFERENCED_PARAMETER(request);
     UNREFERENCED_PARAMETER(data);
-    SAR_LOG("SarKsPinRtGetPacketCount");
     return STATUS_NOT_IMPLEMENTED;
 }
 
@@ -211,7 +206,6 @@ NTSTATUS SarKsPinRtGetPositionRegister(
     PIRP irp, PKSIDENTIFIER request, PVOID data)
 {
     UNREFERENCED_PARAMETER(request);
-    SAR_LOG("SarKsPinRtGetPositionRegister");
 
     NTSTATUS status;
     PKSRTAUDIO_HWREGISTER reg = (PKSRTAUDIO_HWREGISTER)data;
@@ -246,7 +240,6 @@ NTSTATUS SarKsPinRtGetPresentationPosition(
     UNREFERENCED_PARAMETER(irp);
     UNREFERENCED_PARAMETER(request);
     UNREFERENCED_PARAMETER(data);
-    SAR_LOG("SarKsPinRtGetPresentationPosition");
     return STATUS_NOT_IMPLEMENTED;
 }
 
@@ -255,7 +248,6 @@ NTSTATUS SarKsPinRtQueryNotificationSupport(
 {
     UNREFERENCED_PARAMETER(irp);
     UNREFERENCED_PARAMETER(request);
-    SAR_LOG("SarKsPinRtQueryNotificationSupport");
 
     *((BOOL *)data) = TRUE;
     return STATUS_SUCCESS;
@@ -265,7 +257,6 @@ NTSTATUS SarKsPinRtRegisterNotificationEvent(
     PIRP irp, PKSIDENTIFIER request, PVOID data)
 {
     UNREFERENCED_PARAMETER(data);
-    SAR_LOG("SarKsPinRtRegisterNotificationEvent");
     SarEndpoint *endpoint = SarGetEndpointFromIrp(irp, TRUE);
     SarEndpointRegisters regs;
     NTSTATUS status;
@@ -297,6 +288,5 @@ NTSTATUS SarKsPinRtUnregisterNotificationEvent(
     UNREFERENCED_PARAMETER(irp);
     UNREFERENCED_PARAMETER(request);
     UNREFERENCED_PARAMETER(data);
-    SAR_LOG("SarKsPinRtUnregisterNotificationEvent");
     return STATUS_NOT_IMPLEMENTED;
 }

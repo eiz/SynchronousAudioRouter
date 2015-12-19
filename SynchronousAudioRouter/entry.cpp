@@ -77,7 +77,6 @@ SarControlContext *SarCreateControlContext(PFILE_OBJECT fileObject)
 
 VOID SarDeleteControlContext(SarControlContext *controlContext)
 {
-    SAR_LOG("SarDeleteControlContext");
     while (!IsListEmpty(&controlContext->endpointList)) {
         PLIST_ENTRY entry = controlContext->endpointList.Flink;
         SarEndpoint *endpoint =
@@ -130,7 +129,6 @@ BOOLEAN SarOrphanControlContext(SarDriverExtension *extension, PIRP irp)
         return FALSE;
     }
 
-    SAR_LOG("SarOrphanControlContext");
     ExAcquireFastMutex(&controlContext->mutex);
     controlContext->orphan = TRUE;
     InitializeListHead(&orphanEndpoints);

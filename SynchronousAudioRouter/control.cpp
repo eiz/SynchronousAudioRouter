@@ -772,7 +772,6 @@ err_out:
 
 VOID SarDeleteEndpoint(SarEndpoint *endpoint)
 {
-    SAR_LOG("SarDeleteEndpoint");
     PKSDEVICE ksDevice = KsFilterFactoryGetDevice(endpoint->filterFactory);
 
     if (endpoint->filterFactory) {
@@ -818,7 +817,6 @@ VOID SarDeleteEndpoint(SarEndpoint *endpoint)
 
 VOID SarOrphanEndpoint(SarEndpoint *endpoint)
 {
-    SAR_LOG("SarOrphanEndpoint");
     ExAcquireFastMutex(&endpoint->mutex);
     endpoint->orphan = TRUE;
     ExReleaseFastMutex(&endpoint->mutex);

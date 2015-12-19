@@ -83,7 +83,6 @@ NTSTATUS SarKsPinCreate(PKSPIN pin, PIRP irp)
 {
     UNREFERENCED_PARAMETER(pin);
     UNREFERENCED_PARAMETER(irp);
-    SAR_LOG("SarKsPinCreate");
     SarEndpoint *endpoint = SarGetEndpointFromIrp(irp, TRUE);
     NTSTATUS status;
 
@@ -221,7 +220,6 @@ err_out:
 NTSTATUS SarKsPinClose(PKSPIN pin, PIRP irp)
 {
     UNREFERENCED_PARAMETER(irp);
-    SAR_LOG("SarKsPinClose");
     SarEndpoint *endpoint = (SarEndpoint *)pin->Context;
     SarEndpointRegisters regs = {};
     LIST_ENTRY toRemoveList;
@@ -291,20 +289,17 @@ NTSTATUS SarDeleteEndpointProcessContext(SarEndpointProcessContext *context)
 VOID SarKsPinReset(PKSPIN pin)
 {
     UNREFERENCED_PARAMETER(pin);
-    SAR_LOG("SarKsPinReset");
 }
 
 NTSTATUS SarKsPinConnect(PKSPIN pin)
 {
     UNREFERENCED_PARAMETER(pin);
-    SAR_LOG("SarKsPinConnect");
     return STATUS_SUCCESS;
 }
 
 VOID SarKsPinDisconnect(PKSPIN pin)
 {
     UNREFERENCED_PARAMETER(pin);
-    SAR_LOG("SarKsPinDisconnect");
 }
 
 NTSTATUS SarKsPinSetDataFormat(
@@ -349,8 +344,6 @@ NTSTATUS SarKsPinSetDataFormat(
 
 NTSTATUS SarKsPinSetDeviceState(PKSPIN pin, KSSTATE toState, KSSTATE fromState)
 {
-    SAR_LOG("SarKsPinSetDeviceState %d %d", toState, fromState);
-
     NTSTATUS status;
     SarEndpoint *endpoint = (SarEndpoint *)pin->Context;
     BOOL isActive = FALSE, needsChange = FALSE, resetPosition = FALSE;
