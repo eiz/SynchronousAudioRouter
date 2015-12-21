@@ -7,7 +7,8 @@ unique characteristics compared to similar virtual audio cable software:
 * All virtual audio streams are synchronized to a physical audio interface to
   mitigate clock drift/buffer underrun problems.
 * Allows dynamic creation of an unlimited number of Windows audio devices with
-  custom names/metadata.
+  custom names. You get exactly as many endpoints as you need with no useless
+  "Line 6" type names.
 * Allows per-app override of Windows default audio device for apps which
   don't include a way to select an audio device. Regex matching lets you set
   rules for many apps simultaneously, e.g. route every app under your steamapps
@@ -52,7 +53,9 @@ will be relaxed eventually.
 
 Note that the endpoints created by SAR are only active while your DAW is
 running and has started ASIO. They are automatically disconnected when the
-ASIO driver is closed.
+ASIO driver is closed. If you're using REAPER, make sure "Close audio device
+when stopped and application is inactive" in the Audio preferences is
+disabled.
 
 ## Windows 7 Installation Note
 
