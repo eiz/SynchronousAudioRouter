@@ -1,0 +1,88 @@
+{
+  "applications": [
+    {
+      "defaults": [
+        {
+          "id": "ep_1",
+          "role": "console",
+          "type": "playback"
+        },
+        {
+          "id": "ep_1",
+          "role": "communications",
+          "type": "playback"
+        },
+        {
+          "id": "ep_1",
+          "role": "multimedia",
+          "type": "playback"
+        }
+      ],
+      "description": "Spotify",
+      "path": "Spotify",
+      "regexMatch": true
+    },
+    {
+      "defaults": [
+        {
+          "id": "ep_3",
+          "role": "console",
+          "type": "playback"
+        },
+        {
+          "id": "ep_3",
+          "role": "communications",
+          "type": "playback"
+        },
+        {
+          "id": "ep_3",
+          "role": "multimedia",
+          "type": "playback"
+        }
+      ],
+      "description": "steam",
+      "path": "steamapps",
+      "regexMatch": true
+    }
+  ],
+  "driverClsid": "{23638883-0B8C-4324-BBD5-35C3CF1B73BF}",
+  "enableApplicationRouting": true,
+  "endpoints": [
+    {
+      "channelCount": 2,
+      "description": "BGM",
+      "id": "ep_1",
+      "type": "playback"
+    },
+    {
+      "channelCount": 2,
+      "description": "Desktop",
+      "id": "ep_2",
+      "type": "playback"
+    },
+    {
+      "channelCount": 2,
+      "description": "Game",
+      "id": "ep_3",
+      "type": "playback"
+    },
+    {
+      "channelCount": 2,
+      "description": "SFX",
+      "id": "ep_4",
+      "type": "playback"
+    },
+    {
+      "channelCount": 2,
+      "description": "Broadcast",
+      "id": "ep_5",
+      "type": "recording"
+    },
+    {
+      "channelCount": 2,
+      "description": "VoIP",
+      "id": "ep_6",
+      "type": "recording"
+    }
+  ]
+}
