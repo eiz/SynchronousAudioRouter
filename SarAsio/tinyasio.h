@@ -53,6 +53,13 @@ enum class AsioMessage : long
     Overload
 };
 
+enum AsioSampleType : long
+{
+    // ...
+    Int32LSB = 18
+    // ...
+};
+
 struct AsioClockSource
 {
     long index;

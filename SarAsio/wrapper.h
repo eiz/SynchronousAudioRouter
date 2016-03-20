@@ -105,6 +105,8 @@ private:
     AsioTickCallback *_userTick;
     AsioTickWithTimeCallback *_userTickWithTime;
     AsioCallbacks _callbacks = {};
+    AsioBool _isFakeChannelStarted[2] = {};
+    std::vector<void *> _fakeBuffers;
 };
 
 OBJECT_ENTRY_AUTO(CLSID_SarAsioWrapper, SarAsioWrapper)

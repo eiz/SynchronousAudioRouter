@@ -1,5 +1,5 @@
 // SynchronousAudioRouter
-// Copyright (C) 2015 Mackenzie Straight
+// Copyright (C) 2015, 2016 Mackenzie Straight
 //
 // This program is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
@@ -25,6 +25,8 @@
 using namespace Sar;
 
 SarAsioWrapper *gActiveWrapper;
+
+static const char kNoInterfaceSelected[] = "No Interface Selected";
 
 SarAsioWrapper::SarAsioWrapper()
 {
@@ -71,7 +73,7 @@ AsioStatus SarAsioWrapper::start()
     OutputDebugString(L"SarAsioWrapper::start");
 
     if (!_innerDriver) {
-        return AsioStatus::NotPresent;
+        return AsioStatus::OK;
     }
 
     _sar = std::make_shared<SarClient>(_config, _bufferConfig);
@@ -89,7 +91,7 @@ AsioStatus SarAsioWrapper::stop()
     OutputDebugString(L"SarAsioWrapper::stop");
 
     if (!_innerDriver) {
-        return AsioStatus::NotPresent;
+        return AsioStatus::OK;
     }
 
     _sar->stop();
@@ -101,8 +103,8 @@ AsioStatus SarAsioWrapper::getChannels(long *inputCount, long *outputCount)
     OutputDebugString(L"SarAsioWrapper::getChannels");
 
     if (!_innerDriver) {
-        *inputCount = *outputCount = 0;
-        return AsioStatus::NotPresent;
+        *inputCount = *outputCount = 1;
+        return AsioStatus::OK;
     }
 
     auto status = _innerDriver->getChannels(inputCount, outputCount);
@@ -121,8 +123,8 @@ AsioStatus SarAsioWrapper::getLatencies(long *inputLatency, long *outputLatency)
     OutputDebugString(L"SarAsioWrapper::getLatencies");
 
     if (!_innerDriver) {
-        *inputLatency = *outputLatency = 0;
-        return AsioStatus::NotPresent;
+        *inputLatency = *outputLatency = 1;
+        return AsioStatus::OK;
     }
 
     return _innerDriver->getLatencies(inputLatency, outputLatency);
@@ -134,7 +136,9 @@ AsioStatus SarAsioWrapper::getBufferSize(
     OutputDebugString(L"SarAsioWrapper::getBufferSize");
 
     if (!_innerDriver) {
-        return AsioStatus::NotPresent;
+        *minSize = *maxSize = *preferredSize = 64;
+        *granularity = -1;
+        return AsioStatus::OK;
     }
 
     auto status = _innerDriver->getBufferSize(
@@ -192,7 +196,7 @@ AsioStatus SarAsioWrapper::canSampleRate(double sampleRate)
     OutputDebugString(L"SarAsioWrapper::canSampleRate");
 
     if (!_innerDriver) {
-        return AsioStatus::NotPresent;
+        return AsioStatus::OK;
     }
 
     return _innerDriver->canSampleRate(sampleRate);
@@ -203,7 +207,8 @@ AsioStatus SarAsioWrapper::getSampleRate(double *sampleRate)
     OutputDebugString(L"SarAsioWrapper::getSampleRate");
 
     if (!_innerDriver) {
-        return AsioStatus::NotPresent;
+        *sampleRate = 48000.0;
+        return AsioStatus::OK;
     }
 
     return _innerDriver->getSampleRate(sampleRate);
@@ -214,7 +219,7 @@ AsioStatus SarAsioWrapper::setSampleRate(double sampleRate)
     OutputDebugString(L"SarAsioWrapper::setSampleRate");
 
     if (!_innerDriver) {
-        return AsioStatus::NotPresent;
+        return AsioStatus::OK;
     }
 
     return _innerDriver->setSampleRate(sampleRate);
@@ -225,7 +230,16 @@ AsioStatus SarAsioWrapper::getClockSources(AsioClockSource *clocks, long *count)
     OutputDebugString(L"SarAsioWrapper::getClockSources");
 
     if (!_innerDriver) {
-        return AsioStatus::NotPresent;
+        if (*count < 1) {
+            return AsioStatus::InvalidParameter;
+        }
+
+        clocks->index = 0;
+        clocks->channel = 0;
+        clocks->group = 0;
+        clocks->isCurrentSource = AsioBool::True;
+        strcpy_s(clocks->name, 32, kNoInterfaceSelected);
+        return AsioStatus::OK;
     }
 
     return _innerDriver->getClockSources(clocks, count);
@@ -236,7 +250,7 @@ AsioStatus SarAsioWrapper::setClockSource(long index)
     OutputDebugString(L"SarAsioWrapper::setClockSource");
 
     if (!_innerDriver) {
-        return AsioStatus::NotPresent;
+        return AsioStatus::OK;
     }
 
     return _innerDriver->setClockSource(index);
@@ -245,7 +259,9 @@ AsioStatus SarAsioWrapper::setClockSource(long index)
 AsioStatus SarAsioWrapper::getSamplePosition(int64_t *pos, int64_t *timestamp)
 {
     if (!_innerDriver) {
-        return AsioStatus::NotPresent;
+        *pos = 0;
+        *timestamp = 0;
+        return AsioStatus::OK;
     }
 
     return _innerDriver->getSamplePosition(pos, timestamp);
@@ -254,7 +270,15 @@ AsioStatus SarAsioWrapper::getSamplePosition(int64_t *pos, int64_t *timestamp)
 AsioStatus SarAsioWrapper::getChannelInfo(AsioChannelInfo *info)
 {
     if (!_innerDriver) {
-        return AsioStatus::NotPresent;
+        if (info->index != 0) {
+            return AsioStatus::NotPresent;
+        }
+
+        info->isActive = _isFakeChannelStarted[info->isInput == AsioBool::True];
+        info->group = 0;
+        info->sampleType = (long)AsioSampleType::Int32LSB;
+        strcpy_s(info->name, 32, kNoInterfaceSelected);
+        return AsioStatus::OK;
     }
 
     long inputChannels = 0, outputChannels = 0;
@@ -320,7 +344,36 @@ AsioStatus SarAsioWrapper::createBuffers(
     AsioStatus status;
 
     if (!_innerDriver) {
-        return AsioStatus::NotPresent;
+        os.clear();
+        os << "SarAsioWrapper::createBuffers: no inner driver, trying to create"
+           << " fake channels.";
+        OutputDebugStringA(os.str().c_str());
+
+        // Allow allocating a single fake channel if hardware device is not yet
+        // selected. Supports one input and one output.
+        if (channelCount > 2) {
+            return AsioStatus::InvalidMode;
+        }
+
+        for (long i = 0; i < channelCount; ++i) {
+            if (infos[i].index != 0) {
+                return AsioStatus::InvalidMode;
+            }
+        }
+
+        _fakeBuffers.clear();
+
+        for (long i = 0; i < channelCount; ++i) {
+            // Dummy channel is always Int32LSB sample type.
+            infos[i].asioBuffers[0] = calloc(bufferSize, 4);
+            infos[i].asioBuffers[1] = calloc(bufferSize, 4);
+            _isFakeChannelStarted[infos[i].isInput == AsioBool::True] =
+                AsioBool::True;
+            _fakeBuffers.push_back(infos[i].asioBuffers[0]);
+            _fakeBuffers.push_back(infos[i].asioBuffers[1]);
+        }
+
+        return AsioStatus::OK;
     }
 
     _callbacks.tick = &SarAsioWrapper::onTickStub;
@@ -435,7 +488,14 @@ AsioStatus SarAsioWrapper::disposeBuffers()
     OutputDebugString(L"SarAsioWrapper::disposeBuffers");
 
     if (!_innerDriver) {
-        return AsioStatus::NotPresent;
+        for (auto buf : _fakeBuffers) {
+            free(buf);
+        }
+
+        _fakeBuffers.clear();
+        _isFakeChannelStarted[0] = AsioBool::False;
+        _isFakeChannelStarted[1] = AsioBool::False;
+        return AsioStatus::OK;
     }
 
     stop();
