@@ -41,6 +41,9 @@ std::string LoggingPath()
         nullptr, CSIDL_APPDATA, nullptr, 0, path))) {
 
         PathAppend(path, TEXT("\\SynchronousAudioRouter\\"));
+        CreateDirectory(path, nullptr);
+        PathAppend(path, TEXT("\\logs\\"));
+        CreateDirectory(path, nullptr);
     }
 
     return TCHARToUTF8(path);
