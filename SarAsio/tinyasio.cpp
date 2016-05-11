@@ -25,15 +25,20 @@ std::vector<AsioDriver> InstalledAsioDrivers()
     std::vector<AsioDriver> result;
     HKEY asio;
     DWORD index = 0, nameSize = 256, valueSize = 256;
+    LONG err;
     TCHAR name[256], value[256];
 
-    if (!SUCCEEDED(RegOpenKeyEx(
+    LOG(INFO) << "Querying installed ASIO drivers.";
+
+    if (!SUCCEEDED(err = RegOpenKeyEx(
         HKEY_LOCAL_MACHINE, TEXT("SOFTWARE\\ASIO"), 0, KEY_READ, &asio))) {
+
+        LOG(INFO) << "Failed to open HKLM\\SOFTWARE\\ASIO: status " << err;
         return result;
     }
 
-    while (RegEnumKeyEx(
-        asio, index++, name, &nameSize, nullptr, nullptr, nullptr, nullptr) ==
+    while ((err = RegEnumKeyEx(
+        asio, index++, name, &nameSize, nullptr, nullptr, nullptr, nullptr)) ==
         ERROR_SUCCESS) {
 
         AsioDriver driver;
@@ -41,10 +46,13 @@ std::vector<AsioDriver> InstalledAsioDrivers()
         nameSize = 256;
         valueSize = 256;
 
-        if (RegGetValue(
+        if ((err = RegGetValue(
             asio, name, TEXT("CLSID"), RRF_RT_REG_SZ,
-            nullptr, value, &valueSize) != ERROR_SUCCESS) {
+            nullptr, value, &valueSize)) != ERROR_SUCCESS) {
 
+            LOG(INFO) << "Skipping key "
+                << TCHARToUTF8(name) << ": Couldn't get CLSID, error "
+                << err;
             continue;
         }
 
@@ -58,13 +66,18 @@ std::vector<AsioDriver> InstalledAsioDrivers()
             // Workaround for drivers with incomplete ASIO registration.
             // Observed with M-Audio drivers: the main (64bit) registration is
             // fine but the Wow6432Node version is missing the description.
+            LOG(INFO) << "Unable to get ASIO driver description, using key name instead.";
             driver.name = TCHARToUTF8(name);
         } else {
             driver.name = TCHARToUTF8(value);
         }
 
+        LOG(INFO) << "Found ASIO driver: " << driver.name
+            << " with CLSID " << driver.clsid;
         result.emplace_back(driver);
     }
+
+    LOG(INFO) << "Done querying ASIO drivers. Status: " << err;
 
     RegCloseKey(asio);
     return result;

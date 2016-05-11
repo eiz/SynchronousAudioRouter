@@ -17,12 +17,23 @@
 #include "stdafx.h"
 #include <initguid.h>
 #include "dllmain.h"
+#include "utility.h"
 
 SarAsioModule _AtlModule;
 HMODULE gDllModule;
 
 BOOL WINAPI DllMain(HMODULE hModule, DWORD reason, LPVOID reserved)
 {
+    if (reason == DLL_PROCESS_ATTACH) {
+        char buf[1024] = {};
+        FLAGS_log_dir = Sar::LoggingPath();
+        FLAGS_logbuflevel = -1;
+
+        GetModuleFileNameA(nullptr, buf, 1024);
+        google::InitGoogleLogging(
+            *buf ? _strdup(PathFindFileNameA(buf)) : "SarAsio");
+    }
+
     gDllModule = hModule;
     return _AtlModule.DllMain(reason, reserved);
 }

@@ -33,6 +33,8 @@ struct EndpointConfig
     std::string description;
     EndpointType type;
     int channelCount = 2;
+    bool attachPhysical = false;
+    int physicalChannelBase = 0;
 
     bool load(picojson::object& obj);
     picojson::object save();

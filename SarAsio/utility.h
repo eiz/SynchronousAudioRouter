@@ -25,6 +25,7 @@ namespace Sar {
 
 std::string TCHARToUTF8(const TCHAR *ptr);
 std::string ConfigurationPath(const std::string& name);
+std::string LoggingPath();
 std::wstring UTF8ToWide(const std::string& str);
 
 struct RunningApplication

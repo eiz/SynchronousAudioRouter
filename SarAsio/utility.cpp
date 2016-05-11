@@ -33,6 +33,19 @@ std::wstring UTF8ToWide(const std::string& str)
     return converter.from_bytes(str);
 }
 
+std::string LoggingPath()
+{
+    TCHAR path[MAX_PATH];
+
+    if (SUCCEEDED(SHGetFolderPath(
+        nullptr, CSIDL_APPDATA, nullptr, 0, path))) {
+
+        PathAppend(path, TEXT("\\SynchronousAudioRouter\\"));
+    }
+
+    return TCHARToUTF8(path);
+}
+
 std::string ConfigurationPath(const std::string& name)
 {
     TCHAR path[MAX_PATH];

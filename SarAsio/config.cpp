@@ -27,6 +27,8 @@ bool EndpointConfig::load(picojson::object& obj)
     auto poDescription = obj.find("description");
     auto poType = obj.find("type");
     auto poChannelCount = obj.find("channelCount");
+    auto poAttachPhysical = obj.find("attachPhysical");
+    auto poPhysicalChannelBase = obj.find("physicalChannelBase");
 
     if (poId == obj.end() || poDescription == obj.end() ||
         poType == obj.end() || poChannelCount == obj.end()) {
@@ -51,6 +53,17 @@ bool EndpointConfig::load(picojson::object& obj)
     id = poId->second.get<std::string>();
     description = poDescription->second.get<std::string>();
     channelCount = (int)poChannelCount->second.get<double>();
+
+    if (poAttachPhysical != obj.end() && poAttachPhysical->second.is<bool>()) {
+        attachPhysical = poAttachPhysical->second.get<bool>();
+    }
+
+    if (poPhysicalChannelBase != obj.end() &&
+        poPhysicalChannelBase->second.is<double>()) {
+
+        physicalChannelBase = (int)poPhysicalChannelBase->second.get<double>();
+    }
+
     return true;
 }
 
@@ -64,6 +77,14 @@ picojson::object EndpointConfig::save()
         type == EndpointType::Recording ? "recording" : "playback")));
     result.insert(std::make_pair("channelCount",
         picojson::value(double(channelCount))));
+
+    if (attachPhysical) {
+        result.insert(std::make_pair("attachPhysical",
+            picojson::value(attachPhysical)));
+        result.insert(std::make_pair("physicalChannelBase",
+            picojson::value(double(physicalChannelBase))));
+    }
+
     return result;
 }
 
