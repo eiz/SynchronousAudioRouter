@@ -32,6 +32,7 @@ BOOL WINAPI DllMain(HMODULE hModule, DWORD reason, LPVOID reserved)
         GetModuleFileNameA(nullptr, buf, 1024);
         google::InitGoogleLogging(
             *buf ? _strdup(PathFindFileNameA(buf)) : "SarAsio");
+        LOG(INFO) << "Initializing SarAsio.";
     }
 
     gDllModule = hModule;

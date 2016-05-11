@@ -150,11 +150,7 @@ void SarClient::tick(long bufferIndex)
                     _registers[i].positionRegister = nextPositionRegister;
 
                     if (!SetEvent(evt)) {
-                        auto error = GetLastError();
-                        std::ostringstream os;
-
-                        os << "SetEvent error " << error;
-                        OutputDebugStringA(os.str().c_str());
+                        LOG(ERROR) << "SetEvent error " << GetLastError();
                     }
                 } else {
                     for (int ti = 0; ti < ntargets; ++ti) {
@@ -173,30 +169,30 @@ void SarClient::tick(long bufferIndex)
 bool SarClient::start()
 {
     if (!openControlDevice()) {
-        OutputDebugString(_T("Couldn't open control device"));
+        LOG(ERROR) << "Couldn't open control device";
         return false;
     }
 
     if (!openMmNotificationClient()) {
-        OutputDebugString(_T("Couldn't open MMDevice notification client"));
+        LOG(ERROR) << "Couldn't open MMDevice notification client";
         stop();
         return false;
     }
 
     if (!setBufferLayout()) {
-        OutputDebugString(_T("Couldn't set layout"));
+        LOG(ERROR) << "Couldn't set layout";
         stop();
         return false;
     }
 
     if (!createEndpoints()) {
-        OutputDebugString(_T("Couldn't create endpoints"));
+        LOG(ERROR) << "Couldn't create endpoints";
         stop();
         return false;
     }
 
     if (_driverConfig.enableApplicationRouting && !enableRegistryFilter()) {
-        OutputDebugString(_T("Couldn't enable registry filter"));
+        LOG(ERROR) << "Couldn't enable registry filter";
     }
 
     return true;
@@ -372,11 +368,8 @@ bool SarClient::createEndpoints()
         if (!DeviceIoControl(_device, SAR_CREATE_ENDPOINT,
             (LPVOID)&request, sizeof(request), nullptr, 0, &dummy, nullptr)) {
 
-            std::ostringstream os;
-
-            os << "Endpoint creation for " << endpoint.description
+            LOG(ERROR) << "Endpoint creation for " << endpoint.description
                << " failed.";
-            OutputDebugStringA(os.str().c_str());
             return false;
         }
     }

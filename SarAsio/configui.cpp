@@ -398,7 +398,7 @@ void EndpointsPropertySheetPage::updateEpDialogConfig()
 INT_PTR EndpointsPropertySheetPage::epDialogProc(
     HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam)
 {
-    OutputDebugStringA("EndpointsPropertySheetPage::addEndpointDialogProc");
+    LOG(INFO) << "EndpointsPropertySheetPage::addEndpointDialogProc";
 
     switch (msg) {
         case WM_INITDIALOG:
