@@ -15,6 +15,7 @@
 // along with SynchronousAudioRouter.  If not, see <http://www.gnu.org/licenses/>.
 
 #include "stdafx.h"
+#include <tchar.h>
 #include <initguid.h>
 #include <devpkey.h>
 
@@ -22,6 +23,8 @@
 #define HARDWARE_ID L"SW\\{0BCFFA5C-E754-48CF-A783-A64C0DC0BB2C}\0"
 #define CLASS_GUID L"{4d36e96c-e325-11ce-bfc1-08002be10318}"
 #define CLASS_NAME L"MEDIA"
+
+#define ALL_USERS_ACL L"D:P(A;;GA;;;AU)"
 
 UINT __stdcall CreateDeviceNode(MSIHANDLE hInstall)
 {
@@ -31,6 +34,8 @@ UINT __stdcall CreateDeviceNode(MSIHANDLE hInstall)
     HDEVINFO deviceInfoSet = INVALID_HANDLE_VALUE;
     SP_DEVINFO_DATA deviceInfoData = {};
     WCHAR *hardwareId = HARDWARE_ID;
+    TCHAR requireAdminBuf[32] = {};
+    DWORD requireAdminBufSz = sizeof(requireAdminBuf);
 
     hr = WcaInitialize(hInstall, "CreateDeviceNode");
 
@@ -64,6 +69,23 @@ UINT __stdcall CreateDeviceNode(MSIHANDLE hInstall)
         WcaLog(LOGMSG_VERBOSE, "Set SPDRP_HARDWAREID failed.");
         SetupDiDestroyDeviceInfoList(deviceInfoSet);
         return WcaFinalize(ERROR_INSTALL_FAILURE);
+    }
+
+    if (!MsiGetProperty(
+        hInstall, TEXT("CustomActionData"),
+        requireAdminBuf, &requireAdminBufSz)) {
+
+        WcaLog(LOGMSG_STANDARD, "REQUIREADMINUSER = %S", requireAdminBuf);
+
+        if (!_tcscmp(requireAdminBuf, TEXT("Any")) &&
+            !SetupDiSetDeviceRegistryProperty(deviceInfoSet, &deviceInfoData,
+                SPDRP_SECURITY_SDS, (BYTE *)ALL_USERS_ACL,
+                (lstrlen(ALL_USERS_ACL) + 1) * sizeof(TCHAR))) {
+
+            WcaLog(LOGMSG_VERBOSE, "Set SPDRP_SECURITY_SDS failed.");
+            SetupDiDestroyDeviceInfoList(deviceInfoSet);
+            return WcaFinalize(ERROR_INSTALL_FAILURE);
+        }
     }
 
     if (!SetupDiCallClassInstaller(
@@ -134,7 +156,7 @@ UINT __stdcall RemoveDeviceNode(MSIHANDLE hInstall)
         BOOL found = FALSE;
 
         for (WCHAR *p = buffer;
-        p < p + requiredSize / sizeof(WCHAR) && *p;
+            p < p + requiredSize / sizeof(WCHAR) && *p;
             p += lstrlen(p) + 2) {
 
             if (!lstrcmpi(p, HARDWARE_ID)) {

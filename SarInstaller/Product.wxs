@@ -9,19 +9,22 @@
      xmlns:difx="http://schemas.microsoft.com/wix/DifxAppExtension">
 	<Product Id="*"
            Name="Synchronous Audio Router $(var.bitness)"
-           Language="1033" Version="0.12"
+           Language="1033" Version="0.13"
            Manufacturer="Many Worlds"
            UpgradeCode="8cae7fd4-4469-4cc1-ba9a-76c00fbb5e05">
 		<Package InstallerVersion="200" Compressed="yes"
              InstallScope="perMachine" />
 
+    <Property Id="REQUIREADMINUSER" Value="Any"/>
     <WixVariable Id="WixUILicenseRtf" Value="license.rtf" />
     <MajorUpgrade
       AllowSameVersionUpgrades="yes"
       Schedule="afterInstallInitialize"
       DowngradeErrorMessage="A newer version of [ProductName] is already installed." />
 		<MediaTemplate EmbedCab="yes" />
-    <UIRef Id="WixUI_Minimal"/>
+    <UIRef Id="WixUI_Common"/>
+    <UIRef Id="WixUI_ErrorProgressText"/>
+    <UIRef Id="SarUi"/>
 
 		<Feature Id="Main" Title="Synchronous Audio Router" Level="1">
       <?if $(var.Platform) = x64 ?>
@@ -46,6 +49,10 @@
               SourceFile="..\Release\SarInstallerActions.dll"/>
     <?endif ?>
 
+    <CustomAction Id="CreateDeviceNode.SetProperty"
+                  Return="check"
+                  Property="CreateDeviceNode"
+                  Value="[REQUIREADMINUSER]"/>
     <CustomAction Id="CreateDeviceNode"
                   BinaryKey="SarInstallerActions"
                   DllEntry="CreateDeviceNode"
@@ -61,7 +68,10 @@
                   Return="check"/>
 
     <InstallExecuteSequence>
-      <Custom Action="CreateDeviceNode" After="InstallFiles">
+      <Custom Action="CreateDeviceNode.SetProperty" After="InstallFiles">
+        NOT Installed AND NOT REMOVE
+      </Custom>
+      <Custom Action="CreateDeviceNode" After="CreateDeviceNode.SetProperty">
         NOT Installed AND NOT REMOVE
       </Custom>
       <Custom Action="RemoveDeviceNode" Before="RemoveFiles">

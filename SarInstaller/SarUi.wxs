@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+	<Fragment>
+    <UI Id="SarUi">
+      <TextStyle Id="WixUI_Font_Normal" FaceName="Tahoma" Size="8"/>
+      <TextStyle Id="WixUI_Font_Title" FaceName="Tahoma" Size="8" Bold="yes"/>
+      <TextStyle Id="WixUI_Font_Bigger" FaceName="Verdana" Size="13" Bold="yes"/>
+      <Property Id="DefaultUIFont" Value="WixUI_Font_Normal"/>
+
+      <!-- Dialogs directly used by the installer system. -->
+      <DialogRef Id="ErrorDlg" />
+      <DialogRef Id="FatalError" />
+      <DialogRef Id="CancelDlg" />
+      <DialogRef Id="FilesInUse" />
+      <DialogRef Id="MsiRMFilesInUse" />
+      <DialogRef Id="PrepareDlg" />
+      <DialogRef Id="ProgressDlg" />
+      <DialogRef Id="ResumeDlg" />
+      <DialogRef Id="UserExit" />
+
+      <Dialog Id="RequireAdminDlg" Width="370" Height="270" Title="[ProductName] Setup">
+        <Control Id="BannerBitmap" Type="Bitmap" X="0" Y="0" Width="370" Height="44" TabSkip="no" Text="WixUI_Bmp_Banner" />
+        <Control Id="BannerLine" Type="Line" X="0" Y="44" Width="370" Height="0" />
+        <Control Id="BottomLine" Type="Line" X="0" Y="234" Width="370" Height="0" />
+
+        <Control Id="Title" Type="Text" X="15" Y="6" Width="200" Height="15" Transparent="yes" NoPrefix="yes" Text="{\WixUI_Font_Title}Security Options" />
+
+        <Control Type="RadioButtonGroup" Property="REQUIREADMINUSER" Id="RadioButtonGroup" Width="310" Height="55" X="20" Y="60">
+          <RadioButtonGroup Property="REQUIREADMINUSER">
+            <RadioButton Text="Allow any user to access SAR. More user friendly, but somewhat less secure."
+                         Value="Any" Height="15" Width="310" X="0" Y="0"/>
+            <RadioButton Text="Require Administrator privileges to access SAR. More secure, but your DAW software will need to be run with admin rights. Choose this option if your computer is shared by multiple users or you're paranoid about security."
+                         Value="Admin" Height="30" Width="310" X="0" Y="20"/>
+          </RadioButtonGroup>
+        </Control>
+        <Control Type="PushButton" Id="Back" Width="56" Height="17" X="180" Y="243" Text="!(loc.WixUIBack)" />
+        <Control Type="PushButton" Id="Install" Width="56" Height="17" X="236" Y="243" ElevationShield="yes" Default="yes" Text="!(loc.WelcomeEulaDlgInstall)" />
+        <Control Type="PushButton" Id="Cancel" Width="56" Height="17" X="304" Y="243" Cancel="yes" Text="!(loc.WixUICancel)">
+          <Publish Event="SpawnDialog" Value="CancelDlg">1</Publish>
+        </Control>
+      </Dialog>
+
+      <Publish Dialog="WelcomeDlg" Control="Next" Event="NewDialog" Value="LicenseAgreementDlg">NOT Installed AND NOT Patch</Publish>
+      <Publish Dialog="WelcomeDlg" Control="Next" Event="NewDialog" Value="VerifyReadyDlg">Installed AND PATCH</Publish>
+      <Publish Dialog="LicenseAgreementDlg" Control="Next" Event="NewDialog" Value="RequireAdminDlg">LicenseAccepted = "1"</Publish>
+      <Publish Dialog="LicenseAgreementDlg" Control="Back" Event="NewDialog" Value="WelcomeDlg">1</Publish>
+      <Publish Dialog="RequireAdminDlg" Control="Back" Event="NewDialog" Value="LicenseAgreementDlg">1</Publish>
+      <Publish Dialog="RequireAdminDlg" Control="Install" Event="EndDialog" Value="Return">1</Publish>
+      <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog" Value="WelcomeDlg">1</Publish>
+      <Publish Dialog="ExitDialog" Control="Finish" Event="EndDialog" Value="Return" Order="999">1</Publish>
+
+      <InstallUISequence>
+        <Show Dialog="WelcomeDlg" After="CostFinalize"/>
+      </InstallUISequence>
+    </UI>
+	</Fragment>
+</Wix>
