@@ -27,12 +27,18 @@ namespace Sar {
 
 struct CastPacketHeader
 {
-    uint32_t length;
+    uint64_t session;
     uint32_t tag;
+    uint32_t length;
     uint8_t type;
 };
 
 struct CastStatusRequestPacket
+{
+    CastPacketHeader header;
+};
+
+struct CastStatusResponsePacket
 {
     CastPacketHeader header;
 };

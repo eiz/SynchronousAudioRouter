@@ -18,6 +18,12 @@
 #include "network.h"
 
 // todo list / thoughts
+// - biggest problem right now: worst case latency measurement.
+//     - ping is generally within 300us on my test setup but I've seen spikes up
+//       to 10ms. Not acceptable. Create RIO UDP test program to get more
+//       realistic results. There's absolutely no reason we should see latencies
+//       that high other than software being stupid.
+//     - may want to use dedicated NICs for this, too.
 // - winsock initialization
 // - rio initialization
 // - message send routines
@@ -58,3 +64,55 @@
 //       test target), both send and receive, with 64 samples @ 96KHz (0.6ms).
 //     - Maximum of 1 extra buffer of latency.
 //     - Support Windows 8+ (RIO required).
+
+// protocol
+// session based?
+//  - start session
+//  - stop session
+//  - open interface
+//  - close interface
+//  - request status
+// udp only, or tcp control session?
+//  - I wish sctp worked irl =(
+//  - udp only with retry on control packets is prob. fine
+// crypto? secret box with psk
+//  - sodium
+//  - session id + tag = nonce? only 8 bytes randomness... 'eh.
+// acknowledgements
+//  - if slave receives a control message with a tag/session it already acked,
+//    it should re-send its ack
+//  - all control messages are idempotent
+//
+// master:
+//  -> request status
+//     if running session, send stop session, wait for ack
+//  -> start session
+//     include buffer size, sample rate, wait for ack
+//  -> new endpoint 0..n
+//     wait for ack
+//  -> open interface
+//     wait for ack
+//
+//  on asio tick:
+//    - execute SarClient tick as usual
+//    - for each remote playback endpoint:
+//      if a buffer packet for the relevant offset has been received, copy it
+//      into the target asio buffer, otherwise fill with 0
+//    - for each remote recording endpoint:
+//      send a buffer packet for the associated offset using the contents of the
+//      corresponding ASIO buffer
+//    - send a tick packet corresponding to the next ASIO tick.
+//    - execute underlying ASIO tick
+//
+//
+// slave:
+// passive, always driven by packet reception
+//
+// <- request status
+// <- start session
+// <- stop session
+// <- new endpoint
+// <- open interface
+// <- close interface
+// <- tick
+// <- buffer
