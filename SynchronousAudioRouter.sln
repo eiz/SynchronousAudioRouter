@@ -1,7 +1,7 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio 14
-VisualStudioVersion = 14.0.24720.0
+VisualStudioVersion = 14.0.25420.1
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "SynchronousAudioRouter", "SynchronousAudioRouter\SynchronousAudioRouter.vcxproj", "{E918EA5F-86DD-4175-A879-D0C143290750}"
 EndProject
@@ -17,6 +17,8 @@ Project("{930C7802-8A8C-48F9-8165-68863BCCD9DD}") = "SarInstaller", "SarInstalle
 	EndProjectSection
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "SarInstallerActions", "SarInstallerActions\SarInstallerActions.vcxproj", "{D7CBDD84-368E-4E50-8196-8BF372DF648E}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "SarCast", "SarCast\SarCast.vcxproj", "{35D86344-62D3-4C3A-A97B-0B02CE1F4209}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -95,6 +97,18 @@ Global
 		{D7CBDD84-368E-4E50-8196-8BF372DF648E}.Release|x86.ActiveCfg = Release|Win32
 		{D7CBDD84-368E-4E50-8196-8BF372DF648E}.Release|x86.Build.0 = Release|Win32
 		{D7CBDD84-368E-4E50-8196-8BF372DF648E}.Release|x86.Deploy.0 = Release|Win32
+		{35D86344-62D3-4C3A-A97B-0B02CE1F4209}.Debug|ARM.ActiveCfg = Debug|Win32
+		{35D86344-62D3-4C3A-A97B-0B02CE1F4209}.Debug|ARM64.ActiveCfg = Debug|Win32
+		{35D86344-62D3-4C3A-A97B-0B02CE1F4209}.Debug|x64.ActiveCfg = Debug|x64
+		{35D86344-62D3-4C3A-A97B-0B02CE1F4209}.Debug|x64.Build.0 = Debug|x64
+		{35D86344-62D3-4C3A-A97B-0B02CE1F4209}.Debug|x86.ActiveCfg = Debug|Win32
+		{35D86344-62D3-4C3A-A97B-0B02CE1F4209}.Debug|x86.Build.0 = Debug|Win32
+		{35D86344-62D3-4C3A-A97B-0B02CE1F4209}.Release|ARM.ActiveCfg = Release|Win32
+		{35D86344-62D3-4C3A-A97B-0B02CE1F4209}.Release|ARM64.ActiveCfg = Release|Win32
+		{35D86344-62D3-4C3A-A97B-0B02CE1F4209}.Release|x64.ActiveCfg = Release|x64
+		{35D86344-62D3-4C3A-A97B-0B02CE1F4209}.Release|x64.Build.0 = Release|x64
+		{35D86344-62D3-4C3A-A97B-0B02CE1F4209}.Release|x86.ActiveCfg = Release|Win32
+		{35D86344-62D3-4C3A-A97B-0B02CE1F4209}.Release|x86.Build.0 = Release|Win32
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

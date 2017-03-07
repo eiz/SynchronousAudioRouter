@@ -19,6 +19,7 @@
 
 #include "config.h"
 #include "sarclient.h"
+#include "network.h"
 #include "tinyasio.h"
 
 namespace Sar {
@@ -99,6 +100,7 @@ private:
     DriverConfig _config;
     BufferConfig _bufferConfig;
     std::shared_ptr<SarClient> _sar;
+    std::shared_ptr<SarCastMaster> _castMaster;
     CComPtr<IASIO> _innerDriver;
     std::vector<VirtualChannel> _virtualInputs;
     std::vector<VirtualChannel> _virtualOutputs;
