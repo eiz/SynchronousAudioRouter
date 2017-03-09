@@ -7,6 +7,7 @@ static uint8_t gData[1024*1024];
 static RIO_BUFFERID gBufferId;
 static HANDLE gIocp;
 static LARGE_INTEGER gPerfFreq;
+static double gPerfFreqUs;
 static RIO_RQ gRq;
 
 static RIO_CQ gSendCq;
@@ -22,12 +23,19 @@ static int gIterationsLeft = 10000;
 static void clientLoop(const char *addr);
 static void serverLoop();
 
+#ifdef DEBUG_LOG
+#define dprintf printf
+#else
 #define dprintf(...)
+#endif
 
 int main(int argc, const char **argv)
 {
     WSADATA wsaData;
     bool isClient = argc > 1;
+
+    setvbuf(stdout, 0, _IONBF, 0);
+    setvbuf(stderr, 0, _IONBF, 0);
 
     if (!SetPriorityClass(GetCurrentProcess(), REALTIME_PRIORITY_CLASS)) {
         fprintf(stderr, "Unable to set realtime priority class.\r\n");
@@ -44,7 +52,7 @@ int main(int argc, const char **argv)
         return 1;
     }
 
-    gPerfFreq.QuadPart /= 1000000;
+    gPerfFreqUs = (double)gPerfFreq.QuadPart / 1000000.0;
 
     if (WSAStartup(MAKEWORD(2,2), &wsaData)) {
         fprintf(stderr, "Unable to initialize winsock.\r\n");
@@ -195,8 +203,8 @@ static void clientLoop(const char *addr)
                 dprintf("recv complete\r\n");
                 recvComplete = true;
                 QueryPerformanceCounter(&endQpc);
-                uint64_t latency =
-                    (endQpc.QuadPart - startQpc.QuadPart) / gPerfFreq.QuadPart;
+                uint64_t latency = (uint64_t)(
+                    (endQpc.QuadPart - startQpc.QuadPart) / gPerfFreqUs);
 
                 if (latency > worstCaseLatency && index > 1) {
                     printf("worst case %08llX: %lldus\r\n", index, latency);
@@ -261,7 +269,9 @@ static void serverLoop()
                 dprintf("send complete\r\n");
                 sendComplete = true;
             } else if (didRecv) {
+#ifdef DEBUG_LOG
                 char nodeBuf[256], svcBuf[256];
+#endif
                 uint64_t index;
 
                 memcpy(&index, gData + recvData.Offset, sizeof(uint64_t));
@@ -276,10 +286,13 @@ static void serverLoop()
                     gData + sendAddress.Offset,
                     gData + recvAddress.Offset,
                     sendAddress.Length);
+
+#ifdef DEBUG_LOG
                 getnameinfo(
                     (SOCKADDR *)(gData + sendAddress.Offset),
                     sizeof(SOCKADDR_INET),
                     nodeBuf, sizeof(nodeBuf), svcBuf, sizeof(svcBuf), 0);
+#endif
 
                 // Re-arm receive before sending response.
                 if (!gRio.RIOReceiveEx(
