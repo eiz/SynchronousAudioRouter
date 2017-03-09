@@ -24,6 +24,13 @@
 //       realistic results. There's absolutely no reason we should see latencies
 //       that high other than software being stupid.
 //     - may want to use dedicated NICs for this, too.
+//     - The best result I've been able to achieve so far with my RioPing test
+//       is average latency of 120us, but worst case in the 1000-2000us range,
+//       between 2 hosts either directly connected or connected via a switch.
+//       That's really inadequate. Without giving the rioping processes realtime
+//       priority it's drastically worse, of course. On the ping server machine
+//       I am seeing some DPC execution times in the 250us range, but no
+//       smoking gun just yet. Going to try a full kernel bypass test on Linux.
 // - winsock initialization
 // - rio initialization
 // - message send routines

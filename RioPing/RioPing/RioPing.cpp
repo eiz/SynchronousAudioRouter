@@ -8,6 +8,7 @@ static RIO_BUFFERID gBufferId;
 static HANDLE gIocp;
 static LARGE_INTEGER gPerfFreq;
 static double gPerfFreqUs;
+static uint64_t gWorstCaseLatency;
 static RIO_RQ gRq;
 
 static RIO_CQ gSendCq;
@@ -18,7 +19,8 @@ static RIO_CQ gRecvCq;
 static RIO_NOTIFICATION_COMPLETION gRecvNotify;
 static OVERLAPPED gRecvOverlapped;
 
-static int gIterationsLeft = 10000;
+static int gIterations = 100000;
+static int gIterationsLeft = gIterations;
 
 static void clientLoop(const char *addr);
 static void serverLoop();
@@ -120,8 +122,15 @@ int main(int argc, const char **argv)
     }
 
     if (isClient) {
+        LARGE_INTEGER start, end;
         printf("Starting ping client.\r\n");
+        QueryPerformanceCounter(&start);
         clientLoop(argv[1]);
+        QueryPerformanceCounter(&end);
+
+        printf("Average latency: %lldus\r\n", (uint64_t)(
+            (end.QuadPart - start.QuadPart) / gPerfFreqUs / gIterations));
+        printf("Worst case latency: %lldus\r\n", gWorstCaseLatency);
     } else {
         printf("Starting ping server.\r\n");
         serverLoop();
@@ -158,7 +167,6 @@ static void clientLoop(const char *addr)
         gBufferId, 2 * sizeof(uint64_t), sizeof(SOCKADDR_INET)
     };
     RIO_BUF recvData = { gBufferId, sizeof(uint64_t), sizeof(uint64_t) };
-    uint64_t worstCaseLatency = 0;
     LARGE_INTEGER startQpc, endQpc;
 
     target.sin_family = AF_INET;
@@ -214,9 +222,9 @@ static void clientLoop(const char *addr)
                 uint64_t latency = (uint64_t)(
                     (endQpc.QuadPart - startQpc.QuadPart) / gPerfFreqUs);
 
-                if (latency > worstCaseLatency && index > 1) {
+                if (latency > gWorstCaseLatency) {
                     printf("worst case %08llX: %lldus\r\n", index, latency);
-                    worstCaseLatency = latency;
+                    gWorstCaseLatency = latency;
                 }
             }
         }
