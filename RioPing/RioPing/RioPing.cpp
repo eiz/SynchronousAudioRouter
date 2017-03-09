@@ -195,7 +195,8 @@ static void clientLoop(const char *addr)
                 dprintf("recv complete\r\n");
                 recvComplete = true;
                 QueryPerformanceCounter(&endQpc);
-                uint64_t latency = endQpc.QuadPart - startQpc.QuadPart;
+                uint64_t latency =
+                    (endQpc.QuadPart - startQpc.QuadPart) / gPerfFreq.QuadPart;
 
                 if (latency > worstCaseLatency && index > 1) {
                     printf("worst case %08llX: %lldus\r\n", index, latency);
