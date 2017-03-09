@@ -111,7 +111,8 @@ int main(int argc, const char **argv)
         return 1;
     }
 
-    gRq = gRio.RIOCreateRequestQueue(gSocket, 1, 1, 1, 1, gRecvCq, gSendCq, 0);
+    gRq = gRio.RIOCreateRequestQueue(
+        gSocket, 1, 1, 1, 1, gRecvCq, gSendCq, 0);
 
     if (gRq == RIO_INVALID_RQ) {
         fprintf(stderr, "Unable to create RIO request queue.\r\n");
@@ -133,14 +134,19 @@ static bool dumpCompletions(RIO_CQ cq)
 {
     RIORESULT results[8];
     ULONG status;
-    bool dequeued = false;
+    int total = 0;
 
-    do {
+    while (true) {
         status = gRio.RIODequeueCompletion(cq, results, 8);
-        dequeued |= status > 0 && status != RIO_CORRUPT_CQ;
-    } while (status > 0 && status != RIO_CORRUPT_CQ);
 
-    return dequeued;
+        if (status == 0 || status == RIO_CORRUPT_CQ) {
+            break;
+        }
+
+        total += status;
+    }
+
+    return total > 0;
 }
 
 static void clientLoop(const char *addr)
@@ -199,7 +205,9 @@ static void clientLoop(const char *addr)
             if (didSend) {
                 dprintf("send complete\r\n");
                 sendComplete = true;
-            } else if (didRecv) {
+            }
+
+            if (didRecv) {
                 dprintf("recv complete\r\n");
                 recvComplete = true;
                 QueryPerformanceCounter(&endQpc);
@@ -268,7 +276,9 @@ static void serverLoop()
             if (didSend) {
                 dprintf("send complete\r\n");
                 sendComplete = true;
-            } else if (didRecv) {
+            }
+
+            if (didRecv) {
 #ifdef DEBUG_LOG
                 char nodeBuf[256], svcBuf[256];
 #endif
