@@ -30,6 +30,7 @@ struct ATL_NO_VTABLE SarMMDeviceEnumerator:
 {
     BEGIN_COM_MAP(SarMMDeviceEnumerator)
         COM_INTERFACE_ENTRY(IMMDeviceEnumerator)
+        COM_INTERFACE_ENTRY_AGGREGATE_BLIND(_innerEnumerator)
     END_COM_MAP()
 
     DECLARE_REGISTRY_RESOURCEID(IDR_SARMMDEVICE)

@@ -39,6 +39,7 @@ SarMMDeviceEnumerator::SarMMDeviceEnumerator()
     DllGetClassObjectFn *fn_DllGetClassObject;
     CComPtr<IClassFactory> cf;
     HMODULE lib, dummy;
+    HRESULT hr;
 
     _config = DriverConfig::fromFile(ConfigurationPath("default.json"));
 
@@ -52,12 +53,14 @@ SarMMDeviceEnumerator::SarMMDeviceEnumerator()
     // mimicking the threading model of MMDeviceEnumerator already, and we never
     // expose the raw underlying interface pointer to our consumers.
     if (!ExpandEnvironmentStringsA(MMDEVAPI_PATH, buf, sizeof(buf))) {
+        LOG(ERROR) << "Failed to get MMDEVAPI_PATH";
         return;
     }
 
     lib = LoadLibraryA(buf);
 
     if (!lib) {
+        LOG(ERROR) << "Failed to load MMDevAPI";
         return;
     }
 
@@ -65,6 +68,7 @@ SarMMDeviceEnumerator::SarMMDeviceEnumerator()
         (DllGetClassObjectFn *)GetProcAddress(lib, "DllGetClassObject");
 
     if (!fn_DllGetClassObject) {
+        LOG(ERROR) << "Failed to get DllClassObject from MMDevAPI";
         FreeLibrary(lib);
         return;
     }
@@ -88,11 +92,16 @@ SarMMDeviceEnumerator::SarMMDeviceEnumerator()
     if (!SUCCEEDED(fn_DllGetClassObject(
         __uuidof(MMDeviceEnumerator), IID_IClassFactory, (LPVOID *)&cf))) {
 
+        LOG(ERROR) << "Failed to instantiate MMDeviceEnumerator";
         return;
     }
 
-    cf->CreateInstance(
+    hr = cf->CreateInstance(
         0, __uuidof(IMMDeviceEnumerator), (LPVOID *)&_innerEnumerator);
+
+    if (!SUCCEEDED(hr)) {
+        LOG(ERROR) << "Failed to instantiate MMDeviceEnumerator";
+    }
 }
 
 SarMMDeviceEnumerator::~SarMMDeviceEnumerator()
