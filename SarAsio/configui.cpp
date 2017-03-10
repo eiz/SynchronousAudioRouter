@@ -259,6 +259,8 @@ void EndpointsPropertySheetPage::onRemoveEndpoint()
     auto index = ListView_GetNextItem(_listView, -1, LVNI_SELECTED);
 
     if (index < 0 || index >= (int)_config.endpoints.size()) {
+        LOG(INFO) << "Index " << index
+            << " out of bounds when removing endpoint from list";
         return;
     }
 
@@ -584,7 +586,9 @@ void ApplicationsPropertySheetPage::onRemoveApplication()
 {
     auto index = ListView_GetNextItem(_listView, -1, LVNI_SELECTED);
 
-    if (index < 0 || index >= (int)_config.endpoints.size()) {
+    if (index < 0 || index >= (int)_config.applications.size()) {
+        LOG(INFO) << "Index " << index
+            << " out of bounds when removing application from list";
         return;
     }
 
