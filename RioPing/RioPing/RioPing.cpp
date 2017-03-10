@@ -206,10 +206,6 @@ static void clientLoop(const char *addr)
             didSend = !sendComplete && dumpCompletions(gSendCq);
             didRecv = !recvComplete && dumpCompletions(gRecvCq);
 
-            if (!didSend && !didRecv) {
-                continue;
-            }
-
             if (didSend) {
                 dprintf("send complete\r\n");
                 sendComplete = true;
@@ -222,7 +218,7 @@ static void clientLoop(const char *addr)
                 uint64_t latency = (uint64_t)(
                     (endQpc.QuadPart - startQpc.QuadPart) / gPerfFreqUs);
 
-                if (latency > gWorstCaseLatency) {
+                if (latency > gWorstCaseLatency && index > 1) {
                     printf("worst case %08llX: %lldus\r\n", index, latency);
                     gWorstCaseLatency = latency;
                 }
@@ -276,10 +272,6 @@ static void serverLoop()
 
             didSend = !sendComplete && dumpCompletions(gSendCq);
             didRecv = !recvComplete && dumpCompletions(gRecvCq);
-
-            if (!didSend && !didRecv) {
-                continue;
-            }
 
             if (didSend) {
                 dprintf("send complete\r\n");
