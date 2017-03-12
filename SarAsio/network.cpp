@@ -43,6 +43,10 @@
 //       out its derpy JSON UDP packets on every single interface, as does
 //       Google Cast, LLMNR, Bonjour, WPAD... ugh. I wonder if the Windows
 //       netmap driver actually works.
+//     - SFP+ DAC results: 20us average latency. Worst case, ya, they're all the
+//       same because the problem is the things Windows is doing, not the
+//       hardware. An NDIS filter driver may end up being a valid alternative to
+//       using RIO.
 // - winsock initialization
 // - rio initialization
 // - message send routines
