@@ -35,6 +35,14 @@
 //       no random bad neighbors (e.g. Dropbox blasting out random JSON-over-UDP
 //       discovery packets). Non-broadcast stuff should be fine as long as there
 //       is no default route set on the interface, but... ya.
+//     - 10GBASE-T results: average latency 28us, worst case 163us. That's 2
+//       hosts directly connected via dedicated NICs. Not too shabby, but still
+//       not as consistent as I'd like to see. Also: kinda expensive. Not sure
+//       how many people really have these sitting around. Just for kicks, I'm
+//       going to try it with some SFP+ cards, too. Dropbox does in fact spam
+//       out its derpy JSON UDP packets on every single interface, as does
+//       Google Cast, LLMNR, Bonjour, WPAD... ugh. I wonder if the Windows
+//       netmap driver actually works.
 // - winsock initialization
 // - rio initialization
 // - message send routines
