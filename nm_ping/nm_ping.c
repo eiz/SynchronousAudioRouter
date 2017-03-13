@@ -226,6 +226,7 @@ int main(int argc, const char **argv)
     return 0;
 }
 
+#ifdef DEBUG_LOG
 static void printArp(struct arphdr *arp)
 {
     uint8_t *sha = (uint8_t *)ar_sha(arp);
@@ -238,6 +239,7 @@ static void printArp(struct arphdr *arp)
         ntohs(arp->ar_op), MAC_VALUES(sha), IP4_VALUES(spa),
         MAC_VALUES(tha), IP4_VALUES(tpa));
 }
+#endif
 
 static void onArpReceived(struct nm_pkthdr *hdr, uint8_t *buf)
 {
@@ -260,7 +262,9 @@ static void onArpReceived(struct nm_pkthdr *hdr, uint8_t *buf)
     uint8_t *spa = (uint8_t *)ar_spa(arp);
     uint8_t *tpa = (uint8_t *)ar_tpa(arp);
 
+#if DEBUG_LOG
     printArp(arp);
+#endif
 
     if (memcmp(tpa, &gSrcAddr, sizeof(struct in_addr)) ||
         ntohs(arp->ar_op) != ARPOP_REQUEST) {
@@ -289,8 +293,10 @@ static void onArpReceived(struct nm_pkthdr *hdr, uint8_t *buf)
     memcpy(reply.tha, sha, ETHER_ADDR_LEN);
     memcpy(&reply.tpa, spa, sizeof(struct in_addr));
 
+#if DEBUG_LOG
     printf("--> ");
     printArp(&reply.arp);
+#endif
 
     if (!nm_inject(gNetMap, &reply, sizeof(reply))) {
         fprintf(stderr, "Failed to send ARP reply\n");
@@ -303,6 +309,32 @@ static uint64_t perfTime()
 
     clock_gettime(CLOCK_MONOTONIC, &tp);
     return (uint64_t)tp.tv_sec * 1000000000 + tp.tv_nsec;
+}
+
+static bool isPingPacket(struct nm_pkthdr *hdr, Packet *pkt)
+{
+    uint16_t etype = ntohs(pkt->eth.ether_type);
+
+    if (hdr->len < sizeof(Packet) ||
+        etype != ETHERTYPE_IP ||
+        pkt->ip.ip_p != IPPROTO_UDP) {
+
+        return false;
+    }
+
+    if (memcmp(pkt->eth.ether_dhost, gSrcMac, ETHER_ADDR_LEN)) {
+        return false;
+    }
+
+    if (pkt->ip.ip_dst.s_addr != gSrcAddr.s_addr) {
+        return false;
+    }
+
+    if (ntohs(pkt->udp.uh_dport) != PINGSRV_PORT) {
+        return false;
+    }
+
+    return true;
 }
 
 static void clientLoop()
@@ -356,7 +388,7 @@ static void clientLoop()
             pkt.udp.uh_sum = udpsum(&pkt.ip, &pkt.udp, &pkt.index);
 
             if (!nm_inject(gNetMap, &pkt, sizeof(Packet))) {
-                fprintf(stderr, "Failed to write packet to TX chain.\n");
+                fprintf(stderr, "Failed to write packet to TX ring.\n");
                 return;
             }
 
@@ -373,18 +405,7 @@ static void clientLoop()
                 continue;
             }
 
-            if (etype != ETHERTYPE_IP ||
-                hdr.len < sizeof(struct ether_header) + sizeof(struct ip) ||
-                pkt->ip.ip_p != IPPROTO_UDP) {
-
-                continue;
-            }
-
-            if (hdr.len < sizeof(Packet)) {
-                continue;
-            }
-
-            if (memcmp(pkt->eth.ether_dhost, gSrcMac, ETHER_ADDR_LEN)) {
+            if (!isPingPacket(&hdr, pkt)) {
                 continue;
             }
 
@@ -392,20 +413,7 @@ static void clientLoop()
                 continue;
             }
 
-            if (ntohs(pkt->eth.ether_type) != ETHERTYPE_IP) {
-                continue;
-            }
-
-
             if (pkt->ip.ip_src.s_addr != gDstAddr.s_addr) {
-                continue;
-            }
-
-            if (pkt->ip.ip_dst.s_addr != gSrcAddr.s_addr) {
-                continue;
-            }
-
-            if (ntohs(pkt->udp.uh_dport) != PINGSRV_PORT) {
                 continue;
             }
 
@@ -441,5 +449,48 @@ static void clientLoop()
 
 static void serverLoop()
 {
+    struct pollfd pfd;
+    uint8_t *buf;
+    struct nm_pkthdr hdr;
+
+    pfd.fd = NETMAP_FD(gNetMap);
+    pfd.events = POLLIN;
+
+    while (true) {
+        while ((buf = nm_nextpkt(gNetMap, &hdr))) {
+            struct ether_header *eth = (struct ether_header *)buf;
+            Packet *pkt = (Packet *)buf;
+            uint16_t etype = ntohs(eth->ether_type);
+
+            if (etype == ETHERTYPE_ARP) {
+                onArpReceived(&hdr, buf);
+                continue;
+            }
+
+            if (!isPingPacket(&hdr, pkt)) {
+                continue;
+            }
+
+            Packet reply = *pkt;
+
+            memcpy(reply.eth.ether_shost, gSrcMac, ETHER_ADDR_LEN);
+            memcpy(reply.eth.ether_dhost, pkt->eth.ether_shost, ETHER_ADDR_LEN);
+            reply.ip.ip_src = gSrcAddr;
+            reply.ip.ip_dst = pkt->ip.ip_src;
+            reply.ip.ip_sum = ipsum(&reply.ip);
+            reply.udp.uh_sum = udpsum(&reply.ip, &reply.udp, &reply.index);
+
+            if (!nm_inject(gNetMap, &reply, sizeof(Packet))) {
+                fprintf(stderr, "Failed to write packet to TX ring.\n");
+            }
+        }
+
+#ifdef BUSY_WAIT
+        ioctl(NETMAP_FD(gNetMap), NIOCTXSYNC);
+        ioctl(NETMAP_FD(gNetMap), NIOCRXSYNC);
+#else
+        poll(&pfd, 1, -1);
+#endif
+    }
 }
 
