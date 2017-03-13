@@ -20,6 +20,15 @@
 #define MAC_VALUES(v) (v)[0], (v)[1], (v)[2], (v)[3], (v)[4], (v)[5]
 #define IP4_FORMAT "%d.%d.%d.%d"
 #define IP4_VALUES(v) (v)[0], (v)[1], (v)[2], (v)[3]
+#define ITERATIONS 100000
+
+#define PINGSRV_PORT 10000
+
+#ifdef DEBUG_LOG
+#define dprintf printf
+#else
+#define dprintf(...)
+#endif
 
 static void clientLoop();
 static void serverLoop();
@@ -28,6 +37,7 @@ static struct in_addr gSrcAddr;
 static uint8_t gDstMac[ETHER_ADDR_LEN];
 static struct in_addr gDstAddr;
 static struct nm_desc *gNetMap;
+static int gIterationsLeft = ITERATIONS;
 
 typedef struct Packet
 {
@@ -93,24 +103,52 @@ static bool getIPv4Address(const char *ifname, struct in_addr *addr) {
     return found;
 }
 
-static uint16_t ipsum(const void *buf, size_t len, size_t checkidx)
+static uint64_t xsum(const void *buf, size_t len)
 {
     const uint16_t *hwords = (const uint16_t *)buf;
-    uint32_t sum = 0;
+    uint64_t sum = 0;
 
-    assert((len & 1) == 0);
-
-    for (int i = 0; i < checkidx >> 1; ++i) {
+    for (int i = 0; i < len >> 1; ++i) {
         sum += ntohs(hwords[i]);
     }
 
-    for (int i = (checkidx >> 1) + 1; i < len >> 1; ++i) {
-        sum += ntohs(hwords[i]);
+    if (len & 1) {
+        sum += ((uint8_t *)buf)[len - 1] << 8;
     }
 
-    sum = (sum & 0xFFFF) + (sum >> 16);
-    sum = (sum & 0xFFFF) + (sum >> 16);
+    return sum;
+}
+
+static uint16_t finsum(uint64_t sum)
+{
+    while (sum > 0xFFFF) {
+        sum = (sum & 0xFFFF) + (sum >> 16);
+    }
+
     return htons(~(uint16_t)sum);
+}
+
+static uint16_t ipsum(struct ip *ip)
+{
+    return finsum(xsum(ip, offsetof(struct ip, ip_sum)) +
+        xsum((uint8_t*)ip + offsetof(struct ip, ip_src),
+            (ip->ip_hl << 2) - offsetof(struct ip, ip_src)));
+}
+
+static uint16_t udpsum(struct ip *ip, struct udphdr *udp, void *data)
+{
+    struct ippseudo ips;
+
+    ips.ippseudo_src = ip->ip_src;
+    ips.ippseudo_dst = ip->ip_dst;
+    ips.ippseudo_pad = 0;
+    ips.ippseudo_p = ip->ip_p;
+    ips.ippseudo_len = udp->uh_ulen;
+
+    return finsum(
+        xsum(&ips, sizeof(ips)) +
+        xsum(udp, offsetof(struct udphdr, uh_sum)) +
+        xsum(data, ntohs(udp->uh_ulen) - sizeof(struct udphdr)));
 }
 
 static void usage()
@@ -251,7 +289,7 @@ static void onArpReceived(struct nm_pkthdr *hdr, uint8_t *buf)
     memcpy(reply.tha, sha, ETHER_ADDR_LEN);
     memcpy(&reply.tpa, spa, sizeof(struct in_addr));
 
-    printf("-> ");
+    printf("--> ");
     printArp(&reply.arp);
 
     if (!nm_inject(gNetMap, &reply, sizeof(reply))) {
@@ -270,7 +308,10 @@ static void clientLoop()
     pfd.fd = NETMAP_FD(gNetMap);
     pfd.events = POLLIN;
 
-    while (true) {
+    // Give the link a bit of time to come back up after initializing netmap.
+    sleep(2);
+
+    while (gIterationsLeft) {
         if (!waiting) {
             Packet pkt = {};
 
@@ -280,7 +321,7 @@ static void clientLoop()
             pkt.eth.ether_type = htons(ETHERTYPE_IP);
             pkt.ip.ip_v = IPVERSION;
             pkt.ip.ip_hl = sizeof(pkt.ip) >> 2;
-            pkt.ip.ip_tos = IPTOS_DSCP_CS2;
+            pkt.ip.ip_tos = IPTOS_LOWDELAY;
             pkt.ip.ip_len = htons(sizeof(pkt) - sizeof(struct ether_header));
             pkt.ip.ip_id = 0;
             pkt.ip.ip_off = htons(IP_DF);
@@ -288,21 +329,20 @@ static void clientLoop()
             pkt.ip.ip_p = IPPROTO_UDP;
             pkt.ip.ip_src = gSrcAddr;
             pkt.ip.ip_dst = gDstAddr;
-            pkt.ip.ip_sum = ipsum(
-                &pkt.ip, sizeof(struct ip), offsetof(struct ip, ip_sum));
-            pkt.udp.uh_sport = htons(12000);
-            pkt.udp.uh_dport = htons(12000);
+            pkt.ip.ip_sum = ipsum(&pkt.ip);
+            pkt.udp.uh_sport = htons(PINGSRV_PORT);
+            pkt.udp.uh_dport = htons(PINGSRV_PORT);
             pkt.udp.uh_ulen = htons(
                 sizeof(pkt) - sizeof(struct ip) - sizeof(struct ether_header));
-            pkt.udp.uh_sum = 0;
             pkt.index = ++index;
+            pkt.udp.uh_sum = udpsum(&pkt.ip, &pkt.udp, &pkt.index);
 
             if (!nm_inject(gNetMap, &pkt, sizeof(Packet))) {
                 fprintf(stderr, "Failed to write packet to TX chain.\n");
                 return;
             }
 
-            printf("--> %016" PRIx64 "\n", index);
+            dprintf("--> %016" PRIx64 "\n", index);
         }
 
         while ((buf = nm_nextpkt(gNetMap, &hdr))) {
@@ -315,7 +355,14 @@ static void clientLoop()
                 continue;
             }
 
-            if (hdr.len != sizeof(Packet)) {
+            if (etype != ETHERTYPE_IP ||
+                hdr.len < sizeof(struct ether_header) + sizeof(struct ip) ||
+                pkt->ip.ip_p != IPPROTO_UDP) {
+
+                continue;
+            }
+
+            if (hdr.len < sizeof(Packet)) {
                 continue;
             }
 
@@ -331,9 +378,6 @@ static void clientLoop()
                 continue;
             }
 
-            if (pkt->ip.ip_p != IPPROTO_UDP) {
-                continue;
-            }
 
             if (pkt->ip.ip_src.s_addr != gDstAddr.s_addr) {
                 continue;
@@ -343,7 +387,7 @@ static void clientLoop()
                 continue;
             }
 
-            if (ntohs(pkt->udp.uh_dport) != 12000) {
+            if (ntohs(pkt->udp.uh_dport) != PINGSRV_PORT) {
                 continue;
             }
 
@@ -353,6 +397,11 @@ static void clientLoop()
             }
 
             waiting = false;
+            gIterationsLeft--;
+
+            if ((gIterationsLeft % 1000) == 0) {
+                printf("Iterations left: %d\n", gIterationsLeft);
+            }
         }
 
         if (waiting) {
