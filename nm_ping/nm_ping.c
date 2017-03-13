@@ -297,6 +297,14 @@ static void onArpReceived(struct nm_pkthdr *hdr, uint8_t *buf)
     }
 }
 
+static uint64_t perfTime()
+{
+    struct timespec tp;
+
+    clock_gettime(CLOCK_MONOTONIC, &tp);
+    return (uint64_t)tp.tv_sec * 1000000000 + tp.tv_nsec;
+}
+
 static void clientLoop()
 {
     uint64_t index = 0;
@@ -304,18 +312,28 @@ static void clientLoop()
     struct pollfd pfd;
     uint8_t *buf;
     struct nm_pkthdr hdr;
+    struct timespec tp;
 
     pfd.fd = NETMAP_FD(gNetMap);
     pfd.events = POLLIN;
 
+    clock_getres(CLOCK_MONOTONIC, &tp);
+    printf("CLOCK_MONOTONIC resolution: %ld sec, %ld nsec\n",
+        tp.tv_sec, tp.tv_nsec);
+
     // Give the link a bit of time to come back up after initializing netmap.
     sleep(2);
+
+    uint64_t loopStart = perfTime(), loopEnd;
+    uint64_t iterStart, iterEnd;
+    uint64_t worstLatency = 0;
 
     while (gIterationsLeft) {
         if (!waiting) {
             Packet pkt = {};
 
             waiting = true;
+            iterStart = perfTime();
             memcpy(pkt.eth.ether_dhost, gDstMac, sizeof(gDstMac));
             memcpy(pkt.eth.ether_shost, gSrcMac, sizeof(gSrcMac));
             pkt.eth.ether_type = htons(ETHERTYPE_IP);
@@ -398,16 +416,27 @@ static void clientLoop()
 
             waiting = false;
             gIterationsLeft--;
+            iterEnd = perfTime();
 
-            if ((gIterationsLeft % 1000) == 0) {
-                printf("Iterations left: %d\n", gIterationsLeft);
+            if (iterEnd - iterStart > worstLatency) {
+                worstLatency = iterEnd - iterStart;
             }
         }
 
         if (waiting) {
+#ifdef BUSY_WAIT
+            ioctl(NETMAP_FD(gNetMap), NIOCTXSYNC);
+            ioctl(NETMAP_FD(gNetMap), NIOCRXSYNC);
+#else
             poll(&pfd, 1, -1);
+#endif
         }
     }
+
+    loopEnd = perfTime();
+    printf("Average latency: %" PRIu64 "\n",
+        (loopEnd - loopStart) / 1000 / ITERATIONS);
+    printf("Worst case latency: %" PRIu64 "us\n", worstLatency / 1000);
 }
 
 static void serverLoop()
