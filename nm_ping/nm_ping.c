@@ -16,6 +16,7 @@
 #include <arpa/inet.h>
 #include <poll.h>
 
+#define BUSY_WAIT
 #define MAC_FORMAT "%02X:%02X:%02X:%02X:%02X:%02X"
 #define MAC_VALUES(v) (v)[0], (v)[1], (v)[2], (v)[3], (v)[4], (v)[5]
 #define IP4_FORMAT "%d.%d.%d.%d"
@@ -428,6 +429,8 @@ static void clientLoop()
 
             if (iterEnd - iterStart > worstLatency) {
                 worstLatency = iterEnd - iterStart;
+                printf("worst case %08" PRIx64 " %" PRIu64 "us\n",
+                    index, worstLatency / 1000);
             }
         }
 

@@ -47,6 +47,11 @@
 //       same because the problem is the things Windows is doing, not the
 //       hardware. An NDIS filter driver may end up being a valid alternative to
 //       using RIO.
+//     - FreeBSD netmap results are in. Test setup: 2 machines with Intel
+//       X520-DA2 cards, hw.ix.max_interrupt_rate=0, running nm_ping with
+//       'rtprio 0', with BUSY_WAIT enabled. Average: 10us, worst case: 25us.
+//       With BUSY_WAIT off, worst case is consistently around 300us due to
+//       scheduling delay. These are the values I want to see.
 // - winsock initialization
 // - rio initialization
 // - message send routines
