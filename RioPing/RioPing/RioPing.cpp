@@ -73,7 +73,7 @@ int main(int argc, const char **argv)
 
     saddr.sin_addr.s_addr = INADDR_ANY;
     saddr.sin_family = AF_INET;
-    saddr.sin_port = htons(isClient ? 0 : 10000);
+    saddr.sin_port = htons(10000);
 
     if (bind(gSocket, (struct sockaddr *)&saddr, sizeof(sockaddr_in)) < 0) {
         fprintf(stderr, "Unable to bind socket.\r\n");
