@@ -30,8 +30,9 @@ extern "C" {
 #define NOBITMAP
 #include <mmreg.h>
 #include <ksmedia.h>
-#include <devpkey.h>
 #include <ksproxy.h>
+#define NDIS630
+#include <ndis.h>
 #else
 #include <windows.h>
 #endif
@@ -232,9 +233,6 @@ typedef struct SarEndpoint
 } SarEndpoint;
 
 // Control
-NTSTATUS SarReadUserBuffer(PVOID src, PIRP irp, ULONG size);
-NTSTATUS SarWriteUserBuffer(PVOID src, PIRP irp, ULONG size);
-VOID SarDumpKsIoctl(PIO_STACK_LOCATION irpStack);
 NTSTATUS SarSetBufferLayout(
     SarControlContext *controlContext,
     SarSetBufferLayoutRequest *request,
@@ -374,6 +372,8 @@ NTSTATUS DriverEntry(
     (g).Data4[7]
 #define ROUND_UP(N, S) ((((N) + (S) - 1) / (S)) * (S))
 
+NTSTATUS SarReadUserBuffer(PVOID src, PIRP irp, ULONG size);
+NTSTATUS SarWriteUserBuffer(PVOID src, PIRP irp, ULONG size);
 SarDriverExtension *SarGetDriverExtension(PDRIVER_OBJECT driverObject);
 SarDriverExtension *SarGetDriverExtensionFromIrp(PIRP irp);
 SarControlContext *SarGetControlContextFromFileObject(

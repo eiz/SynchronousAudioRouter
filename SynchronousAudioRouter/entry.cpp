@@ -251,11 +251,6 @@ NTSTATUS SarIrpDeviceControl(PDEVICE_OBJECT deviceObject, PIRP irp)
 
     irpStack = IoGetCurrentIrpStackLocation(irp);
     ioControlCode = irpStack->Parameters.DeviceIoControl.IoControlCode;
-
-#ifdef LOUD
-    SarDumpKsIoctl(irp);
-#endif
-
     ExAcquireFastMutex(&extension->mutex);
     controlContext = (SarControlContext *)SarGetTableEntry(
         &extension->controlContextTable, irpStack->FileObject);

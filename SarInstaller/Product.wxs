@@ -28,9 +28,11 @@
 
 		<Feature Id="Main" Title="Synchronous Audio Router" Level="1">
       <?if $(var.Platform) = x64 ?>
-        <ComponentRef Id="KernelDriver64"/>
+        <ComponentRef Id="KsDriver64"/>
+        <ComponentRef Id="NdisDriver64"/>
       <?else ?>
-        <ComponentRef Id="KernelDriver32"/>
+        <ComponentRef Id="KsDriver32"/>
+        <ComponentRef Id="NdisDriver32"/>
       <?endif ?>
 
       <?if $(var.Platform) = x64 ?>
@@ -90,7 +92,7 @@
 
     <?if $(var.Platform) = x64 ?>
     <DirectoryRef Id="INSTALLDIR64">
-      <Component Id="KernelDriver64"
+      <Component Id="KsDriver64"
                  Guid="{48C7E358-9797-42F7-B86D-5AA1DD3E0E44}"
                  Win64="yes">
         <File Id="SynchronousAudioRouter.sys"
@@ -107,6 +109,26 @@
               KeyPath="no"/>
         <difx:Driver PlugAndPlayPrompt="no"/>
       </Component>
+
+      <Directory Id="SarNdisDir" Name="SarNdis">
+          <Component Id="NdisDriver64"
+              Guid="{9E1CA92F-732B-4AFF-BFF4-3AAE349B9E8F}"
+              Win64="yes">
+          <File Id="SarNdis.sys"
+                Name="SarNdis.sys"
+                Source="..\x64\Release\SarNdis.sys"
+                KeyPath="yes"/>
+          <File Id="SarNdis.cat"
+                Name="SarNdis.cat"
+                Source="..\x64\Release\SarNdis\SarNdis.cat"
+                KeyPath="no"/>
+          <File Id="SarNdis.inf"
+                Name="SarNdis.inf"
+                Source="..\x64\Release\SarNdis\SarNdis.inf"
+                KeyPath="no"/>
+          <difx:Driver PlugAndPlayPrompt="no"/>
+        </Component>
+      </Directory>
 
       <Component Id="AsioDriver64"
                  Guid="{2EE1A63F-AEB4-4518-A3FD-963A67CAA5DA}"
@@ -213,7 +235,7 @@
     </DirectoryRef>
     <?else ?>
     <DirectoryRef Id="INSTALLDIR">
-      <Component Id="KernelDriver32"
+      <Component Id="KsDriver32"
                  Guid="{865DF004-18BD-448C-A63B-BF3B758CAE99}"
                  Win64="no">
         <File Id="SynchronousAudioRouter.sys"
@@ -230,6 +252,26 @@
               KeyPath="no"/>
         <difx:Driver PlugAndPlayPrompt="no"/>
       </Component>
+
+      <Directory Id="SarNdisDir" Name="SarNdis">
+        <Component Id="NdisDriver32"
+             Guid="{9E1CA92F-732B-4AFF-BFF4-3AAE349B9E8F}"
+             Win64="no">
+          <File Id="SarNdis.sys"
+                Name="SarNdis.sys"
+                Source="..\Release\SarNdis.sys"
+                KeyPath="yes"/>
+          <File Id="SarNdis.cat"
+                Name="SarNdis.cat"
+                Source="..\Release\SarNdis\SarNdis.cat"
+                KeyPath="no"/>
+          <File Id="SarNdis.inf"
+                Name="SarNdis.inf"
+                Source="..\Release\SarNdis\SarNdis.inf"
+                KeyPath="no"/>
+          <difx:Driver PlugAndPlayPrompt="no"/>
+        </Component>
+      </Directory>
 
       <Component Id="AsioDriver32"
            Guid="{FFBEFDDB-FBC6-4CE5-9187-267DE9BB93D9}"
