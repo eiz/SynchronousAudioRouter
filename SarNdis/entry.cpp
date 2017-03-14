@@ -43,25 +43,59 @@ FILTER_DIRECT_OID_REQUEST SarNdisFilterDirectOidRequest;
 FILTER_DIRECT_OID_REQUEST_COMPLETE SarNdisFilterDirectOidRequestComplete;
 FILTER_CANCEL_DIRECT_OID_REQUEST SarNdisFilterCancelDirectOidRequest;
 
+typedef struct SarNdisFilterModuleContext
+{
+    NDIS_HANDLE filterHandle;
+} SarNdisFilterModuleContext;
+
 _Use_decl_annotations_
 NDIS_STATUS SarNdisFilterAttach(
     _In_ NDIS_HANDLE ndisFilterHandle,
     _In_ NDIS_HANDLE filterDriverContext,
     _In_ PNDIS_FILTER_ATTACH_PARAMETERS attachParameters)
 {
-    UNREFERENCED_PARAMETER(ndisFilterHandle);
+    SAR_LOG("SarNdisFilterAttach");
     UNREFERENCED_PARAMETER(filterDriverContext);
     UNREFERENCED_PARAMETER(attachParameters);
+    NTSTATUS status = STATUS_SUCCESS;
+    NDIS_FILTER_ATTRIBUTES filterAttributes;
+    SarNdisFilterModuleContext *filterModuleContext =
+        (SarNdisFilterModuleContext *)ExAllocatePoolWithTag(
+            NonPagedPool, sizeof(SarNdisFilterModuleContext), SAR_TAG);
 
-    SAR_LOG("SarNdisFilterAttach");
+    if (!filterModuleContext) {
+        status = STATUS_INSUFFICIENT_RESOURCES;
+        goto err_out;
+    }
+
+    filterModuleContext->filterHandle = ndisFilterHandle;
+    filterAttributes.Header.Type = NDIS_OBJECT_TYPE_FILTER_ATTRIBUTES;
+    filterAttributes.Header.Revision = NDIS_FILTER_ATTRIBUTES_REVISION_1;
+    filterAttributes.Header.Size = NDIS_SIZEOF_FILTER_ATTRIBUTES_REVISION_1;
+    filterAttributes.Flags = 0;
+
+    status = NdisFSetAttributes(
+        ndisFilterHandle, filterModuleContext, &filterAttributes);
+
+    if (!NT_SUCCESS(status)) {
+        goto err_out;
+    }
+
     return STATUS_SUCCESS;
+
+err_out:
+    if (filterModuleContext != NULL) {
+        ExFreePoolWithTag(filterModuleContext, SAR_TAG);
+    }
+
+    return status;
 }
 
 _Use_decl_annotations_
 void SarNdisFilterDetach(_In_ NDIS_HANDLE filterModuleContext)
 {
-    UNREFERENCED_PARAMETER(filterModuleContext);
     SAR_LOG("SarNdisFilterDetach");
+    UNREFERENCED_PARAMETER(filterModuleContext);
 }
 
 _Use_decl_annotations_
@@ -69,10 +103,10 @@ NDIS_STATUS SarNdisFilterRestart(
     _In_ NDIS_HANDLE filterModuleContext,
     _In_ PNDIS_FILTER_RESTART_PARAMETERS filterRestartParameters)
 {
+    SAR_LOG("SarNdisFilterRestart");
     UNREFERENCED_PARAMETER(filterModuleContext);
     UNREFERENCED_PARAMETER(filterRestartParameters);
 
-    SAR_LOG("SarNdisFilterRestart");
     return STATUS_SUCCESS;
 }
 
@@ -81,16 +115,17 @@ NDIS_STATUS SarNdisFilterPause(
     _In_ NDIS_HANDLE filterModuleContext,
     _In_ PNDIS_FILTER_PAUSE_PARAMETERS filterPauseParameters)
 {
+    SAR_LOG("SarNdisFilterPause");
     UNREFERENCED_PARAMETER(filterModuleContext);
     UNREFERENCED_PARAMETER(filterPauseParameters);
 
-    SAR_LOG("SarNdisFilterPause");
     return STATUS_SUCCESS;
 }
 
 _Use_decl_annotations_
 void SarNdisDriverUnload(PDRIVER_OBJECT driverObject)
 {
+    SAR_LOG("SarNdisDriverUnload");
     UNREFERENCED_PARAMETER(driverObject);
 
     if (gFilterDriverHandle) {
@@ -98,12 +133,31 @@ void SarNdisDriverUnload(PDRIVER_OBJECT driverObject)
     }
 }
 
+_Use_decl_annotations_
+void SarNdisFilterSendNetBufferLists(
+    _In_ NDIS_HANDLE filterModuleContext,
+    _In_ PNET_BUFFER_LIST netBufferLists,
+    _In_ NDIS_PORT_NUMBER portNumber,
+    _In_ ULONG sendFlags)
+{
+    // TODO: this needs to respect the pause state of the filter.
+    SAR_LOG("SarNdisFilterSendNetBufferLists");
+    UNREFERENCED_PARAMETER(portNumber);
+    SarNdisFilterModuleContext *context =
+        (SarNdisFilterModuleContext *)filterModuleContext;
+
+    NdisFSendNetBufferListsComplete(
+        context->filterHandle, netBufferLists,
+        (sendFlags & NDIS_SEND_FLAGS_SWITCH_SINGLE_SOURCE) ?
+        NDIS_SEND_COMPLETE_FLAGS_SWITCH_SINGLE_SOURCE : 0);
+}
+
 extern "C" NTSTATUS DriverEntry(
     IN PDRIVER_OBJECT driverObject,
     IN PUNICODE_STRING registryPath)
 {
+    SAR_LOG("SarNdis DriverEntry");
     UNREFERENCED_PARAMETER(registryPath);
-
     NDIS_FILTER_DRIVER_CHARACTERISTICS fdc = {};
 
     fdc.Header.Type = NDIS_OBJECT_TYPE_FILTER_DRIVER_CHARACTERISTICS;
@@ -120,6 +174,7 @@ extern "C" NTSTATUS DriverEntry(
     fdc.DetachHandler = SarNdisFilterDetach;
     fdc.PauseHandler = SarNdisFilterPause;
     fdc.RestartHandler = SarNdisFilterRestart;
+    fdc.SendNetBufferListsHandler = SarNdisFilterSendNetBufferLists;
 
     driverObject->DriverUnload = SarNdisDriverUnload;
 
