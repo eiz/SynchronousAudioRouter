@@ -222,7 +222,6 @@ NTSTATUS SarIrpClose(PDEVICE_OBJECT deviceObject, PIRP irp)
 
 NTSTATUS SarIrpCleanup(PDEVICE_OBJECT deviceObject, PIRP irp)
 {
-    UNREFERENCED_PARAMETER(deviceObject);
     NTSTATUS status;
     SarDriverExtension *extension =
         (SarDriverExtension *)IoGetDriverObjectExtension(
