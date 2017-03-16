@@ -43,6 +43,7 @@ SarControlContext *SarGetControlContextFromFileObject(
 }
 
 // TODO: gotta go fast
+#ifndef SAR_NDIS
 SarEndpoint *SarGetEndpointFromIrp(PIRP irp, BOOLEAN retain)
 {
     PKSFILTER filter = KsGetFilterFromIrp(irp);
@@ -92,6 +93,7 @@ SarEndpoint *SarGetEndpointFromIrp(PIRP irp, BOOLEAN retain)
     ExReleaseFastMutex(&extension->mutex);
     return found;
 }
+#endif
 
 NTSTATUS SarStringDuplicate(PUNICODE_STRING str, PUNICODE_STRING src)
 {
@@ -109,6 +111,7 @@ NTSTATUS SarStringDuplicate(PUNICODE_STRING str, PUNICODE_STRING src)
     return STATUS_SUCCESS;
 }
 
+#ifndef SAR_NDIS
 NTSTATUS SarReadEndpointRegisters(
     SarEndpointRegisters *regs, SarEndpoint *endpoint)
 {
@@ -167,6 +170,7 @@ NTSTATUS SarWriteEndpointRegisters(
 
     return STATUS_SUCCESS;
 }
+#endif
 
 VOID SarStringFree(PUNICODE_STRING str)
 {

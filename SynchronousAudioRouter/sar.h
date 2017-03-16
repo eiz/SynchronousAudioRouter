@@ -49,6 +49,7 @@ DEFINE_GUID(GUID_DEVINTERFACE_SYNCHRONOUSAUDIOROUTER,
 #define SAR_ENDPOINT_TYPE_RECORDING 1
 #define SAR_ENDPOINT_TYPE_PLAYBACK 2
 
+// SAR control interface ioctls
 #define SAR_SET_BUFFER_LAYOUT CTL_CODE( \
     FILE_DEVICE_UNKNOWN, 1, METHOD_NEITHER, FILE_READ_DATA | FILE_WRITE_DATA)
 #define SAR_CREATE_ENDPOINT CTL_CODE( \
@@ -59,6 +60,14 @@ DEFINE_GUID(GUID_DEVINTERFACE_SYNCHRONOUSAUDIOROUTER,
     FILE_DEVICE_UNKNOWN, 4, METHOD_NEITHER, FILE_READ_DATA | FILE_WRITE_DATA)
 #define SAR_SEND_FORMAT_CHANGE_EVENT CTL_CODE( \
     FILE_DEVICE_UNKNOWN, 5, METHOD_NEITHER, FILE_READ_DATA | FILE_WRITE_DATA)
+
+// SarNdis ioctls
+#define SARNDIS_IOCTL_CODE(i) CTL_CODE( \
+    FILE_DEVICE_PHYSICAL_NETCARD, i, METHOD_NEITHER, \
+    FILE_READ_DATA | FILE_WRITE_DATA)
+#define SARNDIS_ENUMERATE SARNDIS_IOCTL_CODE(1)
+#define SARNDIS_ENABLE SARNDIS_IOCTL_CODE(2)
+#define SARNDIS_SYNC SARNDIS_IOCTL_CODE(3)
 
 #define SAR_MAX_BUFFER_SIZE 1024 * 1024 * 128
 #define SAR_MIN_SAMPLE_SIZE 1
@@ -115,6 +124,18 @@ typedef struct SarEndpointRegisters
     DWORD notificationCount;
 } SarEndpointRegisters;
 
+typedef struct SarNdisEnumerateResponseItem
+{
+    ULONG32 nameOffset;
+    ULONG32 nameLength;
+} SarNdisEnumerateResponseItem;
+
+typedef struct SarNdisEnumerateResponse
+{
+    ULONG itemCount;
+    SarNdisEnumerateResponseItem items[0];
+} SarNdisEnumerateResponse;
+
 #if defined(KERNEL)
 
 #define SAR_CONTROL_REFERENCE_STRING L"\\{0EB287D4-6C04-4926-AE19-3C066A4C3F3A}"
@@ -124,7 +145,7 @@ typedef struct SarEndpointRegisters
 #define SAR_LOG(...)
 #else
 #define SAR_LOG(fmt, ...) \
-    DbgPrintEx(DPFLTR_DEFAULT_ID, DPFLTR_WARNING_LEVEL, fmt "\n", __VA_ARGS__)
+    DbgPrintEx(DPFLTR_DEFAULT_ID, DPFLTR_INFO_LEVEL, fmt "\n", __VA_ARGS__)
 #endif
 
 typedef struct SarHandleQueue
@@ -231,6 +252,25 @@ typedef struct SarEndpoint
     ULONG activeBufferSize;
     LIST_ENTRY activeProcessList;
 } SarEndpoint;
+
+typedef struct SarNdisDriverState
+{
+    NDIS_HANDLE filterDriverHandle;
+    NDIS_HANDLE deviceHandle;
+    PDEVICE_OBJECT deviceObject;
+    FAST_MUTEX mutex;
+    LIST_ENTRY runningFilters;
+} SarNdisDriverState;
+
+typedef struct SarNdisFilterModuleContext
+{
+    LONG refs;
+    LIST_ENTRY runningFiltersEntry;
+    NDIS_HANDLE filterHandle;
+    UNICODE_STRING instanceName;
+    bool running;
+    bool enabled;
+} SarNdisFilterModuleContext;
 
 // Control
 NTSTATUS SarSetBufferLayout(
@@ -352,6 +392,26 @@ FORCEINLINE VOID SarReleaseEndpointAndContext(SarEndpoint *endpoint)
 NTSTATUS DriverEntry(
     IN PDRIVER_OBJECT driverObject,
     IN PUNICODE_STRING registryPath);
+
+// NDIS
+VOID SarNdisDeleteFilterModuleContext(SarNdisFilterModuleContext *context);
+
+FORCEINLINE VOID SarNdisRetainFilterModuleContext(
+    SarNdisFilterModuleContext *context)
+{
+    InterlockedIncrement(&context->refs);
+}
+
+FORCEINLINE BOOLEAN SarNdisReleaseFilterModuleContext(
+    SarNdisFilterModuleContext *context)
+{
+    if (InterlockedDecrement(&context->refs) == 0) {
+        SarNdisDeleteFilterModuleContext(context);
+        return TRUE;
+    }
+
+    return FALSE;
+}
 
 // Utility
 #define FOR_EACH_GENERIC(table, objType, obj, restartKey) \

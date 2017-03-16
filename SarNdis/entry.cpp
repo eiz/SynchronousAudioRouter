@@ -23,9 +23,7 @@
 #define SAR_NDIS_SYMBOLIC_NAME L"\\DosDevices\\SarNdis"
 #define SAR_NDIS_SDDL_STRING L"D:P(A;;GA;;;AU)"
 
-NDIS_HANDLE gFilterDriverHandle;
-NDIS_HANDLE gDeviceHandle;
-PDEVICE_OBJECT gDeviceObject;
+SarNdisDriverState gDriverState;
 
 DRIVER_UNLOAD SarNdisDriverUnload;
 
@@ -54,12 +52,14 @@ DRIVER_DISPATCH SarNdisIrpClose;
 DRIVER_DISPATCH SarNdisIrpCleanup;
 DRIVER_DISPATCH SarNdisIrpDeviceIoControl;
 
-typedef struct SarNdisFilterModuleContext
+VOID SarNdisDeleteFilterModuleContext(SarNdisFilterModuleContext *context)
 {
-    NDIS_HANDLE filterHandle;
-    bool running;
-    bool enabled;
-} SarNdisFilterModuleContext;
+    if (context->instanceName.Buffer) {
+        SarStringFree(&context->instanceName);
+    }
+
+    ExFreePoolWithTag(context, SAR_TAG);
+}
 
 _Use_decl_annotations_
 NDIS_STATUS SarNdisFilterAttach(
@@ -68,28 +68,37 @@ NDIS_STATUS SarNdisFilterAttach(
     _In_ PNDIS_FILTER_ATTACH_PARAMETERS attachParameters)
 {
     SAR_LOG("SarNdisFilterAttach");
+    SAR_LOG("Attaching to miniport: %wZ (instance name %wZ)",
+        attachParameters->BaseMiniportName,
+        attachParameters->BaseMiniportInstanceName);
     UNREFERENCED_PARAMETER(filterDriverContext);
-    UNREFERENCED_PARAMETER(attachParameters);
     NTSTATUS status = STATUS_SUCCESS;
     NDIS_FILTER_ATTRIBUTES filterAttributes;
-    SarNdisFilterModuleContext *filterModuleContext =
+    SarNdisFilterModuleContext *context =
         (SarNdisFilterModuleContext *)ExAllocatePoolWithTag(
             NonPagedPool, sizeof(SarNdisFilterModuleContext), SAR_TAG);
 
-    if (!filterModuleContext) {
+    if (!context) {
         status = STATUS_INSUFFICIENT_RESOURCES;
         goto err_out;
     }
 
-    RtlZeroMemory(filterModuleContext, sizeof(SarNdisFilterModuleContext));
-    filterModuleContext->filterHandle = ndisFilterHandle;
+    RtlZeroMemory(context, sizeof(SarNdisFilterModuleContext));
+    context->refs = 1;
+    context->filterHandle = ndisFilterHandle;
+    status = SarStringDuplicate(
+        &context->instanceName, attachParameters->BaseMiniportInstanceName);
+
+    if (!NT_SUCCESS(status)) {
+        goto err_out;
+    }
+
     filterAttributes.Header.Type = NDIS_OBJECT_TYPE_FILTER_ATTRIBUTES;
     filterAttributes.Header.Revision = NDIS_FILTER_ATTRIBUTES_REVISION_1;
     filterAttributes.Header.Size = NDIS_SIZEOF_FILTER_ATTRIBUTES_REVISION_1;
     filterAttributes.Flags = 0;
 
-    status = NdisFSetAttributes(
-        ndisFilterHandle, filterModuleContext, &filterAttributes);
+    status = NdisFSetAttributes(ndisFilterHandle, context, &filterAttributes);
 
     if (!NT_SUCCESS(status)) {
         goto err_out;
@@ -98,18 +107,21 @@ NDIS_STATUS SarNdisFilterAttach(
     return STATUS_SUCCESS;
 
 err_out:
-    if (filterModuleContext != NULL) {
-        ExFreePoolWithTag(filterModuleContext, SAR_TAG);
+    if (context != NULL) {
+        SarNdisDeleteFilterModuleContext(context);
     }
 
     return status;
 }
 
 _Use_decl_annotations_
-void SarNdisFilterDetach(_In_ NDIS_HANDLE filterModuleContext)
+VOID SarNdisFilterDetach(_In_ NDIS_HANDLE filterModuleContext)
 {
     SAR_LOG("SarNdisFilterDetach");
-    UNREFERENCED_PARAMETER(filterModuleContext);
+    SarNdisFilterModuleContext *context =
+        (SarNdisFilterModuleContext *)filterModuleContext;
+
+    SarNdisReleaseFilterModuleContext(context);
 }
 
 _Use_decl_annotations_
@@ -123,6 +135,10 @@ NDIS_STATUS SarNdisFilterRestart(
         (SarNdisFilterModuleContext *)filterModuleContext;
 
     context->running = true;
+    ExAcquireFastMutex(&gDriverState.mutex);
+    InsertTailList(&gDriverState.runningFilters, &context->runningFiltersEntry);
+    SarNdisRetainFilterModuleContext(context);
+    ExReleaseFastMutex(&gDriverState.mutex);
     return STATUS_SUCCESS;
 }
 
@@ -137,22 +153,26 @@ NDIS_STATUS SarNdisFilterPause(
         (SarNdisFilterModuleContext *)filterModuleContext;
 
     context->running = false;
+    ExAcquireFastMutex(&gDriverState.mutex);
+    RemoveEntryList(&context->runningFiltersEntry);
+    ExReleaseFastMutex(&gDriverState.mutex);
+    SarNdisReleaseFilterModuleContext(context);
     return STATUS_SUCCESS;
 }
 
 _Use_decl_annotations_
-void SarNdisFilterSendNetBufferLists(
+VOID SarNdisFilterSendNetBufferLists(
     _In_ NDIS_HANDLE filterModuleContext,
     _In_ PNET_BUFFER_LIST netBufferLists,
     _In_ NDIS_PORT_NUMBER portNumber,
     _In_ ULONG sendFlags)
 {
-    SAR_LOG("SarNdisFilterSendNetBufferLists");
     UNREFERENCED_PARAMETER(portNumber);
     SarNdisFilterModuleContext *context =
         (SarNdisFilterModuleContext *)filterModuleContext;
 
     if (context->running && context->enabled) {
+        SAR_LOG("SarNdisFilterSendNetBufferLists");
         NdisFSendNetBufferListsComplete(
             context->filterHandle, netBufferLists,
             (sendFlags & NDIS_SEND_FLAGS_SWITCH_SINGLE_SOURCE) ?
@@ -209,33 +229,61 @@ NTSTATUS SarNdisIrpDeviceIoControl(
 {
     SAR_LOG("SarNdisIrpDeviceIoControl");
     UNREFERENCED_PARAMETER(deviceObject);
+    NTSTATUS status = STATUS_UNSUCCESSFUL;
+    PIO_STACK_LOCATION irpStack = IoGetCurrentIrpStackLocation(irp);
 
-    irp->IoStatus.Status = STATUS_UNSUCCESSFUL;
-    IoCompleteRequest(irp, IO_NO_INCREMENT);
-    return STATUS_UNSUCCESSFUL;
+    switch (irpStack->Parameters.DeviceIoControl.IoControlCode) {
+        case SARNDIS_ENUMERATE: {
+            int count = 0;
+            PLIST_ENTRY entry;
+
+            ExAcquireFastMutex(&gDriverState.mutex);
+            entry = gDriverState.runningFilters.Flink;
+
+            while (entry != &gDriverState.runningFilters) {
+                entry = entry->Flink;
+                count++;
+            }
+
+            ExReleaseFastMutex(&gDriverState.mutex);
+            SAR_LOG("Total number of attached and unpaused filters: %d", count);
+            break;
+        }
+        case SARNDIS_ENABLE:
+            break;
+        case SARNDIS_SYNC:
+            break;
+    }
+
+    if (status != STATUS_PENDING) {
+        irp->IoStatus.Status = status;
+        IoCompleteRequest(irp, IO_NO_INCREMENT);
+    }
+
+    return status;
 }
 
 _Use_decl_annotations_
-void SarNdisDriverUnload(PDRIVER_OBJECT driverObject)
+VOID SarNdisDriverUnload(PDRIVER_OBJECT driverObject)
 {
     SAR_LOG("SarNdisDriverUnload");
     UNREFERENCED_PARAMETER(driverObject);
 
-    if (gDeviceHandle) {
-        NdisDeregisterDeviceEx(gDeviceHandle);
-        gDeviceHandle = NULL;
-        gDeviceObject = NULL;
+    if (gDriverState.deviceHandle) {
+        NdisDeregisterDeviceEx(gDriverState.deviceHandle);
+        gDriverState.deviceHandle = NULL;
+        gDriverState.deviceObject = NULL;
     }
 
-    if (gFilterDriverHandle) {
-        NdisFDeregisterFilterDriver(gFilterDriverHandle);
-        gFilterDriverHandle = NULL;
+    if (gDriverState.filterDriverHandle) {
+        NdisFDeregisterFilterDriver(gDriverState.filterDriverHandle);
+        gDriverState.filterDriverHandle = NULL;
     }
 }
 
 extern "C" NTSTATUS DriverEntry(
-    IN PDRIVER_OBJECT driverObject,
-    IN PUNICODE_STRING registryPath)
+    _In_ PDRIVER_OBJECT driverObject,
+    _In_ PUNICODE_STRING registryPath)
 {
     SAR_LOG("SarNdis DriverEntry");
     UNREFERENCED_PARAMETER(registryPath);
@@ -243,9 +291,10 @@ extern "C" NTSTATUS DriverEntry(
     NDIS_DEVICE_OBJECT_ATTRIBUTES doa = {};
     UNICODE_STRING deviceName = {}, deviceLink = {}, sddlString = {};
     DRIVER_DISPATCH *dispatch[IRP_MJ_MAXIMUM_FUNCTION + 1] = {};
-
     NTSTATUS status = STATUS_SUCCESS;
 
+    ExInitializeFastMutex(&gDriverState.mutex);
+    InitializeListHead(&gDriverState.runningFilters);
     fdc.Header.Type = NDIS_OBJECT_TYPE_FILTER_DRIVER_CHARACTERISTICS;
     fdc.Header.Revision = NDIS_FILTER_CHARACTERISTICS_REVISION_2;
     fdc.Header.Size = NDIS_SIZEOF_FILTER_DRIVER_CHARACTERISTICS_REVISION_2;
@@ -265,7 +314,8 @@ extern "C" NTSTATUS DriverEntry(
     driverObject->DriverUnload = SarNdisDriverUnload;
 
     status = NdisFRegisterFilterDriver(
-        driverObject, (NDIS_HANDLE)driverObject, &fdc, &gFilterDriverHandle);
+        driverObject, (NDIS_HANDLE)driverObject, &fdc,
+        &gDriverState.filterDriverHandle);
 
     if (!NT_SUCCESS(status)) {
         return status;
@@ -290,10 +340,11 @@ extern "C" NTSTATUS DriverEntry(
     doa.DefaultSDDLString = &sddlString;
 
     status = NdisRegisterDeviceEx(
-        gFilterDriverHandle, &doa, &gDeviceObject, &gDeviceHandle);
+        gDriverState.filterDriverHandle, &doa,
+        &gDriverState.deviceObject, &gDriverState.deviceHandle);
 
     if (!NT_SUCCESS(status)) {
-        NdisFDeregisterFilterDriver(gFilterDriverHandle);
+        NdisFDeregisterFilterDriver(gDriverState.filterDriverHandle);
         return status;
     }
 

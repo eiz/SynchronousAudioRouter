@@ -24,6 +24,7 @@
 int main(int argc, char *argv[])
 {
 	HANDLE device;
+    DWORD bytes;
 
     device = CreateFile(L"\\??\\SarNdis",
         GENERIC_ALL, 0, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
@@ -35,7 +36,7 @@ int main(int argc, char *argv[])
     }
 
     std::cout << "Opened SarNdis device." << std::endl;
-
+    DeviceIoControl(device, SARNDIS_ENUMERATE, 0, 0, 0, 0, &bytes, 0);
     CloseHandle(device);
     return 0;
 }
