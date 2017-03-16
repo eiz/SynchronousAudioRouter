@@ -61,13 +61,24 @@
                   Execute="deferred"
                   Impersonate="no"
                   Return="check"/>
-
+    <CustomAction Id="InstallNdisFilter"
+                  BinaryKey="SarInstallerActions"
+                  DllEntry="InstallNdisFilter"
+                  Execute="deferred"
+                  Impersonate="no"
+                  Return="check"/>
     <CustomAction Id="RemoveDeviceNode"
                   BinaryKey="SarInstallerActions"
                   DllEntry="RemoveDeviceNode"
                   Execute="deferred"
                   Impersonate="no"
                   Return="check"/>
+    <CustomAction Id="UninstallNdisFilter"
+              BinaryKey="SarInstallerActions"
+              DllEntry="UninstallNdisFilter"
+              Execute="deferred"
+              Impersonate="no"
+              Return="check"/>
 
     <InstallExecuteSequence>
       <Custom Action="CreateDeviceNode.SetProperty" After="InstallFiles">
@@ -75,6 +86,12 @@
       </Custom>
       <Custom Action="CreateDeviceNode" After="CreateDeviceNode.SetProperty">
         NOT Installed AND NOT REMOVE
+      </Custom>
+      <Custom Action="InstallNdisFilter" After="MsiProcessDrivers">
+        NOT Installed AND NOT REMOVE
+      </Custom>
+      <Custom Action="UninstallNdisFilter" Before="MsiProcessDrivers">
+        REMOVE
       </Custom>
       <Custom Action="RemoveDeviceNode" Before="RemoveFiles">
         REMOVE

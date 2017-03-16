@@ -54,16 +54,11 @@ DRIVER_DISPATCH SarNdisIrpClose;
 DRIVER_DISPATCH SarNdisIrpCleanup;
 DRIVER_DISPATCH SarNdisIrpDeviceIoControl;
 
-enum SarNdisFilterState
-{
-    Paused,
-    Running,
-};
-
 typedef struct SarNdisFilterModuleContext
 {
     NDIS_HANDLE filterHandle;
-    SarNdisFilterState state;
+    bool running;
+    bool enabled;
 } SarNdisFilterModuleContext;
 
 _Use_decl_annotations_
@@ -127,7 +122,7 @@ NDIS_STATUS SarNdisFilterRestart(
     SarNdisFilterModuleContext *context =
         (SarNdisFilterModuleContext *)filterModuleContext;
 
-    context->state = Running;
+    context->running = true;
     return STATUS_SUCCESS;
 }
 
@@ -141,7 +136,7 @@ NDIS_STATUS SarNdisFilterPause(
     SarNdisFilterModuleContext *context =
         (SarNdisFilterModuleContext *)filterModuleContext;
 
-    context->state = Paused;
+    context->running = false;
     return STATUS_SUCCESS;
 }
 
@@ -157,7 +152,7 @@ void SarNdisFilterSendNetBufferLists(
     SarNdisFilterModuleContext *context =
         (SarNdisFilterModuleContext *)filterModuleContext;
 
-    if (context->state == Running) {
+    if (context->running && context->enabled) {
         NdisFSendNetBufferListsComplete(
             context->filterHandle, netBufferLists,
             (sendFlags & NDIS_SEND_FLAGS_SWITCH_SINGLE_SOURCE) ?
