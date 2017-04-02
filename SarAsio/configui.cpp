@@ -742,6 +742,30 @@ int ApplicationConfigDialog::indexOfEndpoint(const std::string& id)
     return 0;
 }
 
+std::string ApplicationConfigDialog::endpointAtIndex(
+    EDataFlow dataFlow, int index)
+{
+    int playbackIndex = 0, recordingIndex = 0;
+
+    for (auto& endpoint : _driverConfig.endpoints) {
+        if (endpoint.type ==
+                (dataFlow == eCapture ? EndpointType::Recording :
+                EndpointType::Playback) &&
+            index == (dataFlow == eCapture ? recordingIndex : playbackIndex)) {
+
+            return endpoint.id;
+        }
+
+        if (endpoint.type == EndpointType::Recording) {
+            recordingIndex++;
+        } else {
+            playbackIndex++;
+        }
+    }
+
+    return "";
+}
+
 void ApplicationConfigDialog::updateConfig()
 {
     _config.regexMatch = Button_GetCheck(_useRegularExpressions) == BST_CHECKED;
@@ -784,7 +808,7 @@ void ApplicationConfigDialog::updateDefaultEndpoint(
 
         defaultEndpoint.type = dataFlow;
         defaultEndpoint.role = role;
-        defaultEndpoint.id = _driverConfig.endpoints[index - 1].id;
+        defaultEndpoint.id = endpointAtIndex(dataFlow, index - 1);
         _config.defaults.push_back(defaultEndpoint);
     }
 }

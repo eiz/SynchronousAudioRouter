@@ -147,6 +147,7 @@ private:
     void refreshControls();
     void refreshEndpointDropdown(HWND control, EDataFlow dataFlow, ERole role);
     int indexOfEndpoint(const std::string& id);
+    std::string endpointAtIndex(EDataFlow dataFlow, int index);
     void updateConfig();
     void updateDefaultEndpoint(HWND control, EDataFlow dataFlow, ERole role);
     void onRunningApplicationsClicked();
