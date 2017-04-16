@@ -638,7 +638,7 @@ static NTSTATUS SarAddRegistryRedirect(
         goto err;
     }
 
-    status = SarInsertStringTableEntry(table, &srcLocal, &dstHeap);
+    status = SarInsertStringTableEntry(table, &srcLocal, dstHeap);
 
     if (!NT_SUCCESS(status)) {
         goto err;
@@ -685,7 +685,7 @@ err:
 static NTSTATUS SarAddAllRegistryRedirects(SarDriverExtension *extension)
 {
     NTSTATUS status = STATUS_SUCCESS;
-
+    PVOID p;
     PRTL_AVL_TABLE wow64 = &extension->registryRedirectTableWow64;
     PRTL_AVL_TABLE table = &extension->registryRedirectTable;
 
@@ -698,6 +698,21 @@ static NTSTATUS SarAddAllRegistryRedirects(SarDriverExtension *extension)
         L"{E2F7A62A-862B-40AE-BBC2-5C0CA9A5B7E1}",
         L"{739191CC-CCBE-45D8-8D24-828D8E989E8E}"
     );
+
+    for (p = RtlEnumerateGenericTableAvl(table, TRUE); p;
+         p = RtlEnumerateGenericTableAvl(table, FALSE)) {
+
+        SarStringTableEntry *entry = (SarStringTableEntry *)p;
+        SAR_LOG("Registry mapping: %wZ -> %wZ", &entry->key, entry->value);
+    }
+
+    for (p = RtlEnumerateGenericTableAvl(wow64, TRUE); p;
+         p = RtlEnumerateGenericTableAvl(wow64, FALSE)) {
+
+        SarStringTableEntry *entry = (SarStringTableEntry *)p;
+        SAR_LOG("WOW64 Registry mapping: %wZ -> %wZ",
+            &entry->key, entry->value);
+    }
 
     return STATUS_SUCCESS;
 }
