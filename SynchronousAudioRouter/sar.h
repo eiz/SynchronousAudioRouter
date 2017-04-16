@@ -464,7 +464,7 @@ NTSTATUS SarReadEndpointRegisters(
 NTSTATUS SarWriteEndpointRegisters(
     SarEndpointRegisters *regs, SarEndpoint *endpoint);
 
-NTSTATUS SarStringDuplicate(PUNICODE_STRING str, PUNICODE_STRING src);
+NTSTATUS SarStringDuplicate(PUNICODE_STRING str, PCUNICODE_STRING src);
 
 void SarInitializeHandleQueue(SarHandleQueue *queue);
 NTSTATUS SarTransferQueuedHandle(

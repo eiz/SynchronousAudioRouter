@@ -95,7 +95,7 @@ SarEndpoint *SarGetEndpointFromIrp(PIRP irp, BOOLEAN retain)
 }
 #endif
 
-NTSTATUS SarStringDuplicate(PUNICODE_STRING str, PUNICODE_STRING src)
+NTSTATUS SarStringDuplicate(PUNICODE_STRING str, PCUNICODE_STRING src)
 {
     PWCH buffer = (PWCH)ExAllocatePoolWithTag(
         NonPagedPool, src->MaximumLength, SAR_TAG);

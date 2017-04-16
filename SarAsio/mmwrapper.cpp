@@ -15,7 +15,6 @@
 // along with SynchronousAudioRouter.  If not, see <http://www.gnu.org/licenses/>.
 
 #include "stdafx.h"
-#include <initguid.h>
 #include "mmwrapper.h"
 #include "utility.h"
 #include <DbgHelp.h>
@@ -35,17 +34,24 @@ const PROPERTYKEY PKEY_SynchronousAudioRouter_EndpointId =
     0
 };
 
-SarMMDeviceEnumerator::SarMMDeviceEnumerator()
+// There's an undocumented device property that gives the actual path to the
+// kernel streaming device, which is what ActivateAudioInterfaceAsync expects.
+// TODO: find a better way to get this from IMMDevice.
+const PROPERTYKEY PKEY_Unknown_DevicePath =
 {
-    LOG(INFO) << "Initializing SarMMDeviceEnumerator.";
+    { 0x9c119480, 0xddc2, 0x4954,
+      { 0xa1, 0x50, 0x5b, 0xd2, 0x40, 0xd4, 0x54, 0xad } },
+    1
+};
 
+static HRESULT CreateMMDevAPIObject(
+    REFCLSID rclsid, REFIID riid, LPVOID *ppvObject)
+{
     char buf[256] = {};
     DllGetClassObjectFn *fn_DllGetClassObject;
     CComPtr<IClassFactory> cf;
     HMODULE lib, dummy;
     HRESULT hr;
-
-    _config = DriverConfig::fromFile(ConfigurationPath("default.json"));
 
     // Our registry filter has replaced the registration for the
     // MMDeviceEnumerator with our wrapper object, but we need to instantiate
@@ -53,19 +59,18 @@ SarMMDeviceEnumerator::SarMMDeviceEnumerator()
     // filter to get the original registration back, as CoCreateInstance uses
     // an internal class cache and won't re-load the registration. So we hack
     // job it and instantiate the object directly using the DLL's
-    // DllGetClassObject export. This should be mostly safe since
-    // MMDeviceEnumerator has a threading model of 'both', so proxies should
-    // never be needed.
+    // DllGetClassObject export. In order for this to be safe, the wrapper
+    // object must use the same threading model as the underlying one.
     if (!ExpandEnvironmentStringsA(MMDEVAPI_PATH, buf, sizeof(buf))) {
         LOG(ERROR) << "Failed to get MMDEVAPI_PATH";
-        return;
+        return E_FAIL;
     }
 
     lib = LoadLibraryA(buf);
 
     if (!lib) {
         LOG(ERROR) << "Failed to load MMDevAPI";
-        return;
+        return E_FAIL;
     }
 
     fn_DllGetClassObject =
@@ -74,7 +79,7 @@ SarMMDeviceEnumerator::SarMMDeviceEnumerator()
     if (!fn_DllGetClassObject) {
         LOG(ERROR) << "Failed to get DllClassObject from MMDevAPI";
         FreeLibrary(lib);
-        return;
+        return E_FAIL;
     }
 
     // Because of the nasty way we're loading the underlying COM object outside
@@ -93,15 +98,26 @@ SarMMDeviceEnumerator::SarMMDeviceEnumerator()
     // balance the LoadLibraryA call above.
     FreeLibrary(lib);
 
-    if (!SUCCEEDED(fn_DllGetClassObject(
-        __uuidof(MMDeviceEnumerator), IID_IClassFactory, (LPVOID *)&cf))) {
+    if (!SUCCEEDED(hr = fn_DllGetClassObject(
+        rclsid, IID_IClassFactory, (LPVOID *)&cf))) {
 
-        LOG(ERROR) << "Failed to instantiate MMDeviceEnumerator";
-        return;
+        LOG(ERROR) << "Failed to instantiate class factory";
+        return hr;
     }
 
-    hr = cf->CreateInstance(
-        0, __uuidof(IMMDeviceEnumerator), (LPVOID *)&_innerEnumerator);
+    return cf->CreateInstance(0, riid, ppvObject);
+}
+
+SarMMDeviceEnumerator::SarMMDeviceEnumerator()
+{
+    LOG(INFO) << "Initializing SarMMDeviceEnumerator.";
+    HRESULT hr;
+
+    _config = DriverConfig::fromFile(ConfigurationPath("default.json"));
+
+    hr = CreateMMDevAPIObject(
+        __uuidof(MMDeviceEnumerator), __uuidof(IMMDeviceEnumerator),
+        (LPVOID *)&_innerEnumerator);
 
     if (!SUCCEEDED(hr)) {
         LOG(ERROR) << "Failed to instantiate MMDeviceEnumerator";
@@ -329,6 +345,21 @@ HRESULT STDMETHODCALLTYPE SarMMDeviceCollection::Item(
     return _items[nDevice].CopyTo(ppDevice);
 }
 
+SarActivateAudioInterfaceWorker::SarActivateAudioInterfaceWorker()
+{
+    HRESULT hr;
+
+    hr = CreateMMDevAPIObject(
+        __uuidof(SarActivateAudioInterfaceWorker),
+        __uuidof(IActivateAudioInterfaceWorker),
+        (LPVOID *)&_innerWorker);
+
+    if (!SUCCEEDED(hr)) {
+        LOG(ERROR)
+            << "Failed to initialize inner ActivateAudioInterfaceWorker.";
+    }
+}
+
 HRESULT STDMETHODCALLTYPE SarActivateAudioInterfaceWorker::Initialize(
     LPCWSTR deviceInterfacePath,
     REFIID riid,
@@ -336,8 +367,94 @@ HRESULT STDMETHODCALLTYPE SarActivateAudioInterfaceWorker::Initialize(
     IActivateAudioInterfaceCompletionHandler *completionHandler,
     UINT threadId)
 {
-    LOG(INFO) << "SarActivateAudioInterfaceWorker::Initialize";
-    return S_OK;
+    if (!_innerWorker) {
+        return E_FAIL;
+    }
+
+    auto path = TCHARToUTF8(deviceInterfacePath);
+    LPOLESTR riidStr;
+    HRESULT hr;
+    CComPtr<IMMDeviceEnumerator> mmEnum;
+    CComPtr<IMMDevice> mmDevice;
+    std::wstring defaultDevicePath = deviceInterfacePath;
+
+    hr = CoCreateInstance(
+        __uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL,
+        __uuidof(IMMDeviceEnumerator), (LPVOID *)&mmEnum);
+
+    if (!SUCCEEDED(hr)) {
+        LOG(ERROR) << "Failed to create device enumerator.";
+        return hr;
+    }
+
+    StringFromCLSID(riid, &riidStr);
+    LOG(INFO) << "SarActivateAudioInterfaceWorker::Initialize("
+        << TCHARToUTF8(deviceInterfacePath) << ", "
+        << TCHARToUTF8(riidStr) << ", "
+        << "activationParams, "
+        << std::hex << completionHandler << ", " << threadId << "), thread id "
+        << std::hex << GetCurrentThreadId() << std::dec;
+    CoTaskMemFree(riidStr);
+    hr = S_OK;
+
+    if (path == "{E6327CAD-DCEC-4949-AE8A-991E976A79D2}") {
+        LOG(INFO) << "Caller is trying to initialize default render interface.";
+
+        hr = mmEnum->GetDefaultAudioEndpoint(eRender, eConsole, &mmDevice);
+    }
+
+    if (path == "{2EEF81BE-33FA-4800-9670-1CD474972C3F}") {
+        LOG(INFO) << "Caller is trying to initialize default record interface.";
+
+        hr = mmEnum->GetDefaultAudioEndpoint(eCapture, eConsole, &mmDevice);
+    }
+
+    if (SUCCEEDED(hr) && mmDevice) {
+        do {
+            CComPtr<IPropertyStore> ps;
+            PROPVARIANT pvalue = {};
+
+            if (!SUCCEEDED(mmDevice->OpenPropertyStore(STGM_READ, &ps))) {
+                break;
+            }
+
+            if (!SUCCEEDED(ps->GetValue(PKEY_Unknown_DevicePath, &pvalue))) {
+                break;
+            }
+
+            defaultDevicePath = pvalue.pwszVal;
+            PropVariantClear(&pvalue);
+        } while(0);
+    }
+
+    LOG(INFO) << "Using device " << TCHARToUTF8(defaultDevicePath.c_str());
+    return _innerWorker->Initialize(
+        defaultDevicePath.c_str(),
+        riid, activationParams, completionHandler, threadId);
+}
+
+HRESULT STDMETHODCALLTYPE SarActivateAudioInterfaceWorker::GetActivateResult(
+    _Out_  HRESULT *activateResult,
+    _Outptr_result_maybenull_  IUnknown **activatedInterface)
+{
+    // This wrapper is never actually called by the implementation of the worker
+    // but ActivateAudioInterfaceAsync does a QueryInterface on us to make sure
+    // that it's actually present.
+    LOG(INFO) << "SarActivateAudioInterfaceWorker::GetActivateResult";
+
+    if (!_innerWorker) {
+        return E_FAIL;
+    }
+
+    CComQIPtr<IActivateAudioInterfaceAsyncOperation>
+        innerOperation(_innerWorker);
+
+    if (!innerOperation) {
+        return E_FAIL;
+    }
+
+    return innerOperation->GetActivateResult(
+        activateResult, activatedInterface);
 }
 
 } // namespace Sar

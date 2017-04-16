@@ -404,6 +404,12 @@ BOOL SarFilterMatchesPath(
     PRTL_AVL_TABLE table = &extension->registryRedirectTable;
     PVOID entry = nullptr;
     KIRQL irql;
+    UNICODE_STRING nonpagedPath;
+    NTSTATUS status = STATUS_SUCCESS;
+
+    if (!path) {
+        return FALSE;
+    }
 
 #ifdef _WIN64
     if (IoIs32bitProcess(nullptr)) {
@@ -411,14 +417,24 @@ BOOL SarFilterMatchesPath(
     }
 #endif
 
+    // TODO: we get a path that's in paged memory from the configuration manager
+    // so we can't access it with IRQL raised to dispatch level by the spinlock.
+    // Probably better to just use an ERESOURCE or something here instead.
+    status = SarStringDuplicate(&nonpagedPath, path);
+
+    if (!NT_SUCCESS(status)) {
+        return FALSE;
+    }
+
     irql = ExAcquireSpinLockShared(&extension->registryRedirectLock);
-    entry = SarGetStringTableEntry(table, path);
+    entry = SarGetStringTableEntry(table, &nonpagedPath);
 
     if (entry) {
         *redirectPath = *(PCUNICODE_STRING)entry;
     }
 
     ExReleaseSpinLockShared(&extension->registryRedirectLock, irql);
+    SarStringFree(&nonpagedPath);
     return entry != nullptr;
 }
 

@@ -99,13 +99,26 @@ struct DECLSPEC_UUID("E2F7A62A-862B-40AE-BBC2-5C0CA9A5B7E1") ATL_NO_VTABLE
     SarActivateAudioInterfaceWorker:
         public CComObjectRootEx<CComMultiThreadModel>,
         public CComCoClass<SarActivateAudioInterfaceWorker>,
-        public IActivateAudioInterfaceWorker
+        public IActivateAudioInterfaceWorker,
+        public IActivateAudioInterfaceAsyncOperation
 {
     BEGIN_COM_MAP(SarActivateAudioInterfaceWorker)
         COM_INTERFACE_ENTRY(IActivateAudioInterfaceWorker)
+        COM_INTERFACE_ENTRY(IActivateAudioInterfaceAsyncOperation)
+        COM_INTERFACE_ENTRY_AGGREGATE(__uuidof(IMarshal), _marshaler)
     END_COM_MAP()
 
     DECLARE_NO_REGISTRY()
+    DECLARE_GET_CONTROLLING_UNKNOWN()
+    DECLARE_PROTECT_FINAL_CONSTRUCT()
+
+    SarActivateAudioInterfaceWorker();
+
+    HRESULT FinalConstruct()
+    {
+        return CoCreateFreeThreadedMarshaler(
+            GetControllingUnknown(), &_marshaler);
+    }
 
     virtual HRESULT STDMETHODCALLTYPE Initialize(
         LPCWSTR deviceInterfacePath,
@@ -113,6 +126,13 @@ struct DECLSPEC_UUID("E2F7A62A-862B-40AE-BBC2-5C0CA9A5B7E1") ATL_NO_VTABLE
         PROPVARIANT *activationParams,
         IActivateAudioInterfaceCompletionHandler *completionHandler,
         UINT threadId) override;
+    virtual HRESULT STDMETHODCALLTYPE GetActivateResult(
+        _Out_  HRESULT *activateResult,
+        _Outptr_result_maybenull_  IUnknown **activatedInterface) override;
+
+private:
+    CComPtr<IActivateAudioInterfaceWorker> _innerWorker;
+    CComPtr<IUnknown> _marshaler;
 };
 
 OBJECT_ENTRY_AUTO(__uuidof(MMDeviceEnumerator), SarMMDeviceEnumerator)

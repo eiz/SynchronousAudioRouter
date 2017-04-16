@@ -15,7 +15,6 @@
 // along with SynchronousAudioRouter.  If not, see <http://www.gnu.org/licenses/>.
 
 #include "stdafx.h"
-#include <initguid.h>
 #include "dllmain.h"
 #include "utility.h"
 

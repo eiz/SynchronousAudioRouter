@@ -10,6 +10,6 @@ interface IActivateAudioInterfaceWorker: IUnknown
         [in] REFIID riid,
         [in] PROPVARIANT *activationParams,
         [in] IActivateAudioInterfaceCompletionHandler *completionHandler,
-        UINT threadId /* not sure */
+        UINT threadId /* non-zero if called from a single threaded apartment */
     );
 }
