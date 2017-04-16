@@ -176,6 +176,12 @@ typedef struct SarTableEntry
     PVOID value;
 } SarTableEntry;
 
+typedef struct SarStringTableEntry
+{
+    UNICODE_STRING key;
+    PVOID value;
+} SarStringTableEntry;
+
 typedef struct SarDriverExtension
 {
     PDRIVER_DISPATCH ksDispatchCreate;
@@ -186,6 +192,16 @@ typedef struct SarDriverExtension
     UNICODE_STRING sarInterfaceName;
     FAST_MUTEX mutex;
     RTL_GENERIC_TABLE controlContextTable;
+    // This shouldn't really be needed as long as CmUnRegisterCallback can't
+    // complete while one of our callback routines is still running, but there
+    // is no explicit documentation of that, so we protect the registry redirect
+    // tables with a reader writer spinlock "just in case." Note that
+    // RTL_AVL_TABLE is used here instead of RTL_GENERIC_TABLE to avoid
+    // splaying which would be unsafe with a read-only lock. All related
+    // structures must be in nonpaged memory.
+    EX_SPIN_LOCK registryRedirectLock;
+    RTL_AVL_TABLE registryRedirectTableWow64;
+    RTL_AVL_TABLE registryRedirectTable;
     LARGE_INTEGER filterCookie;
     PTOKEN_USER filterUser;
 } SarDriverExtension;
@@ -468,6 +484,17 @@ NTSTATUS SarInsertTableEntry(PRTL_GENERIC_TABLE table, PVOID key, PVOID value);
 BOOLEAN SarRemoveTableEntry(PRTL_GENERIC_TABLE table, PVOID key);
 PVOID SarGetTableEntry(PRTL_GENERIC_TABLE table, PVOID key);
 VOID SarInitializeTable(PRTL_GENERIC_TABLE table);
+
+RTL_GENERIC_COMPARE_RESULTS NTAPI SarCompareStringTableEntry(
+    PRTL_AVL_TABLE table, PVOID lhs, PVOID rhs);
+NTSTATUS SarInsertStringTableEntry(
+    PRTL_AVL_TABLE table, PUNICODE_STRING key, PVOID value);
+BOOLEAN SarRemoveStringTableEntry(
+    PRTL_AVL_TABLE table, PUNICODE_STRING key);
+VOID NTAPI SarFreeStringTableEntry(PRTL_AVL_TABLE table, PVOID buffer);
+PVOID SarGetStringTableEntry(PRTL_AVL_TABLE table, PCUNICODE_STRING key);
+VOID SarInitializeStringTable(PRTL_AVL_TABLE table);
+VOID SarClearStringTable(PRTL_AVL_TABLE table, VOID (*freeCb)(PVOID));
 
 NTSTATUS SarCopyProcessUser(PEPROCESS process, PTOKEN_USER *outTokenUser);
 

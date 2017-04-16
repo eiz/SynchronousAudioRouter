@@ -7,5 +7,13 @@ HKCR {
 				val ThreadingModel = s 'both'
 			}
 		}
+
+		ForceRemove '{739191CC-CCBE-45D8-8D24-828D8E989E8E}' =
+			s 'Synchronous Audio Router ActivateAudioInterfaceWorker Wrapper' {
+			ProgID = s 'SarActivateAudioInterfaceWorker.1'
+			InProcServer32 = s '%MODULE%' {
+				val ThreadingModel = s 'free'
+			}
+		}
 	}
 }

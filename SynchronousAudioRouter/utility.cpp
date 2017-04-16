@@ -517,6 +517,119 @@ PVOID SarGetTableEntry(PRTL_GENERIC_TABLE table, PVOID key)
     return nullptr;
 }
 
+RTL_GENERIC_COMPARE_RESULTS NTAPI SarCompareStringTableEntry(
+    PRTL_AVL_TABLE table, PVOID lhs, PVOID rhs)
+{
+    UNREFERENCED_PARAMETER(table);
+    SarStringTableEntry *le = (SarStringTableEntry *)lhs;
+    SarStringTableEntry *re = (SarStringTableEntry *)rhs;
+    LONG result = RtlCompareUnicodeString(&le->key, &re->key, TRUE);
+
+    return result < 0 ? GenericLessThan :
+        result > 0 ? GenericGreaterThan : GenericEqual;
+}
+
+NTSTATUS SarInsertStringTableEntry(
+    PRTL_AVL_TABLE table, PUNICODE_STRING key, PVOID value)
+{
+    NTSTATUS status = STATUS_SUCCESS;
+    SarStringTableEntry entry = { {}, value };
+    BOOLEAN isNew = FALSE;
+    PVOID result = nullptr;
+
+    status = SarStringDuplicate(&entry.key, key);
+
+    if (!NT_SUCCESS(status)) {
+        goto err;
+    }
+
+    result = RtlInsertElementGenericTableAvl(
+        table, &entry, sizeof(entry), &isNew);
+
+    if (!result) {
+        status = STATUS_INSUFFICIENT_RESOURCES;
+        goto err;
+    }
+
+    if (!isNew) {
+        status = STATUS_OBJECT_NAME_EXISTS;
+        goto err;
+    }
+
+    return STATUS_SUCCESS;
+
+err:
+    if (entry.key.Buffer) {
+        SarStringFree(&entry.key);
+    }
+
+    return status;
+}
+
+BOOLEAN SarRemoveStringTableEntry(
+    PRTL_AVL_TABLE table, PUNICODE_STRING key)
+{
+    SarStringTableEntry entry = { *key, nullptr };
+
+    return RtlDeleteElementGenericTableAvl(table, &entry);
+}
+
+PVOID NTAPI SarAllocateStringTableEntry(PRTL_AVL_TABLE table, CLONG byteSize)
+{
+    UNREFERENCED_PARAMETER(table);
+    return ExAllocatePoolWithTag(NonPagedPool, byteSize, SAR_TAG);
+}
+
+VOID NTAPI SarFreeStringTableEntry(PRTL_AVL_TABLE table, PVOID buffer)
+{
+    UNREFERENCED_PARAMETER(table);
+    SarStringTableEntry *entry = (SarStringTableEntry *)(
+        (PCHAR)buffer + sizeof(RTL_BALANCED_LINKS));
+
+    if (entry->key.Buffer) {
+        SarStringFree(&entry->key);
+    }
+
+    ExFreePoolWithTag(buffer, SAR_TAG);
+}
+
+PVOID SarGetStringTableEntry(PRTL_AVL_TABLE table, PCUNICODE_STRING key)
+{
+    SarStringTableEntry entry = { *key, nullptr };
+    SarStringTableEntry *result =
+        (SarStringTableEntry *)RtlLookupElementGenericTableAvl(table, &entry);
+
+    if (result) {
+        return result->value;
+    }
+
+    return nullptr;
+}
+
+VOID SarInitializeStringTable(PRTL_AVL_TABLE table)
+{
+    RtlInitializeGenericTableAvl(table,
+        SarCompareStringTableEntry,
+        SarAllocateStringTableEntry,
+        SarFreeStringTableEntry,
+        nullptr);
+}
+
+VOID SarClearStringTable(PRTL_AVL_TABLE table, VOID (*freeCb)(PVOID))
+{
+    PVOID entry;
+
+    while ((entry = RtlGetElementGenericTableAvl(table, 0)) != NULL) {
+        SarStringTableEntry *stEntry = (SarStringTableEntry *)entry;
+        PVOID value = stEntry->value;
+
+        RtlDeleteElementGenericTableAvl(table, entry);
+        freeCb(value);
+    }
+
+    NT_ASSERT(RtlIsGenericTableEmptyAvl(table));
+}
+
 NTSTATUS SarCopyProcessUser(PEPROCESS process, PTOKEN_USER *outTokenUser)
 {
     NT_ASSERT(process);

@@ -18,6 +18,8 @@
 #include <initguid.h>
 #include "mmwrapper.h"
 #include "utility.h"
+#include <DbgHelp.h>
+#pragma comment(lib, "dbghelp.lib")
 
 namespace Sar {
 
@@ -35,6 +37,8 @@ const PROPERTYKEY PKEY_SynchronousAudioRouter_EndpointId =
 
 SarMMDeviceEnumerator::SarMMDeviceEnumerator()
 {
+    LOG(INFO) << "Initializing SarMMDeviceEnumerator.";
+
     char buf[256] = {};
     DllGetClassObjectFn *fn_DllGetClassObject;
     CComPtr<IClassFactory> cf;
@@ -49,9 +53,9 @@ SarMMDeviceEnumerator::SarMMDeviceEnumerator()
     // filter to get the original registration back, as CoCreateInstance uses
     // an internal class cache and won't re-load the registration. So we hack
     // job it and instantiate the object directly using the DLL's
-    // DllGetClassObject export. This should be mostly safe since we're
-    // mimicking the threading model of MMDeviceEnumerator already, and we never
-    // expose the raw underlying interface pointer to our consumers.
+    // DllGetClassObject export. This should be mostly safe since
+    // MMDeviceEnumerator has a threading model of 'both', so proxies should
+    // never be needed.
     if (!ExpandEnvironmentStringsA(MMDEVAPI_PATH, buf, sizeof(buf))) {
         LOG(ERROR) << "Failed to get MMDEVAPI_PATH";
         return;
@@ -102,6 +106,8 @@ SarMMDeviceEnumerator::SarMMDeviceEnumerator()
     if (!SUCCEEDED(hr)) {
         LOG(ERROR) << "Failed to instantiate MMDeviceEnumerator";
     }
+
+    LOG(INFO) << "Initialized SarMMDeviceEnumerator.";
 }
 
 SarMMDeviceEnumerator::~SarMMDeviceEnumerator()
@@ -118,8 +124,46 @@ HRESULT STDMETHODCALLTYPE SarMMDeviceEnumerator::EnumAudioEndpoints(
         return E_FAIL;
     }
 
-    return _innerEnumerator->EnumAudioEndpoints(
-        dataFlow, dwStateMask, ppDevices);
+    LOG(INFO) << "SarMMDeviceEnumerator::EnumAudioEndpoints";
+
+    CComPtr<IMMDeviceCollection> innerCollection;
+    CComPtr<IMMDeviceCollection> outerCollection;
+    std::vector<CComPtr<IMMDevice>> devices;
+    auto hr = _innerEnumerator->EnumAudioEndpoints(
+        dataFlow, dwStateMask, &innerCollection);
+
+    if (!SUCCEEDED(hr)) {
+        return hr;
+    }
+
+    UINT numDevices;
+    hr = innerCollection->GetCount(&numDevices);
+
+    if (!SUCCEEDED(hr)) {
+        return hr;
+    }
+
+    for (UINT i = 0; i < numDevices; ++i) {
+        CComPtr<IMMDevice> device;
+
+        hr = innerCollection->Item(i, &device);
+
+        if (!SUCCEEDED(hr)) {
+            continue;
+        }
+
+        devices.emplace_back(device);
+    }
+
+    hr = SarMMDeviceCollection::CreateInstance(&outerCollection);
+
+    if (!SUCCEEDED(hr)) {
+        return hr;
+    }
+
+    CComQIPtr<ISarMMDeviceCollectionInit> ocInit(outerCollection);
+    ocInit->Initialize(devices);
+    return outerCollection.CopyTo(ppDevices);
 }
 
 HRESULT STDMETHODCALLTYPE SarMMDeviceEnumerator::GetDefaultAudioEndpoint(
@@ -127,6 +171,8 @@ HRESULT STDMETHODCALLTYPE SarMMDeviceEnumerator::GetDefaultAudioEndpoint(
     _In_ ERole role,
     _Out_ IMMDevice **ppEndpoint)
 {
+    LOG(INFO) << "SarMMDeviceEnumerator::GetDefaultAudioEndpoint";
+
     if (!_innerEnumerator) {
         return E_FAIL;
     }
@@ -221,6 +267,10 @@ HRESULT STDMETHODCALLTYPE SarMMDeviceEnumerator::GetDevice(
         return E_FAIL;
     }
 
+    auto deviceId = TCHARToUTF8(pwstrId);
+    LOG(INFO) << "SarMMDeviceEnumerator::GetDevice("
+        << deviceId << ")";
+
     return _innerEnumerator->GetDevice(pwstrId, ppDevice);
 }
 
@@ -232,6 +282,7 @@ SarMMDeviceEnumerator::RegisterEndpointNotificationCallback(
         return E_FAIL;
     }
 
+    LOG(INFO) << "SarMMDeviceEnumerator::RegisterEndpointNotificationCallback";
     return _innerEnumerator->RegisterEndpointNotificationCallback(pClient);
 }
 
@@ -243,8 +294,50 @@ SarMMDeviceEnumerator::UnregisterEndpointNotificationCallback(
         return E_FAIL;
     }
 
+    LOG(INFO)
+        << "SarMMDeviceEnumerator::UnregisterEndpointNotificationCallback";
     return _innerEnumerator->UnregisterEndpointNotificationCallback(
         pClient);
+}
+
+HRESULT SarMMDeviceCollection::Initialize(
+    const std::vector<CComPtr<IMMDevice>> &items)
+{
+    _items = items;
+    return S_OK;
+}
+
+HRESULT STDMETHODCALLTYPE SarMMDeviceCollection::GetCount(
+    _Out_ UINT *pcDevices)
+{
+    if (!pcDevices) {
+        return E_POINTER;
+    }
+
+    *pcDevices = (UINT)_items.size();
+    return S_OK;
+}
+
+HRESULT STDMETHODCALLTYPE SarMMDeviceCollection::Item(
+    _In_ UINT nDevice, _Out_ IMMDevice **ppDevice)
+{
+    if (nDevice >= _items.size()) {
+        return E_INVALIDARG;
+    }
+
+    LOG(INFO) << "Getting enumerated device at index " << nDevice;
+    return _items[nDevice].CopyTo(ppDevice);
+}
+
+HRESULT STDMETHODCALLTYPE SarActivateAudioInterfaceWorker::Initialize(
+    LPCWSTR deviceInterfacePath,
+    REFIID riid,
+    PROPVARIANT *activationParams,
+    IActivateAudioInterfaceCompletionHandler *completionHandler,
+    UINT threadId)
+{
+    LOG(INFO) << "SarActivateAudioInterfaceWorker::Initialize";
+    return S_OK;
 }
 
 } // namespace Sar

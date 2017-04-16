@@ -1,0 +1,15 @@
+import "oaidl.idl";
+import "ocidl.idl";
+import "mmdeviceapi.idl";
+
+[object, uuid(ef4accab-272b-4cab-a9b7-0163d1415d8f), local]
+interface IActivateAudioInterfaceWorker: IUnknown
+{
+    HRESULT Initialize(
+        [in] LPCWSTR deviceInterfacePath,
+        [in] REFIID riid,
+        [in] PROPVARIANT *activationParams,
+        [in] IActivateAudioInterfaceCompletionHandler *completionHandler,
+        UINT threadId /* not sure */
+    );
+}

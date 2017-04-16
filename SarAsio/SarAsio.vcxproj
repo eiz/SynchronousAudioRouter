@@ -219,6 +219,9 @@
   <ItemGroup>
     <ResourceCompile Include="SarAsio.rc" />
   </ItemGroup>
+  <ItemGroup>
+    <Midl Include="ActivateAudioInterfaceWorker.idl" />
+  </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>

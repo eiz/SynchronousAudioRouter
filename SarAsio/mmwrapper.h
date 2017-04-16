@@ -18,6 +18,7 @@
 #define _SAR_ASIO_MMWRAPPER_H
 
 #include "config.h"
+#include "ActivateAudioInterfaceWorker_h.h"
 
 namespace Sar {
 
@@ -59,7 +60,66 @@ private:
     CComPtr<IMMDeviceEnumerator> _innerEnumerator;
 };
 
+struct DECLSPEC_UUID("7A3A9E4A-6212-42C8-BE71-5772D95CCD8E") ATL_NO_VTABLE
+    ISarMMDeviceCollectionInit: public IUnknown
+{
+    virtual HRESULT Initialize(
+        const std::vector<CComPtr<IMMDevice>> &items) = 0;
+};
+
+struct DECLSPEC_UUID("A3A81B80-F89F-4806-A2AF-0E8CC2E8F8E5") ATL_NO_VTABLE
+    SarMMDeviceCollection:
+        public CComObjectRootEx<CComMultiThreadModel>,
+        public CComCoClass<SarMMDeviceCollection>,
+        public IMMDeviceCollection,
+        public ISarMMDeviceCollectionInit
+{
+    BEGIN_COM_MAP(SarMMDeviceCollection)
+        COM_INTERFACE_ENTRY(IMMDeviceCollection)
+        COM_INTERFACE_ENTRY(ISarMMDeviceCollectionInit)
+    END_COM_MAP()
+
+    DECLARE_NO_REGISTRY()
+
+    SarMMDeviceCollection() {}
+    virtual ~SarMMDeviceCollection() {}
+
+    virtual HRESULT STDMETHODCALLTYPE GetCount(
+        _Out_ UINT *pcDevices) override;
+    virtual HRESULT STDMETHODCALLTYPE Item(
+        _In_ UINT nDevice, _Out_ IMMDevice **ppDevice) override;
+    virtual HRESULT Initialize(
+        const std::vector<CComPtr<IMMDevice>> &items) override;
+
+private:
+    std::vector<CComPtr<IMMDevice>> _items;
+};
+
+struct DECLSPEC_UUID("E2F7A62A-862B-40AE-BBC2-5C0CA9A5B7E1") ATL_NO_VTABLE
+    SarActivateAudioInterfaceWorker:
+        public CComObjectRootEx<CComMultiThreadModel>,
+        public CComCoClass<SarActivateAudioInterfaceWorker>,
+        public IActivateAudioInterfaceWorker
+{
+    BEGIN_COM_MAP(SarActivateAudioInterfaceWorker)
+        COM_INTERFACE_ENTRY(IActivateAudioInterfaceWorker)
+    END_COM_MAP()
+
+    DECLARE_NO_REGISTRY()
+
+    virtual HRESULT STDMETHODCALLTYPE Initialize(
+        LPCWSTR deviceInterfacePath,
+        REFIID riid,
+        PROPVARIANT *activationParams,
+        IActivateAudioInterfaceCompletionHandler *completionHandler,
+        UINT threadId) override;
+};
+
 OBJECT_ENTRY_AUTO(__uuidof(MMDeviceEnumerator), SarMMDeviceEnumerator)
+OBJECT_ENTRY_AUTO(
+    __uuidof(SarActivateAudioInterfaceWorker), SarActivateAudioInterfaceWorker)
+OBJECT_ENTRY_NON_CREATEABLE_EX_AUTO(
+    __uuidof(SarMMDeviceCollection), SarMMDeviceCollection)
 
 } // namespace Sar
 

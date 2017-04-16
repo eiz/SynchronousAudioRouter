@@ -17,6 +17,7 @@
 #include <initguid.h>
 #include "sar.h"
 
+static void SarDeleteRegistryRedirect(PVOID ptr);
 DRIVER_DISPATCH SarIrpCreate;
 DRIVER_DISPATCH SarIrpDeviceControl;
 DRIVER_DISPATCH SarIrpClose;
@@ -355,7 +356,7 @@ NTSTATUS SarIrpDeviceControl(PDEVICE_OBJECT deviceObject, PIRP irp)
 VOID SarUnload(PDRIVER_OBJECT driverObject)
 {
     SAR_LOG("SAR is unloading");
-
+    KIRQL irql;
     SarDriverExtension *extension =
         (SarDriverExtension *)IoGetDriverObjectExtension(
             driverObject, DriverEntry);
@@ -365,6 +366,13 @@ VOID SarUnload(PDRIVER_OBJECT driverObject)
     if (extension->filterCookie.QuadPart) {
         CmUnRegisterCallback(extension->filterCookie);
     }
+
+    irql = ExAcquireSpinLockExclusive(&extension->registryRedirectLock);
+    SarClearStringTable(
+        &extension->registryRedirectTableWow64, SarDeleteRegistryRedirect);
+    SarClearStringTable(
+        &extension->registryRedirectTable, SarDeleteRegistryRedirect);
+    ExReleaseSpinLockExclusive(&extension->registryRedirectLock, irql);
 
     if (extension->filterUser) {
         ExFreePool(extension->filterUser);
@@ -386,6 +394,32 @@ BOOL SarFilterMatchesCurrentProcess(SarDriverExtension *extension)
 
     ExFreePool(tokenUser);
     return isMatch;
+}
+
+BOOL SarFilterMatchesPath(
+    SarDriverExtension *extension,
+    PCUNICODE_STRING path,
+    PUNICODE_STRING redirectPath)
+{
+    PRTL_AVL_TABLE table = &extension->registryRedirectTable;
+    PVOID entry = nullptr;
+    KIRQL irql;
+
+#ifdef _WIN64
+    if (IoIs32bitProcess(nullptr)) {
+        table = &extension->registryRedirectTableWow64;
+    }
+#endif
+
+    irql = ExAcquireSpinLockShared(&extension->registryRedirectLock);
+    entry = SarGetStringTableEntry(table, path);
+
+    if (entry) {
+        *redirectPath = *(PCUNICODE_STRING)entry;
+    }
+
+    ExReleaseSpinLockShared(&extension->registryRedirectLock, irql);
+    return entry != nullptr;
 }
 
 NTSTATUS SarFilterMMDeviceQuery(
@@ -502,31 +536,10 @@ NTSTATUS SarRegistryCallback(PVOID context, PVOID argument1, PVOID argument2)
 {
     UNREFERENCED_PARAMETER(argument2);
 
-    UNICODE_STRING mmDeviceRegistrationPath;
-    UNICODE_STRING wrapperRegistrationPath;
+    UNICODE_STRING redirectPath;
     NTSTATUS status;
     REG_NOTIFY_CLASS notifyClass = (REG_NOTIFY_CLASS)(ULONG_PTR)argument1;
     SarDriverExtension *extension = (SarDriverExtension *)context;
-
-#ifdef _WIN64
-    if (IoIs32bitProcess(nullptr)) {
-        RtlUnicodeStringInit(&mmDeviceRegistrationPath,
-            WOW64_CLSID_ROOT
-            L"{BCDE0395-E52F-467C-8E3D-C4579291692E}\\InprocServer32");
-        RtlUnicodeStringInit(&wrapperRegistrationPath,
-            WOW64_CLSID_ROOT
-            L"{9FB96668-9EDD-4574-AD77-76BD89659D5D}\\InprocServer32");
-    } else {
-#endif
-        RtlUnicodeStringInit(&mmDeviceRegistrationPath,
-            CLSID_ROOT
-            L"{BCDE0395-E52F-467C-8E3D-C4579291692E}\\InprocServer32");
-        RtlUnicodeStringInit(&wrapperRegistrationPath,
-            CLSID_ROOT
-            L"{9FB96668-9EDD-4574-AD77-76BD89659D5D}\\InprocServer32");
-#ifdef _WIN64
-    }
-#endif
 
     switch (notifyClass) {
         case RegNtQueryValueKey: {
@@ -547,9 +560,7 @@ NTSTATUS SarRegistryCallback(PVOID context, PVOID argument1, PVOID argument2)
                 break;
             }
 
-            if (RtlCompareUnicodeString(
-                &mmDeviceRegistrationPath, objectName, TRUE)) {
-
+            if (!SarFilterMatchesPath(extension, objectName, &redirectPath)) {
                 break;
             }
 
@@ -557,8 +568,7 @@ NTSTATUS SarRegistryCallback(PVOID context, PVOID argument1, PVOID argument2)
                 break;
             }
 
-            return SarFilterMMDeviceQuery(
-                queryInfo, &wrapperRegistrationPath);
+            return SarFilterMMDeviceQuery(queryInfo, &redirectPath);
         }
         case RegNtEnumerateValueKey: {
             PREG_ENUMERATE_VALUE_KEY_INFORMATION queryInfo =
@@ -577,9 +587,7 @@ NTSTATUS SarRegistryCallback(PVOID context, PVOID argument1, PVOID argument2)
                 break;
             }
 
-            if (RtlCompareUnicodeString(
-                &mmDeviceRegistrationPath, objectName, TRUE)) {
-
+            if (!SarFilterMatchesPath(extension, objectName, &redirectPath)) {
                 break;
             }
 
@@ -587,10 +595,109 @@ NTSTATUS SarRegistryCallback(PVOID context, PVOID argument1, PVOID argument2)
                 break;
             }
 
-            return SarFilterMMDeviceEnum(
-                queryInfo, &wrapperRegistrationPath);
+            return SarFilterMMDeviceEnum(queryInfo, &redirectPath);
         }
     }
+
+    return STATUS_SUCCESS;
+}
+
+static void SarDeleteRegistryRedirect(PVOID ptr)
+{
+    PUNICODE_STRING str = (PUNICODE_STRING)ptr;
+
+    if (str->Buffer) {
+        SarStringFree(str);
+    }
+
+    ExFreePoolWithTag(str, SAR_TAG);
+}
+
+static NTSTATUS SarAddRegistryRedirect(
+    PRTL_AVL_TABLE table, NTSTRSAFE_PCWSTR src, NTSTRSAFE_PCWSTR dst)
+{
+    NTSTATUS status = STATUS_SUCCESS;
+    UNICODE_STRING srcLocal = {}, dstLocal = {};
+    PUNICODE_STRING dstHeap = nullptr;
+
+    RtlUnicodeStringInit(&srcLocal, src);
+    RtlUnicodeStringInit(&dstLocal, dst);
+
+    dstHeap = (PUNICODE_STRING)ExAllocatePoolWithTag(
+        NonPagedPool, sizeof(UNICODE_STRING), SAR_TAG);
+
+    if (!dstHeap) {
+        status = STATUS_INSUFFICIENT_RESOURCES;
+        goto err;
+    }
+
+    RtlZeroMemory(dstHeap, sizeof(UNICODE_STRING));
+    status = SarStringDuplicate(dstHeap, &dstLocal);
+
+    if (!NT_SUCCESS(status)) {
+        goto err;
+    }
+
+    status = SarInsertStringTableEntry(table, &srcLocal, &dstHeap);
+
+    if (!NT_SUCCESS(status)) {
+        goto err;
+    }
+
+    return STATUS_SUCCESS;
+
+err:
+    if (dstHeap) {
+        if (dstHeap->Buffer) {
+            SarStringFree(dstHeap);
+        }
+
+        ExFreePoolWithTag(dstHeap, SAR_TAG);
+    }
+
+    return status;
+}
+
+#define REDIRECT_INPROC_WOW64(src, dst) \
+    do { \
+        status = SarAddRegistryRedirect(wow64, \
+            WOW64_CLSID_ROOT src L"\\InprocServer32", \
+            WOW64_CLSID_ROOT dst L"\\InprocServer32"); \
+        if (!NT_SUCCESS(status)) { \
+            return status; \
+        } \
+    } while (0)
+#define REDIRECT_INPROC(src, dst) \
+    do { \
+        status = SarAddRegistryRedirect(table, \
+            CLSID_ROOT src L"\\InprocServer32", \
+            CLSID_ROOT dst L"\\InprocServer32"); \
+        if (!NT_SUCCESS(status)) { \
+            return status; \
+        } \
+    } while (0)
+#define REDIRECT(src, dst) \
+    do { \
+        REDIRECT_INPROC_WOW64(src, dst); \
+        REDIRECT_INPROC(src, dst); \
+    } while (0)
+
+static NTSTATUS SarAddAllRegistryRedirects(SarDriverExtension *extension)
+{
+    NTSTATUS status = STATUS_SUCCESS;
+
+    PRTL_AVL_TABLE wow64 = &extension->registryRedirectTableWow64;
+    PRTL_AVL_TABLE table = &extension->registryRedirectTable;
+
+    // MMDeviceEnumerator
+    REDIRECT(
+        L"{BCDE0395-E52F-467C-8E3D-C4579291692E}",
+        L"{9FB96668-9EDD-4574-AD77-76BD89659D5D}");
+    // ActivateAudioInterfaceWorker
+    REDIRECT(
+        L"{E2F7A62A-862B-40AE-BBC2-5C0CA9A5B7E1}",
+        L"{739191CC-CCBE-45D8-8D24-828D8E989E8E}"
+    );
 
     return STATUS_SUCCESS;
 }
@@ -621,6 +728,14 @@ extern "C" NTSTATUS DriverEntry(
     RtlZeroMemory(extension, sizeof(SarDriverExtension));
     ExInitializeFastMutex(&extension->mutex);
     SarInitializeTable(&extension->controlContextTable);
+    SarInitializeStringTable(&extension->registryRedirectTableWow64);
+    SarInitializeStringTable(&extension->registryRedirectTable);
+    status = SarAddAllRegistryRedirects(extension);
+
+    if (!NT_SUCCESS(status)) {
+        return status;
+    }
+
     extension->ksDispatchCreate = driverObject->MajorFunction[IRP_MJ_CREATE];
     extension->ksDispatchClose = driverObject->MajorFunction[IRP_MJ_CLOSE];
     extension->ksDispatchCleanup = driverObject->MajorFunction[IRP_MJ_CLEANUP];
