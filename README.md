@@ -24,6 +24,11 @@ unique characteristics compared to similar virtual audio cable software:
   audio processing, SAR doesn't need to include a complicated mixer interface or
   extensive configuration options.
 
+## Community
+
+If you use SAR and would like to discuss issues related to it, please join the
+Discord server at [https://discord.gg/9rwFdMW](https://discord.gg/9rwFdMW).
+
 ## System Requirements
 
 * Windows 7 or later.
