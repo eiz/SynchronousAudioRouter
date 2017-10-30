@@ -94,7 +94,9 @@ AsioStatus SarAsioWrapper::stop()
         return AsioStatus::OK;
     }
 
-    _sar->stop();
+    if(_sar)
+        _sar->stop();
+
     return _innerDriver->stop();
 }
 
