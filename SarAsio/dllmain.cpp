@@ -32,16 +32,16 @@ BOOL WINAPI DllMain(HMODULE hModule, DWORD reason, LPVOID reserved)
         FLAGS_log_dir = Sar::LoggingPath();
         FLAGS_logbuflevel = -1;
 
-		char *sarLogVar = getenv("SAR_ASIO_LOG");
+        char *sarLogVar = getenv("SAR_ASIO_LOG");
 
-		if (sarLogVar && atoi(sarLogVar)) {
-			GetModuleFileNameA(nullptr, buf, 1024);
-			google::InitGoogleLogging(
-				*buf ? _strdup(PathFindFileNameA(buf)) : "SarAsio");
-			LOG(INFO) << "Initializing SarAsio.";
-		} else {
-			LOG(INFO) << "Logging disabled. (This shouldn't log.)";
-		}
+        if (sarLogVar && atoi(sarLogVar)) {
+            GetModuleFileNameA(nullptr, buf, 1024);
+            google::InitGoogleLogging(
+                *buf ? _strdup(PathFindFileNameA(buf)) : "SarAsio");
+            LOG(INFO) << "Initializing SarAsio.";
+        } else {
+            LOG(INFO) << "Logging disabled. (This shouldn't log.)";
+        }
     }
 
     gDllModule = hModule;
