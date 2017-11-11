@@ -14,6 +14,10 @@
 // You should have received a copy of the GNU General Public License
 // along with SynchronousAudioRouter.  If not, see <http://www.gnu.org/licenses/>.
 
+// Microsoft thinks getenv is insecure, presumably because setenv/putenv are not
+// thread safe? I think it's going to be ok.
+#define _CRT_SECURE_NO_WARNINGS
+
 #include "stdafx.h"
 #include "dllmain.h"
 #include "utility.h"
@@ -28,10 +32,16 @@ BOOL WINAPI DllMain(HMODULE hModule, DWORD reason, LPVOID reserved)
         FLAGS_log_dir = Sar::LoggingPath();
         FLAGS_logbuflevel = -1;
 
-        GetModuleFileNameA(nullptr, buf, 1024);
-        google::InitGoogleLogging(
-            *buf ? _strdup(PathFindFileNameA(buf)) : "SarAsio");
-        LOG(INFO) << "Initializing SarAsio.";
+		char *sarLogVar = getenv("SAR_ASIO_LOG");
+
+		if (sarLogVar && atoi(sarLogVar)) {
+			GetModuleFileNameA(nullptr, buf, 1024);
+			google::InitGoogleLogging(
+				*buf ? _strdup(PathFindFileNameA(buf)) : "SarAsio");
+			LOG(INFO) << "Initializing SarAsio.";
+		} else {
+			LOG(INFO) << "Logging disabled. (This shouldn't log.)";
+		}
     }
 
     gDllModule = hModule;
