@@ -31,7 +31,7 @@ Discord server at [https://discord.gg/9rwFdMW](https://discord.gg/9rwFdMW).
 
 ## System Requirements
 
-* Windows 7 or later.
+* Windows 7 or later. If you are running a current version of Windows 10, Secure Boot is not supported.
 * An audio interface which supports ASIO. If your hardware doesn't come with a
   native ASIO driver, you may be able to use ASIO4ALL instead.
 * Digital audio workstation software. SAR is mainly tested using [REAPER](http://www.reaper.fm/).
