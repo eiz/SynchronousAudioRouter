@@ -102,6 +102,10 @@
       <AdditionalDependencies>$(ProjectDir)\..\3rdParty\bin\x86\libglog_static.lib;version.lib;propsys.lib;setupapi.lib;shlwapi.lib;comctl32.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;odbc32.lib;odbccp32.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <DelayLoadDLLs>comdlg32.dll;shlwapi.dll;comctl32.dll;setupapi.dll;version.dll</DelayLoadDLLs>
     </Link>
+    <PostBuildEvent>
+      <Command>
+      </Command>
+    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
@@ -120,6 +124,10 @@
       <AdditionalDependencies>$(ProjectDir)\..\3rdParty\bin\x64\libglog_static.lib;version.lib;propsys.lib;setupapi.lib;shlwapi.lib;comctl32.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;odbc32.lib;odbccp32.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <DelayLoadDLLs>comdlg32.dll;shlwapi.dll;comctl32.dll;setupapi.dll;version.dll</DelayLoadDLLs>
     </Link>
+    <PostBuildEvent>
+      <Command>
+      </Command>
+    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <ClCompile>
@@ -142,6 +150,9 @@
       <AdditionalDependencies>$(ProjectDir)\..\3rdParty\bin\x86\libglog_static.lib;version.lib;propsys.lib;setupapi.lib;shlwapi.lib;comctl32.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;odbc32.lib;odbccp32.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <DelayLoadDLLs>comdlg32.dll;shlwapi.dll;comctl32.dll;setupapi.dll;version.dll</DelayLoadDLLs>
     </Link>
+    <PostBuildEvent>
+      <Command>signtool sign /n "Mackenzie Straight" /tr http://timestamp.digicert.com $(OutDir)\SarAsio.dll</Command>
+    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
@@ -165,6 +176,9 @@
       <AdditionalDependencies>$(ProjectDir)\..\3rdParty\bin\x64\libglog_static.lib;version.lib;propsys.lib;setupapi.lib;shlwapi.lib;comctl32.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;odbc32.lib;odbccp32.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <DelayLoadDLLs>comdlg32.dll;shlwapi.dll;comctl32.dll;setupapi.dll;version.dll</DelayLoadDLLs>
     </Link>
+    <PostBuildEvent>
+      <Command>signtool sign /n "Mackenzie Straight" /tr http://timestamp.digicert.com $(OutDir)\SarAsio.dll</Command>
+    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="config.h" />

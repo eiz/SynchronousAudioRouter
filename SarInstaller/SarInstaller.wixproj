@@ -66,6 +66,9 @@
     </WixLibrary>
   </ItemGroup>
   <Import Project="$(WixTargetsPath)" />
+  <PropertyGroup>
+    <PostBuildEvent>"C:\Program Files (x86)\Windows Kits\10\bin\x64\signtool.exe" sign /n "Mackenzie Straight" /tr http://timestamp.digicert.com SynchronousAudioRouter.msi</PostBuildEvent>
+  </PropertyGroup>
   <!--
 	To modify your build process, add your task inside one of the targets below and uncomment it.
 	Other similar extension points exist, see Wix.targets.
