@@ -152,6 +152,8 @@ BOOLEAN SarOrphanControlContext(SarDriverExtension *extension, PIRP irp)
         SarOrphanEndpoint(endpoint);
     }
 
+    SarCancelAllHandleQueueIrps(&controlContext->handleQueue);
+
     SarReleaseControlContext(controlContext);
     return TRUE;
 }

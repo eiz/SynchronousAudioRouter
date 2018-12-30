@@ -470,6 +470,7 @@ void SarInitializeHandleQueue(SarHandleQueue *queue);
 NTSTATUS SarTransferQueuedHandle(
     PIRP irp, HANDLE kernelTargetProcessHandle, ULONG responseIndex,
     HANDLE kernelProcessHandle, HANDLE userHandle, ULONG64 associatedData);
+void SarCancelAllHandleQueueIrps(SarHandleQueue *handleQueue);
 void SarCancelHandleQueueIrp(PDEVICE_OBJECT deviceObject, PIRP irp);
 NTSTATUS SarPostHandleQueue(
     SarHandleQueue *queue, HANDLE userHandle, ULONG64 associatedData);

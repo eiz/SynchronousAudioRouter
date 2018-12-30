@@ -257,6 +257,42 @@ NTSTATUS SarTransferQueuedHandle(
     return status;
 }
 
+void SarCancelAllHandleQueueIrps(SarHandleQueue *handleQueue)
+{
+    KIRQL irql;
+    LIST_ENTRY pendingIrqsToCancel;
+
+    InitializeListHead(&pendingIrqsToCancel);
+
+    KeAcquireSpinLock(&handleQueue->lock, &irql);
+
+    if (!IsListEmpty(&handleQueue->pendingIrps)) {
+        PLIST_ENTRY entry = handleQueue->pendingIrps.Flink;
+
+        RemoveEntryList(&handleQueue->pendingIrps);
+        InitializeListHead(&handleQueue->pendingIrps);
+        AppendTailList(&pendingIrqsToCancel, entry);
+    }
+
+    KeReleaseSpinLock(&handleQueue->lock, irql);
+
+    while (!IsListEmpty(&pendingIrqsToCancel)) {
+        SarHandleQueueIrp *pendingIrp =
+            CONTAINING_RECORD(pendingIrqsToCancel.Flink, SarHandleQueueIrp, listEntry);
+        PIRP irp = pendingIrp->irp;
+
+        RemoveEntryList(&pendingIrp->listEntry);
+
+        ZwClose(pendingIrp->kernelProcessHandle);
+        ExFreePoolWithTag(pendingIrp, SAR_TAG);
+
+        irp->IoStatus.Information = 0;
+        irp->IoStatus.Status = STATUS_CANCELLED;
+        IoSetCancelRoutine(irp, nullptr);
+        IoCompleteRequest(irp, IO_NO_INCREMENT);
+    }
+}
+
 void SarCancelHandleQueueIrp(PDEVICE_OBJECT deviceObject, PIRP irp)
 {
     UNREFERENCED_PARAMETER(deviceObject);

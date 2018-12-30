@@ -772,9 +772,10 @@ err_out:
 
 VOID SarDeleteEndpoint(SarEndpoint *endpoint)
 {
-    PKSDEVICE ksDevice = KsFilterFactoryGetDevice(endpoint->filterFactory);
 
     if (endpoint->filterFactory) {
+        PKSDEVICE ksDevice = KsFilterFactoryGetDevice(endpoint->filterFactory);
+
         KsAcquireDevice(ksDevice);
         KsDeleteFilterFactory(endpoint->filterFactory);
         KsReleaseDevice(ksDevice);
