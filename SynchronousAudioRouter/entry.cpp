@@ -18,11 +18,13 @@
 #include "sar.h"
 
 static void SarDeleteRegistryRedirect(PVOID ptr);
-DRIVER_DISPATCH SarIrpCreate;
-DRIVER_DISPATCH SarIrpDeviceControl;
-DRIVER_DISPATCH SarIrpClose;
-DRIVER_DISPATCH SarIrpCleanup;
+
 DRIVER_UNLOAD SarUnload;
+EX_CALLBACK_FUNCTION SarRegistryCallback;
+_Dispatch_type_(IRP_MJ_CREATE) DRIVER_DISPATCH SarIrpCreate;
+_Dispatch_type_(IRP_MJ_DEVICE_CONTROL) DRIVER_DISPATCH SarIrpDeviceControl;
+_Dispatch_type_(IRP_MJ_CLOSE) DRIVER_DISPATCH SarIrpClose;
+_Dispatch_type_(IRP_MJ_CLEANUP) DRIVER_DISPATCH SarIrpCleanup;
 
 static KSDEVICE_DISPATCH gDeviceDispatch = {
     SarKsDeviceAdd, // Add
@@ -104,6 +106,11 @@ VOID SarDeleteControlContext(SarControlContext *controlContext)
     if (controlContext->bufferSection) {
         ZwClose(controlContext->bufferSection);
         controlContext->bufferSection = nullptr;
+    }
+
+    if (controlContext->bufferMapStorage) {
+        ExFreePoolWithTag(controlContext->bufferMapStorage, SAR_TAG);
+        controlContext->bufferMapStorage = nullptr;
     }
 
     ExFreePoolWithTag(controlContext, SAR_TAG);
@@ -197,7 +204,7 @@ NTSTATUS SarIrpCreate(PDEVICE_OBJECT deviceObject, PIRP irp)
 
 out:
     if (controlContext && !NT_SUCCESS(status)) {
-        ExFreePoolWithTag(controlContext, SAR_TAG);
+        SarReleaseControlContext(controlContext);
     }
 
     irp->IoStatus.Status = status;
@@ -296,7 +303,6 @@ NTSTATUS SarIrpDeviceControl(PDEVICE_OBJECT deviceObject, PIRP irp)
                 break;
             }
 
-            IoMarkIrpPending(irp);
             ntStatus = SarCreateEndpoint(
                 deviceObject, irp, controlContext, &request);
             break;
@@ -340,10 +346,10 @@ NTSTATUS SarIrpDeviceControl(PDEVICE_OBJECT deviceObject, PIRP irp)
             break;
         }
         case SAR_SEND_FORMAT_CHANGE_EVENT:
-            ntStatus = SarSendFormatChangeEvent(extension);
+            ntStatus = SarSendFormatChangeEvent(deviceObject, extension);
             break;
         default:
-            SAR_LOG("(SAR) Unknown ioctl %d", ioControlCode);
+            SAR_LOG("(SAR) Unknown ioctl %lu", ioControlCode);
             break;
     }
 
@@ -363,7 +369,9 @@ VOID SarUnload(PDRIVER_OBJECT driverObject)
         (SarDriverExtension *)IoGetDriverObjectExtension(
             driverObject, DriverEntry);
 
-    RtlFreeUnicodeString(&extension->sarInterfaceName);
+    if (extension->sarInterfaceName.Buffer) {
+        RtlFreeUnicodeString(&extension->sarInterfaceName);
+    }
 
     if (extension->filterCookie.QuadPart) {
         CmUnRegisterCallback(extension->filterCookie);
@@ -377,6 +385,7 @@ VOID SarUnload(PDRIVER_OBJECT driverObject)
     ExReleaseSpinLockExclusive(&extension->registryRedirectLock, irql);
 
     if (extension->filterUser) {
+        // Allocated by SeQueryInformationToken
         ExFreePool(extension->filterUser);
     }
 }
@@ -488,7 +497,7 @@ NTSTATUS SarFilterMMDeviceQuery(
         status = GetExceptionCode();
     }
 
-    ExFreePool(buffer);
+    ExFreePoolWithTag(buffer, SAR_TAG);
     ZwClose(wrapperKey);
     return status;
 }
@@ -541,7 +550,7 @@ NTSTATUS SarFilterMMDeviceEnum(
         status = GetExceptionCode();
     }
 
-    ExFreePool(buffer);
+    ExFreePoolWithTag(buffer, SAR_TAG);
     ZwClose(wrapperKey);
     return status;
 }
@@ -566,7 +575,7 @@ NTSTATUS SarRegistryCallback(PVOID context, PVOID argument1, PVOID argument2)
             PCUNICODE_STRING objectName;
 
             // Only filter the default value
-            if (queryInfo->ValueName->Length != 0) {
+            if (!queryInfo || queryInfo->ValueName->Length != 0) {
                 break;
             }
 
@@ -593,7 +602,7 @@ NTSTATUS SarRegistryCallback(PVOID context, PVOID argument1, PVOID argument2)
                 (PREG_ENUMERATE_VALUE_KEY_INFORMATION)argument2;
             PCUNICODE_STRING objectName;
 
-            if (queryInfo->Index != 0) {
+            if (!queryInfo || queryInfo->Index != 0) {
                 break;
             }
 
@@ -766,6 +775,7 @@ extern "C" NTSTATUS DriverEntry(
     status = SarAddAllRegistryRedirects(extension);
 
     if (!NT_SUCCESS(status)) {
+        SarUnload(driverObject);
         return status;
     }
 

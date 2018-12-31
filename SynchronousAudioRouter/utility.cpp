@@ -16,6 +16,14 @@
 
 #include "sar.h"
 
+DRIVER_CANCEL SarCancelHandleQueueIrp;
+RTL_GENERIC_COMPARE_ROUTINE SarCompareTableEntry;
+RTL_GENERIC_ALLOCATE_ROUTINE SarAllocateTableEntry;
+RTL_GENERIC_FREE_ROUTINE SarFreeTableEntry;
+RTL_AVL_COMPARE_ROUTINE SarCompareStringTableEntry;
+RTL_AVL_ALLOCATE_ROUTINE SarAllocateStringTableEntry;
+RTL_AVL_FREE_ROUTINE SarFreeStringTableEntry;
+
 SarDriverExtension *SarGetDriverExtension(PDRIVER_OBJECT driverObject)
 {
     return (SarDriverExtension *)IoGetDriverObjectExtension(

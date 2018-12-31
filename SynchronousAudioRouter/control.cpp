@@ -16,6 +16,8 @@
 
 #include "sar.h"
 
+IO_WORKITEM_ROUTINE SarProcessPendingEndpoints;
+
 const KSPIN_DISPATCH gPinDispatch = {
     SarKsPinCreate, // Create
     SarKsPinClose, // Close
@@ -216,8 +218,11 @@ NTSTATUS SarSetBufferLayout(
     SIZE_T viewSize = 0;
     PVOID baseAddress = nullptr;
     GUID sectionGuid = {};
+    PULONG bufferMap = nullptr;
+    DWORD bufferSize = 0;
 
-    if (request->bufferSize > SAR_MAX_BUFFER_SIZE ||
+    if (request->bufferSize == 0 ||
+        request->bufferSize > SAR_MAX_BUFFER_SIZE ||
         request->sampleSize < SAR_MIN_SAMPLE_SIZE ||
         request->sampleSize > SAR_MAX_SAMPLE_SIZE ||
         request->sampleRate < SAR_MIN_SAMPLE_RATE ||
@@ -231,35 +236,24 @@ NTSTATUS SarSetBufferLayout(
         return status;
     }
 
-    ExAcquireFastMutex(&controlContext->mutex);
-
-    if (controlContext->bufferSize) {
-        ExReleaseFastMutex(&controlContext->mutex);
-        return STATUS_INVALID_STATE_TRANSITION;
-    }
-
-    controlContext->bufferSize = ROUND_TO_PAGES(request->bufferSize);
-    controlContext->frameSize = request->frameSize;
-    controlContext->sampleSize = request->sampleSize;
-    controlContext->sampleRate = request->sampleRate;
-    controlContext->minimumFrameCount = request->minimumFrameCount;
-    ExReleaseFastMutex(&controlContext->mutex);
+    bufferSize = ROUND_TO_PAGES(request->bufferSize);
 
     RtlUnicodeStringPrintf(
         &sectionName,
         L"\\BaseNamedObjects\\SynchronousAudioRouter_" GUID_FORMAT,
-        controlContext, GUID_VALUES(sectionGuid));
+        GUID_VALUES(sectionGuid));
     InitializeObjectAttributes(
         &sectionAttributes, &sectionName, OBJ_KERNEL_HANDLE, nullptr, nullptr);
-    sectionSize.QuadPart = controlContext->bufferSize + SAR_BUFFER_CELL_SIZE;
+    sectionSize.QuadPart = bufferSize + SAR_BUFFER_CELL_SIZE;
 
-    DWORD bufferMapSize = SarBufferMapSize(controlContext);
-    // TODO: don't leak this
-    PULONG bufferMap = (PULONG)ExAllocatePoolWithTag(
+    DWORD bufferMapSize = SarBufferMapSize(bufferSize);
+
+    bufferMap = (PULONG)ExAllocatePoolWithTag(
         NonPagedPool, bufferMapSize, SAR_TAG);
 
     if (!bufferMap) {
-        return STATUS_INSUFFICIENT_RESOURCES;
+        status = STATUS_INSUFFICIENT_RESOURCES;
+        goto err_out;
     }
 
     RtlZeroMemory(bufferMap, bufferMapSize);
@@ -280,15 +274,34 @@ NTSTATUS SarSetBufferLayout(
         SAR_LOG("Couldn't map view of section");
         goto err_out;
     }
+    
+    ExAcquireFastMutex(&controlContext->mutex);
+
+    if (controlContext->bufferSize) {
+        ExReleaseFastMutex(&controlContext->mutex);
+        status = STATUS_INVALID_STATE_TRANSITION;
+        goto err_out;
+    }
+
+    controlContext->bufferSize = bufferSize;
+    controlContext->frameSize = request->frameSize;
+    controlContext->sampleSize = request->sampleSize;
+    controlContext->sampleRate = request->sampleRate;
+    controlContext->minimumFrameCount = request->minimumFrameCount;
+    
+    RtlInitializeBitMap(&controlContext->bufferMap,
+        bufferMap, SarBufferMapEntryCount(bufferSize));
+
+    controlContext->bufferMapStorage = bufferMap;
+    bufferMap = nullptr;
+
+    controlContext->bufferSection = section;
+    ExReleaseFastMutex(&controlContext->mutex);
 
     response->actualSize = sectionSize.LowPart;
     response->virtualAddress = baseAddress;
     response->registerBase = sectionSize.LowPart - SAR_BUFFER_CELL_SIZE;
-    ExAcquireFastMutex(&controlContext->mutex);
-    RtlInitializeBitMap(&controlContext->bufferMap,
-        bufferMap, SarBufferMapEntryCount(controlContext));
-    controlContext->bufferSection = section;
-    ExReleaseFastMutex(&controlContext->mutex);
+
     return STATUS_SUCCESS;
 
 err_out:
@@ -296,10 +309,10 @@ err_out:
         ZwClose(section);
     }
 
-    ExAcquireFastMutex(&controlContext->mutex);
-    controlContext->bufferSize =
-        controlContext->sampleSize = controlContext->sampleRate = 0;
-    ExReleaseFastMutex(&controlContext->mutex);
+    if (bufferMap) {
+        ExFreePoolWithTag(bufferMap, SAR_TAG);
+    }
+
     return status;
 }
 
@@ -455,14 +468,18 @@ retry:
     while (entry != &controlContext->pendingEndpointList) {
         SarEndpoint *endpoint =
             CONTAINING_RECORD(entry, SarEndpoint, listEntry);
-        PUNICODE_STRING symlink =
-            KsFilterFactoryGetSymbolicLink(endpoint->filterFactory);
+
+        // Call KsFilterFactoryGetSymbolicLink require IRQL at PASSIVE_LEVEL (so after mutex release)
+        PUNICODE_STRING symlink;
         PLIST_ENTRY current = entry;
         PIRP pendingIrp = endpoint->pendingIrp;
 
         entry = endpoint->listEntry.Flink;
         RemoveEntryList(current);
         ExReleaseFastMutex(&controlContext->mutex);
+
+        symlink =
+            KsFilterFactoryGetSymbolicLink(endpoint->filterFactory);
 
         status = SarSetDeviceInterfaceProperties(
             endpoint, symlink, &KSCATEGORY_AUDIO);
@@ -537,6 +554,12 @@ NTSTATUS SarCreateEndpoint(
     if (request->index >= SAR_MAX_ENDPOINT_COUNT ||
         request->channelCount > SAR_MAX_CHANNEL_COUNT) {
         return STATUS_INVALID_PARAMETER;
+    }
+
+    // Endpoints assume buffer parameters are not 0 (else division by 0 could occur)
+    if (!controlContext->bufferSize) {
+        SAR_LOG("(SAR) Creating endpoints require setting buffer beforehand");
+        return STATUS_INVALID_STATE_TRANSITION;
     }
 
     if (!NT_SUCCESS(status)) {
@@ -713,7 +736,7 @@ NTSTATUS SarCreateEndpoint(
         DECLARE_UNICODE_STRING_SIZE(deviceIdBuffer, 256);
 
         RtlUnicodeStringPrintf(&deviceIdBuffer,
-            L"%ws_%d_%d_%d", request->id, request->channelCount,
+            L"%ws_%u_%u_%u", request->id, request->channelCount,
             controlContext->sampleRate, controlContext->sampleSize);
         status = SarStringDuplicate(
             &endpoint->deviceIdMangled, &deviceIdBuffer);
@@ -740,6 +763,11 @@ NTSTATUS SarCreateEndpoint(
     if (!NT_SUCCESS(status)) {
         goto err_out;
     }
+
+    // Only call IoMarkIrpPending when there is no error and we WILL return STATUS_PENDING
+    // but before any chance for the IRP to be completed (in SarProcessPendingEndpoints)
+    // So before queuing the endpoint to the pendingEndpointList list
+    IoMarkIrpPending(irp);
 
     ExAcquireFastMutex(&controlContext->mutex);
 
@@ -825,9 +853,13 @@ VOID SarOrphanEndpoint(SarEndpoint *endpoint)
     SarReleaseEndpoint(endpoint);
 }
 
-NTSTATUS SarSendFormatChangeEvent(SarDriverExtension *extension)
+NTSTATUS SarSendFormatChangeEvent(PDEVICE_OBJECT deviceObject, SarDriverExtension *extension)
 {
     PVOID restartKey = nullptr;
+    PKSDEVICE ksDevice = KsGetDeviceForDeviceObject(deviceObject);
+
+    // Always acquire ksDevice before extension->mutex, else deadlocks can occurs with a concurrent SarKsFilterCreate for example
+    KsAcquireDevice(ksDevice);
 
     KeEnterCriticalRegion();
     ExAcquireFastMutexUnsafe(&extension->mutex);
@@ -848,7 +880,6 @@ NTSTATUS SarSendFormatChangeEvent(SarDriverExtension *extension)
                 CONTAINING_RECORD(entry, SarEndpoint, listEntry);
 
             entry = entry->Flink;
-            KsAcquireDevice(extension->ksDevice);
 
             for (PKSFILTER filter =
                     KsFilterFactoryGetFirstChildFilter(endpoint->filterFactory);
@@ -861,8 +892,6 @@ NTSTATUS SarSendFormatChangeEvent(SarDriverExtension *extension)
                     0, nullptr,
                     nullptr, nullptr);
             }
-
-            KsReleaseDevice(extension->ksDevice);
         }
 
         ExReleaseFastMutexUnsafe(&controlContext->mutex);
@@ -870,5 +899,8 @@ NTSTATUS SarSendFormatChangeEvent(SarDriverExtension *extension)
 
     ExReleaseFastMutexUnsafe(&extension->mutex);
     KeLeaveCriticalRegion();
+
+    KsReleaseDevice(ksDevice);
+
     return STATUS_SUCCESS;
 }

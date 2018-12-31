@@ -219,6 +219,7 @@ typedef struct SarControlContext
     HANDLE bufferSection;
     SarHandleQueue handleQueue;
     RTL_BITMAP bufferMap;
+    PULONG bufferMapStorage;
     DWORD bufferSize;
     DWORD frameSize;
     DWORD sampleRate;
@@ -226,11 +227,11 @@ typedef struct SarControlContext
     DWORD minimumFrameCount;
 } SarControlContext;
 
-#define SarBufferMapEntryCount(controlContext) \
-    ((controlContext)->bufferSize / SAR_BUFFER_CELL_SIZE)
-#define SarBufferMapSize(controlContext) (sizeof(DWORD) * ( \
-    SarBufferMapEntryCount(controlContext) / sizeof(DWORD) + \
-    (((SarBufferMapEntryCount(controlContext) % sizeof(DWORD)) != 0) ? 1 : 0)))
+#define SarBufferMapEntryCount(bufferSize) \
+    ((bufferSize) / SAR_BUFFER_CELL_SIZE)
+#define SarBufferMapSize(bufferSize) (sizeof(DWORD) * ( \
+    SarBufferMapEntryCount(bufferSize) / sizeof(DWORD) + \
+    (((SarBufferMapEntryCount(bufferSize) % sizeof(DWORD)) != 0) ? 1 : 0)))
 
 typedef struct SarEndpointProcessContext
 {
@@ -301,6 +302,7 @@ NTSTATUS SarCreateEndpoint(
 VOID SarOrphanEndpoint(SarEndpoint *endpoint);
 VOID SarDeleteEndpoint(SarEndpoint *endpoint);
 NTSTATUS SarSendFormatChangeEvent(
+    PDEVICE_OBJECT deviceObject,
     SarDriverExtension *extension);
 
 FORCEINLINE VOID SarRetainEndpoint(SarEndpoint *endpoint)
@@ -377,10 +379,10 @@ NTSTATUS SarGetOrCreateEndpointProcessContext(
 NTSTATUS SarDeleteEndpointProcessContext(SarEndpointProcessContext *context);
 
 // Entry
+DRIVER_INITIALIZE DriverEntry;
 SarControlContext *SarCreateControlContext(PFILE_OBJECT fileObject);
 VOID SarDeleteControlContext(SarControlContext *controlContext);
 BOOLEAN SarOrphanControlContext(SarDriverExtension *extension, PIRP irp);
-NTSTATUS SarRegistryCallback(PVOID context, PVOID argument1, PVOID argument2);
 
 FORCEINLINE VOID SarRetainControlContext(SarControlContext *controlContext)
 {
@@ -404,10 +406,6 @@ FORCEINLINE VOID SarReleaseEndpointAndContext(SarEndpoint *endpoint)
     SarReleaseEndpoint(endpoint);
     SarReleaseControlContext(controlContext);
 }
-
-NTSTATUS DriverEntry(
-    IN PDRIVER_OBJECT driverObject,
-    IN PUNICODE_STRING registryPath);
 
 // NDIS
 VOID SarNdisDeleteFilterModuleContext(SarNdisFilterModuleContext *context);
@@ -471,28 +469,20 @@ NTSTATUS SarTransferQueuedHandle(
     PIRP irp, HANDLE kernelTargetProcessHandle, ULONG responseIndex,
     HANDLE kernelProcessHandle, HANDLE userHandle, ULONG64 associatedData);
 void SarCancelAllHandleQueueIrps(SarHandleQueue *handleQueue);
-void SarCancelHandleQueueIrp(PDEVICE_OBJECT deviceObject, PIRP irp);
 NTSTATUS SarPostHandleQueue(
     SarHandleQueue *queue, HANDLE userHandle, ULONG64 associatedData);
 NTSTATUS SarWaitHandleQueue(SarHandleQueue *queue, PIRP irp);
 VOID SarStringFree(PUNICODE_STRING str);
 
-RTL_GENERIC_COMPARE_RESULTS NTAPI SarCompareTableEntry(
-    PRTL_GENERIC_TABLE table, PVOID lhs, PVOID rhs);
-PVOID NTAPI SarAllocateTableEntry(PRTL_GENERIC_TABLE table, CLONG byteSize);
-VOID NTAPI SarFreeTableEntry(PRTL_GENERIC_TABLE table, PVOID buffer);
 NTSTATUS SarInsertTableEntry(PRTL_GENERIC_TABLE table, PVOID key, PVOID value);
 BOOLEAN SarRemoveTableEntry(PRTL_GENERIC_TABLE table, PVOID key);
 PVOID SarGetTableEntry(PRTL_GENERIC_TABLE table, PVOID key);
 VOID SarInitializeTable(PRTL_GENERIC_TABLE table);
 
-RTL_GENERIC_COMPARE_RESULTS NTAPI SarCompareStringTableEntry(
-    PRTL_AVL_TABLE table, PVOID lhs, PVOID rhs);
 NTSTATUS SarInsertStringTableEntry(
     PRTL_AVL_TABLE table, PUNICODE_STRING key, PVOID value);
 BOOLEAN SarRemoveStringTableEntry(
     PRTL_AVL_TABLE table, PUNICODE_STRING key);
-VOID NTAPI SarFreeStringTableEntry(PRTL_AVL_TABLE table, PVOID buffer);
 PVOID SarGetStringTableEntry(PRTL_AVL_TABLE table, PCUNICODE_STRING key);
 VOID SarInitializeStringTable(PRTL_AVL_TABLE table);
 VOID SarClearStringTable(PRTL_AVL_TABLE table, VOID (*freeCb)(PVOID));

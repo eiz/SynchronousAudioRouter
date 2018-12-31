@@ -402,7 +402,7 @@ VOID SarDumpKsIoctl(PIRP irp)
 
             SarReadUserBuffer(&propertyInfo, irp, sizeof(KSPROPERTY));
 
-            SAR_LOG("KSProperty: Set " GUID_FORMAT " Id %d Flags %d",
+            SAR_LOG("KSProperty: Set " GUID_FORMAT " Id %lu Flags %lu",
                 GUID_VALUES(propertyInfo.Set), propertyInfo.Id,
                 propertyInfo.Flags);
         }
@@ -425,7 +425,7 @@ NTSTATUS SarKsPinIntersectHandler(
     if (callerDataRange->FormatSize == sizeof(KSDATARANGE_AUDIO) &&
         callerDataRange->MajorFormat == KSDATAFORMAT_TYPE_AUDIO) {
         callerFormat = (PKSDATARANGE_AUDIO)callerDataRange;
-        SAR_LOG("callerFormat: %d-%dHz, %d-%dbits, x%d",
+        SAR_LOG("callerFormat: %lu-%lu Hz, %lu-%lu bits, x%lu",
             callerFormat->MinimumSampleFrequency,
             callerFormat->MaximumSampleFrequency,
             callerFormat->MinimumBitsPerSample,
@@ -605,11 +605,11 @@ NTSTATUS SarKsPinProposeDataFormat(
     if (format->DataFormat.MajorFormat != KSDATAFORMAT_TYPE_AUDIO ||
         format->DataFormat.SubFormat != KSDATAFORMAT_SUBTYPE_PCM ||
         format->DataFormat.Specifier != KSDATAFORMAT_SPECIFIER_WAVEFORMATEX) {
-        SAR_LOG("Format type can't be handled %d %d %d"
+        SAR_LOG("Format type can't be handled %lu %lu %lu"
             GUID_FORMAT " " GUID_FORMAT " " GUID_FORMAT,
             format->DataFormat.FormatSize,
-            sizeof(KSDATAFORMAT_WAVEFORMATEX),
-            sizeof(KSDATAFORMAT),
+            (ULONG)sizeof(KSDATAFORMAT_WAVEFORMATEX),
+            (ULONG)sizeof(KSDATAFORMAT),
             GUID_VALUES(format->DataFormat.MajorFormat),
             GUID_VALUES(format->DataFormat.SubFormat),
             GUID_VALUES(format->DataFormat.Specifier));
