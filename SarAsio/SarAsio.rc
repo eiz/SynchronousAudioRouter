@@ -44,7 +44,7 @@ FONT 8, "MS Shell Dlg", 400, 0, 0
         8, 8, 304, 28,
         0, WS_EX_LEFT
     COMBOBOX 1001,
-        14, 18, 244, 17,
+        14, 18, 244, 128,
         CBS_DROPDOWNLIST | CBS_HASSTRINGS, WS_EX_LEFT
     PUSHBUTTON "&Configure", 1002,
         262, 17, 44, 14,
