@@ -77,7 +77,7 @@ FONT 8, "MS Shell Dlg", 400, 0, 0
     LTEXT "Type:", 1102,
         4, 22, 56, 12
     COMBOBOX 1103,
-        68, 21, 184, 12,
+        68, 21, 184, 64,
         CBS_DROPDOWNLIST | CBS_HASSTRINGS, WS_EX_LEFT
     LTEXT "Channel count:", 1104,
         4, 38, 56, 12
@@ -160,21 +160,21 @@ FONT 8, "MS Shell Dlg", 400, 0, 0
         14, 148, 98, 12
 
     COMBOBOX 1320,
-        116, 66, 130, 12,
+        116, 66, 130, 128,
         CBS_DROPDOWNLIST | CBS_HASSTRINGS, WS_EX_LEFT
     COMBOBOX 1321,
-        116, 82, 130, 12,
+        116, 82, 130, 128,
         CBS_DROPDOWNLIST | CBS_HASSTRINGS, WS_EX_LEFT
     COMBOBOX 1322,
-        116, 98, 130, 12,
+        116, 98, 130, 128,
         CBS_DROPDOWNLIST | CBS_HASSTRINGS, WS_EX_LEFT
     COMBOBOX 1323,
-        116, 114, 130, 12,
+        116, 114, 130, 128,
         CBS_DROPDOWNLIST | CBS_HASSTRINGS, WS_EX_LEFT
     COMBOBOX 1324,
-        116, 130, 130, 12,
+        116, 130, 130, 128,
         CBS_DROPDOWNLIST | CBS_HASSTRINGS, WS_EX_LEFT
     COMBOBOX 1325,
-        116, 146, 130, 12,
+        116, 146, 130, 128,
         CBS_DROPDOWNLIST | CBS_HASSTRINGS, WS_EX_LEFT
 }
