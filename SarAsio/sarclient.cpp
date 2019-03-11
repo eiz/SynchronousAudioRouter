@@ -266,6 +266,7 @@ bool SarClient::openControlDevice()
     if (!SetupDiEnumDeviceInterfaces(devinfo, NULL,
         &GUID_DEVINTERFACE_SYNCHRONOUSAUDIOROUTER, 0, &interfaceData)) {
 
+        SetupDiDestroyDeviceInfoList(devinfo);
         return false;
     }
 
@@ -274,6 +275,7 @@ bool SarClient::openControlDevice()
         devinfo, &interfaceData, nullptr, 0, &requiredSize, nullptr);
 
     if (GetLastError() != ERROR_INSUFFICIENT_BUFFER) {
+        SetupDiDestroyDeviceInfoList(devinfo);
         return false;
     }
 
@@ -285,8 +287,11 @@ bool SarClient::openControlDevice()
         requiredSize, nullptr, nullptr)) {
 
         free(interfaceDetail);
+        SetupDiDestroyDeviceInfoList(devinfo);
         return false;
     }
+
+    SetupDiDestroyDeviceInfoList(devinfo);
 
     _device = CreateFile(interfaceDetail->DevicePath,
         GENERIC_ALL, 0, nullptr, OPEN_EXISTING,
