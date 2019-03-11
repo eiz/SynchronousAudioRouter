@@ -517,6 +517,8 @@ NTSTATUS SarCreateEndpoint(
         nullptr, KSCREATE_ITEM_FREEONSTOP,
         nullptr, nullptr, &endpoint->topologyFilterFactory);
 
+    KsFilterFactoryUpdateCacheData(endpoint->filterFactory, NULL);
+    KsFilterFactoryUpdateCacheData(endpoint->topologyFilterFactory, NULL);
     KsReleaseDevice(ksDevice);
 
     if (!NT_SUCCESS(status)) {

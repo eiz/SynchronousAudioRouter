@@ -342,7 +342,6 @@ NTSTATUS SarKsPinSetDataFormat(
     const KSDATARANGE *dataRange,
     const KSATTRIBUTE_LIST *attributeRange)
 {
-    UNREFERENCED_PARAMETER(pin);
     UNREFERENCED_PARAMETER(oldFormat);
     UNREFERENCED_PARAMETER(oldAttributeList);
     UNREFERENCED_PARAMETER(attributeRange);
@@ -490,6 +489,7 @@ NTSTATUS SarKsPinIntersectHandler(
     }
 
     if (dataBufferSize == 0) {
+        irp->IoStatus.Information = sizeof(KSDATAFORMAT_WAVEFORMATEXTENSIBLE);
         return STATUS_BUFFER_OVERFLOW;
     }
 
@@ -586,7 +586,10 @@ NTSTATUS SarKsPinGetDefaultDataFormat(
     if (outputLength < sizeof(KSDATAFORMAT_WAVEFORMATEXTENSIBLE)) {
         irp->IoStatus.Information = sizeof(KSDATAFORMAT_WAVEFORMATEXTENSIBLE);
         SarReleaseEndpointAndContext(endpoint);
-        return STATUS_BUFFER_OVERFLOW;
+        if (outputLength)
+            return STATUS_BUFFER_TOO_SMALL;
+        else
+            return STATUS_BUFFER_OVERFLOW;
     }
 
     PKSDATAFORMAT_WAVEFORMATEXTENSIBLE waveFormat =
@@ -642,9 +645,13 @@ NTSTATUS SarKsPinProposeDataFormat(
         return STATUS_NOT_FOUND;
     }
 
-    if (outputLength < sizeof(KSDATAFORMAT)) {
+    if (outputLength < sizeof(KSDATAFORMAT_WAVEFORMATEXTENSIBLE)) {
+        irp->IoStatus.Information = sizeof(KSDATAFORMAT_WAVEFORMATEXTENSIBLE);
         SarReleaseEndpointAndContext(endpoint);
-        return STATUS_BUFFER_TOO_SMALL;
+        if (outputLength)
+            return STATUS_BUFFER_TOO_SMALL;
+        else
+            return STATUS_BUFFER_OVERFLOW;
     }
 
     PKSDATAFORMAT_WAVEFORMATEXTENSIBLE format =
@@ -663,11 +670,6 @@ NTSTATUS SarKsPinProposeDataFormat(
             GUID_VALUES(format->DataFormat.Specifier));
         SarReleaseEndpointAndContext(endpoint);
         return STATUS_NO_MATCH;
-    }
-
-    if (outputLength < sizeof(KSDATAFORMAT_WAVEFORMATEXTENSIBLE)) {
-        SarReleaseEndpointAndContext(endpoint);
-        return STATUS_BUFFER_TOO_SMALL;
     }
 
     if (format->WaveFormatExt.Format.nChannels > endpoint->channelCount ||

@@ -195,9 +195,11 @@ NTSTATUS SarReadUserBuffer(PVOID dest, PIRP irp, ULONG size)
     }
 
     __try {
-        ProbeForRead(
-            irpStack->Parameters.DeviceIoControl.Type3InputBuffer, size,
-            TYPE_ALIGNMENT(ULONG));
+        if (irp->RequestorMode != KernelMode) {
+            ProbeForRead(
+                irpStack->Parameters.DeviceIoControl.Type3InputBuffer, size,
+                TYPE_ALIGNMENT(ULONG));
+        }
         RtlCopyMemory(
             dest, irpStack->Parameters.DeviceIoControl.Type3InputBuffer, size);
         return STATUS_SUCCESS;
