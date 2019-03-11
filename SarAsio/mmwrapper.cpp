@@ -204,7 +204,7 @@ HRESULT STDMETHODCALLTYPE SarMMDeviceEnumerator::GetDefaultAudioEndpoint(
     WCHAR processNameWide[512] = {};
     ApplicationConfig *appConfig = nullptr;
 
-    GetModuleFileName(nullptr, processNameWide, sizeof(processNameWide));
+    GetModuleFileName(nullptr, processNameWide, sizeof(processNameWide)/sizeof(processNameWide[0]));
 
     auto processName = TCHARToUTF8(processNameWide);
 
