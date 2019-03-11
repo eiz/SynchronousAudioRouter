@@ -216,11 +216,15 @@
     <ClCompile Include="device.cpp" />
     <ClCompile Include="entry.cpp" />
     <ClCompile Include="pin.cpp" />
+    <ClCompile Include="SarWaveFilterDescriptor.cpp" />
+    <ClCompile Include="SarTopologyFilterDescriptor.cpp" />
     <ClCompile Include="utility.cpp" />
     <ClCompile Include="wavert.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="sar.h" />
+    <ClInclude Include="SarWaveFilterDescriptor.h" />
+    <ClInclude Include="SarTopologyFilterDescriptor.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

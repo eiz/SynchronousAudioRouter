@@ -79,7 +79,7 @@ SarEndpoint *SarGetEndpointFromIrp(PIRP irp, BOOLEAN retain)
 
             entry = entry->Flink;
 
-            if (endpoint->filterFactory == factory) {
+            if (endpoint->filterFactory == factory || endpoint->topologyFilterFactory == factory) {
                 found = endpoint;
 
                 if (retain) {
@@ -170,6 +170,7 @@ NTSTATUS SarWriteEndpointRegisters(
         dest->bufferOffset = regs->bufferOffset;
         dest->bufferSize = regs->bufferSize;
         dest->notificationCount = regs->notificationCount;
+        dest->activeChannelCount = regs->activeChannelCount;
         MemoryBarrier();
         InterlockedExchange((LONG *)&dest->generation, (ULONG)regs->generation);
     } __except(EXCEPTION_EXECUTE_HANDLER) {

@@ -36,6 +36,12 @@ NTSTATUS SarKsPinRtGetBufferCore(
         return STATUS_NOT_IMPLEMENTED;
     }
 
+    if (endpoint->activeChannelCount == 0) {
+        SAR_LOG("ERROR ! activeChannelCount not set, assuming channelCount");
+        KdBreakPoint();
+        endpoint->activeChannelCount = endpoint->channelCount;
+    }
+
     status = SarGetOrCreateEndpointProcessContext(
         endpoint, PsGetCurrentProcess(), &processContext);
 
@@ -47,9 +53,9 @@ NTSTATUS SarKsPinRtGetBufferCore(
     ULONG actualSize = ROUND_UP(
         max(requestedBufferSize,
             controlContext->minimumFrameCount *
-            controlContext->frameSize *
-            endpoint->channelCount),
-        controlContext->sampleSize * endpoint->channelCount);
+            controlContext->periodSizeBytes *
+            endpoint->activeChannelCount),
+        controlContext->sampleSize * endpoint->activeChannelCount);
     SIZE_T viewSize = ROUND_UP(actualSize, SAR_BUFFER_CELL_SIZE);
 
     ExAcquireFastMutex(&controlContext->mutex);
@@ -227,7 +233,7 @@ NTSTATUS SarKsPinRtGetPositionRegister(
     reg->Register =
         &context->registerFileUVA[endpoint->index].positionRegister;
     reg->Width = 32;
-    reg->Accuracy = 1;
+    reg->Accuracy = endpoint->owner->periodSizeBytes * endpoint->activeChannelCount;
     reg->Numerator = 0;
     reg->Denominator = 0;
     SarReleaseEndpointAndContext(endpoint);

@@ -33,6 +33,8 @@ extern "C" {
 #include <ksproxy.h>
 #define NDIS630
 #include <ndis.h>
+#include "SarWaveFilterDescriptor.h"
+#include "SarTopologyFilterDescriptor.h"
 #else
 #include <windows.h>
 #endif
@@ -91,7 +93,7 @@ typedef struct SarCreateEndpointRequest
 typedef struct SarSetBufferLayoutRequest
 {
     DWORD bufferSize;
-    DWORD frameSize;
+    DWORD periodSizeBytes;
     DWORD sampleRate;
     DWORD sampleSize;
     DWORD minimumFrameCount;
@@ -122,6 +124,7 @@ typedef struct SarEndpointRegisters
     DWORD bufferOffset;
     DWORD bufferSize;
     DWORD notificationCount;
+    DWORD activeChannelCount;
 } SarEndpointRegisters;
 
 typedef struct SarNdisEnumerateResponseItem
@@ -222,7 +225,7 @@ typedef struct SarControlContext
     RTL_BITMAP bufferMap;
     PULONG bufferMapStorage;
     DWORD bufferSize;
-    DWORD frameSize;
+    DWORD periodSizeBytes;
     DWORD sampleRate;
     DWORD sampleSize;
     DWORD minimumFrameCount;
@@ -251,16 +254,17 @@ typedef struct SarEndpoint
     UNICODE_STRING deviceName;
     UNICODE_STRING deviceId;
     UNICODE_STRING deviceIdMangled;
+    UNICODE_STRING topologyFilterRefId;
     SarControlContext *owner;
     PKSFILTERFACTORY filterFactory;
-    PKSFILTER_DESCRIPTOR filterDesc;
-    PKSPIN_DESCRIPTOR_EX pinDesc;
-    PKSNODE_DESCRIPTOR nodeDesc;
-    PKSDATARANGE_AUDIO dataRange;
-    PKSDATARANGE_AUDIO analogDataRange;
+    PKSFILTERFACTORY topologyFilterFactory;
+    SarWaveFilterDescriptor filterDescriptor;
+    SarTopologyFilterDescriptor topologyDescriptor;
     DWORD type;
     DWORD index;
     DWORD channelCount;
+    ULONG channelMask;
+    DWORD activeChannelCount;
 
     FAST_MUTEX mutex;
     BOOLEAN orphan;
@@ -372,6 +376,10 @@ NTSTATUS SarKsPinRtQueryNotificationSupport(
 NTSTATUS SarKsPinRtRegisterNotificationEvent(
     PIRP irp, PKSIDENTIFIER request, PVOID data);
 NTSTATUS SarKsPinRtUnregisterNotificationEvent(
+    PIRP irp, PKSIDENTIFIER request, PVOID data);
+NTSTATUS SarKsNodeGetAudioChannelConfig(
+    PIRP irp, PKSIDENTIFIER request, PVOID data);
+NTSTATUS SarKsNodeSetAudioChannelConfig(
     PIRP irp, PKSIDENTIFIER request, PVOID data);
 NTSTATUS SarGetOrCreateEndpointProcessContext(
     SarEndpoint *endpoint,

@@ -16,6 +16,19 @@
 
 #include "sar.h"
 
+
+static WORD getnbits(DWORD value) {
+    WORD bitOnesCount = 0;
+
+    while (value > 0) {           // until all bits are zero
+        if ((value & 1) == 1)     // check lower bit
+            bitOnesCount++;
+        value >>= 1;              // shift bits, removing lower bit
+    }
+
+    return bitOnesCount;
+}
+
 NTSTATUS SarKsFilterCreate(PKSFILTER filter, PIRP irp)
 {
     filter->Context = SarGetEndpointFromIrp(irp, TRUE);
@@ -85,12 +98,29 @@ NTSTATUS SarKsPinCreate(PKSPIN pin, PIRP irp)
     UNREFERENCED_PARAMETER(irp);
     SarEndpoint *endpoint = SarGetEndpointFromIrp(irp, TRUE);
     NTSTATUS status;
+    DWORD activeChannelCount;
 
     pin->Context = endpoint;
 
     if (!pin->Context) {
         SAR_LOG("Failed to find endpoint for pin");
         return STATUS_NOT_FOUND;
+    }
+
+    if (pin->ConnectionFormat != NULL &&
+        pin->ConnectionFormat->MajorFormat == KSDATAFORMAT_TYPE_AUDIO &&
+        pin->ConnectionFormat->SubFormat == KSDATAFORMAT_SUBTYPE_PCM &&
+        pin->ConnectionFormat->Specifier == KSDATAFORMAT_SPECIFIER_WAVEFORMATEX &&
+        pin->ConnectionFormat->FormatSize >= sizeof(KSDATAFORMAT_WAVEFORMATEXTENSIBLE))
+    {
+        PKSDATAFORMAT_WAVEFORMATEXTENSIBLE pinWaveFormat = (PKSDATAFORMAT_WAVEFORMATEXTENSIBLE)pin->ConnectionFormat;
+        activeChannelCount = pinWaveFormat->WaveFormatExt.Format.nChannels;
+        SAR_LOG("Opening pin with %d channels", activeChannelCount);
+    }
+    else
+    {
+        SAR_LOG("ERROR: Can't read pin ConnectionFormat, using default channel count: %d", endpoint->channelCount);
+        activeChannelCount = endpoint->channelCount;
     }
 
     InterlockedCompareExchangePointer(
@@ -122,6 +152,8 @@ NTSTATUS SarKsPinCreate(PKSPIN pin, PIRP irp)
     } else {
         regs.generation =
             MAKE_GENERATION(GENERATION_NUMBER(regs.generation) + 1, FALSE);
+        regs.activeChannelCount = activeChannelCount;
+        endpoint->activeChannelCount = activeChannelCount;
 
         if (!NT_SUCCESS(SarWriteEndpointRegisters(&regs, endpoint))) {
             SAR_LOG("Couldn't write endpoint registers");
@@ -268,6 +300,7 @@ NTSTATUS SarKsPinClose(PKSPIN pin, PIRP irp)
 
     endpoint->activeCellIndex = 0;
     endpoint->activeViewSize = 0;
+    endpoint->activeChannelCount = 0;
     InterlockedExchangePointer((PVOID *)&endpoint->activePin, nullptr);
     SarReleaseEndpointAndContext(endpoint);
     return STATUS_SUCCESS;
@@ -328,7 +361,7 @@ NTSTATUS SarKsPinSetDataFormat(
 
     if (waveFormat->WaveFormatExt.Format.wFormatTag !=
             WAVE_FORMAT_EXTENSIBLE ||
-        waveFormat->WaveFormatExt.Format.nChannels !=
+        waveFormat->WaveFormatExt.Format.nChannels >
             audioRange->MaximumChannels ||
         waveFormat->WaveFormatExt.Format.nSamplesPerSec !=
             audioRange->MaximumSampleFrequency ||
@@ -414,11 +447,23 @@ NTSTATUS SarKsPinIntersectHandler(
     PKSDATARANGE callerDataRange, PKSDATARANGE descriptorDataRange,
     ULONG dataBufferSize, PVOID data, PULONG dataSize)
 {
+    DWORD channelMask;
+
     UNREFERENCED_PARAMETER(context);
     UNREFERENCED_PARAMETER(irp);
     UNREFERENCED_PARAMETER(pin);
     PKSDATARANGE_AUDIO callerFormat = nullptr;
     PKSDATARANGE_AUDIO myFormat = nullptr;
+
+    {
+        SarEndpoint *endpoint = SarGetEndpointFromIrp(irp, TRUE);
+        if (!endpoint) {
+            SAR_LOG("Failed to find endpoint for pin");
+            return STATUS_NOT_FOUND;
+        }
+        channelMask = endpoint->channelMask;
+        SarReleaseEndpointAndContext(endpoint);
+    }
 
     *dataSize = sizeof(KSDATAFORMAT_WAVEFORMATEXTENSIBLE);
 
@@ -454,11 +499,9 @@ NTSTATUS SarKsPinIntersectHandler(
 
     if (callerFormat->MaximumBitsPerSample < myFormat->MinimumBitsPerSample ||
         callerFormat->MinimumBitsPerSample > myFormat->MaximumBitsPerSample ||
-        (callerFormat->MaximumSampleFrequency <
-         myFormat->MinimumSampleFrequency) ||
-        (callerFormat->MinimumSampleFrequency >
-         myFormat->MaximumSampleFrequency) ||
-        callerFormat->MaximumChannels < myFormat->MaximumChannels) {
+        (callerFormat->MaximumSampleFrequency < myFormat->MinimumSampleFrequency) ||
+        (callerFormat->MinimumSampleFrequency > myFormat->MaximumSampleFrequency) ||
+        callerFormat->MaximumChannels < 1) {
         return STATUS_NO_MATCH;
     }
 
@@ -467,30 +510,35 @@ NTSTATUS SarKsPinIntersectHandler(
 
     RtlCopyMemory(
         &waveFormat->DataFormat, &myFormat->DataRange, sizeof(KSDATAFORMAT));
-    waveFormat->WaveFormatExt.Format.wFormatTag =
-        WAVE_FORMAT_EXTENSIBLE;
-    waveFormat->WaveFormatExt.Format.nChannels =
-        (WORD)myFormat->MaximumChannels;
-    waveFormat->WaveFormatExt.Format.nSamplesPerSec =
-        myFormat->MaximumSampleFrequency;
-    waveFormat->WaveFormatExt.Format.wBitsPerSample =
-        (WORD)myFormat->MaximumBitsPerSample;
+
+    waveFormat->WaveFormatExt.Format.nChannels = channelMask ? getnbits(channelMask) : (WORD)myFormat->MaximumChannels;
+    if (waveFormat->WaveFormatExt.Format.nChannels > myFormat->MaximumChannels) {
+        waveFormat->WaveFormatExt.Format.nChannels = (WORD)myFormat->MaximumChannels;
+    }
+    else if (waveFormat->WaveFormatExt.Format.nChannels > callerFormat->MaximumChannels) {
+        waveFormat->WaveFormatExt.Format.nChannels = (WORD)callerFormat->MaximumChannels;
+    }
+
+    waveFormat->WaveFormatExt.Format.nSamplesPerSec = min(callerFormat->MaximumSampleFrequency, myFormat->MaximumSampleFrequency);
+    waveFormat->WaveFormatExt.Format.wBitsPerSample = (WORD)min(callerFormat->MaximumBitsPerSample, myFormat->MaximumBitsPerSample);
+    waveFormat->WaveFormatExt.Format.cbSize = sizeof(WAVEFORMATEXTENSIBLE) - sizeof(WAVEFORMATEX);
+    waveFormat->WaveFormatExt.dwChannelMask = 0;
+
+    waveFormat->WaveFormatExt.Format.wFormatTag = WAVE_FORMAT_EXTENSIBLE;
+    waveFormat->WaveFormatExt.SubFormat = KSDATAFORMAT_SUBTYPE_PCM;
+    waveFormat->DataFormat.FormatSize = sizeof(KSDATAFORMAT_WAVEFORMATEXTENSIBLE);
+
+    waveFormat->WaveFormatExt.Samples.wValidBitsPerSample =
+        waveFormat->WaveFormatExt.Format.wBitsPerSample;
     waveFormat->WaveFormatExt.Format.nBlockAlign =
-        ((WORD)myFormat->MaximumBitsPerSample / 8) *
-        (WORD)myFormat->MaximumChannels;
+        (waveFormat->WaveFormatExt.Format.wBitsPerSample / 8) *
+        waveFormat->WaveFormatExt.Format.nChannels;
+    waveFormat->DataFormat.SampleSize =
+        waveFormat->WaveFormatExt.Format.nBlockAlign;
     waveFormat->WaveFormatExt.Format.nAvgBytesPerSec =
         waveFormat->WaveFormatExt.Format.nBlockAlign *
         waveFormat->WaveFormatExt.Format.nSamplesPerSec;
-    waveFormat->WaveFormatExt.Format.cbSize =
-        sizeof(WAVEFORMATEXTENSIBLE) - sizeof(WAVEFORMATEX);
-    waveFormat->WaveFormatExt.Samples.wValidBitsPerSample =
-        (WORD)myFormat->MaximumBitsPerSample;
-    waveFormat->WaveFormatExt.dwChannelMask =
-        (1 << myFormat->MaximumChannels) - 1;
-    waveFormat->WaveFormatExt.SubFormat = KSDATAFORMAT_SUBTYPE_PCM;
-    waveFormat->DataFormat.SampleSize =
-        waveFormat->WaveFormatExt.Format.nBlockAlign;
-    waveFormat->DataFormat.FormatSize = *dataSize;
+
     return STATUS_SUCCESS;
 }
 
@@ -543,35 +591,35 @@ NTSTATUS SarKsPinGetDefaultDataFormat(
 
     PKSDATAFORMAT_WAVEFORMATEXTENSIBLE waveFormat =
         (PKSDATAFORMAT_WAVEFORMATEXTENSIBLE)data;
-    PKSDATARANGE_AUDIO myFormat = endpoint->dataRange;
+    PKSDATARANGE_AUDIO myFormat = &endpoint->filterDescriptor.digitalDataRange;
 
     RtlCopyMemory(
         &waveFormat->DataFormat, &myFormat->DataRange, sizeof(KSDATAFORMAT));
-    waveFormat->WaveFormatExt.Format.wFormatTag =
-        WAVE_FORMAT_EXTENSIBLE;
-    waveFormat->WaveFormatExt.Format.nChannels =
-        (WORD)myFormat->MaximumChannels;
+
+    waveFormat->WaveFormatExt.Format.nChannels = endpoint->channelMask ? getnbits(endpoint->channelMask) : (WORD)myFormat->MaximumChannels;
     waveFormat->WaveFormatExt.Format.nSamplesPerSec =
         myFormat->MaximumSampleFrequency;
     waveFormat->WaveFormatExt.Format.wBitsPerSample =
         (WORD)myFormat->MaximumBitsPerSample;
+    waveFormat->WaveFormatExt.Format.cbSize =
+        sizeof(WAVEFORMATEXTENSIBLE) - sizeof(WAVEFORMATEX);
+    waveFormat->WaveFormatExt.dwChannelMask = endpoint->channelMask;
+
+    waveFormat->WaveFormatExt.Format.wFormatTag = WAVE_FORMAT_EXTENSIBLE;
+    waveFormat->WaveFormatExt.SubFormat = KSDATAFORMAT_SUBTYPE_PCM;
+    waveFormat->DataFormat.FormatSize = sizeof(KSDATAFORMAT_WAVEFORMATEXTENSIBLE);
+
+    waveFormat->WaveFormatExt.Samples.wValidBitsPerSample =
+        waveFormat->WaveFormatExt.Format.wBitsPerSample;
     waveFormat->WaveFormatExt.Format.nBlockAlign =
-        ((WORD)myFormat->MaximumBitsPerSample / 8) *
-        (WORD)myFormat->MaximumChannels;
+        (waveFormat->WaveFormatExt.Format.wBitsPerSample / 8) *
+        waveFormat->WaveFormatExt.Format.nChannels;
+    waveFormat->DataFormat.SampleSize =
+        waveFormat->WaveFormatExt.Format.nBlockAlign;
     waveFormat->WaveFormatExt.Format.nAvgBytesPerSec =
         waveFormat->WaveFormatExt.Format.nBlockAlign *
         waveFormat->WaveFormatExt.Format.nSamplesPerSec;
-    waveFormat->WaveFormatExt.Format.cbSize =
-        sizeof(WAVEFORMATEXTENSIBLE) - sizeof(WAVEFORMATEX);
-    waveFormat->WaveFormatExt.Samples.wValidBitsPerSample =
-        (WORD)myFormat->MaximumBitsPerSample;
-    waveFormat->WaveFormatExt.dwChannelMask =
-        (1 << myFormat->MaximumChannels) - 1;
-    waveFormat->WaveFormatExt.SubFormat = KSDATAFORMAT_SUBTYPE_PCM;
-    waveFormat->DataFormat.SampleSize =
-        waveFormat->WaveFormatExt.Format.nBlockAlign;
-    waveFormat->DataFormat.FormatSize =
-        sizeof(KSDATAFORMAT_WAVEFORMATEXTENSIBLE);
+
     SarReleaseEndpointAndContext(endpoint);
     return STATUS_SUCCESS;
 }
@@ -622,7 +670,7 @@ NTSTATUS SarKsPinProposeDataFormat(
         return STATUS_BUFFER_TOO_SMALL;
     }
 
-    if (format->WaveFormatExt.Format.nChannels != endpoint->channelCount ||
+    if (format->WaveFormatExt.Format.nChannels > endpoint->channelCount ||
         (format->WaveFormatExt.Format.wBitsPerSample !=
          endpoint->owner->sampleSize * 8) ||
         format->WaveFormatExt.Format.wFormatTag != WAVE_FORMAT_EXTENSIBLE ||
@@ -634,6 +682,76 @@ NTSTATUS SarKsPinProposeDataFormat(
         return STATUS_NO_MATCH;
     }
 
+    SarReleaseEndpointAndContext(endpoint);
+    return STATUS_SUCCESS;
+}
+
+NTSTATUS SarKsNodeGetAudioChannelConfig(
+    PIRP irp, PKSIDENTIFIER request, PVOID data)
+{
+    PKSNODEPROPERTY propertyRequest = (PKSNODEPROPERTY)request;
+    PIO_STACK_LOCATION irpStack = IoGetCurrentIrpStackLocation(irp);
+    ULONG outputLength =
+        irpStack->Parameters.DeviceIoControl.OutputBufferLength;
+
+    // Only one node: DAC or ADC
+    if (propertyRequest->NodeId != 0) {
+        return STATUS_NOT_FOUND;
+    }
+
+    SarEndpoint *endpoint = SarGetEndpointFromIrp(irp, TRUE);
+
+    if (!endpoint) {
+        return STATUS_NOT_FOUND;
+    }
+
+    if (outputLength < sizeof(KSAUDIO_CHANNEL_CONFIG)) {
+        SarReleaseEndpointAndContext(endpoint);
+        return STATUS_BUFFER_TOO_SMALL;
+    }
+
+    KSAUDIO_CHANNEL_CONFIG* format = (KSAUDIO_CHANNEL_CONFIG*)data;
+
+    // Get the channel mask.
+    format->ActiveSpeakerPositions = endpoint->channelMask;
+
+    SarReleaseEndpointAndContext(endpoint);
+    return STATUS_SUCCESS;
+}
+
+NTSTATUS SarKsNodeSetAudioChannelConfig(
+    PIRP irp, PKSIDENTIFIER request, PVOID data)
+{
+    PKSNODEPROPERTY propertyRequest = (PKSNODEPROPERTY)request;
+    PIO_STACK_LOCATION irpStack = IoGetCurrentIrpStackLocation(irp);
+    ULONG outputLength =
+        irpStack->Parameters.DeviceIoControl.OutputBufferLength;
+
+    // Only one node: DAC or ADC
+    if (propertyRequest->NodeId != 0) {
+        return STATUS_NOT_FOUND;
+    }
+
+    SarEndpoint *endpoint = SarGetEndpointFromIrp(irp, TRUE);
+
+    if (!endpoint) {
+        return STATUS_NOT_FOUND;
+    }
+
+    if (outputLength < sizeof(KSAUDIO_CHANNEL_CONFIG)) {
+        SarReleaseEndpointAndContext(endpoint);
+        return STATUS_BUFFER_TOO_SMALL;
+    }
+
+    KSAUDIO_CHANNEL_CONFIG* format = (KSAUDIO_CHANNEL_CONFIG*)data;
+
+    if(getnbits(format->ActiveSpeakerPositions) > endpoint->channelCount) {
+        SarReleaseEndpointAndContext(endpoint);
+        return STATUS_NOT_SUPPORTED;
+    }
+
+    // Store the new channel mask.
+    endpoint->channelMask = format->ActiveSpeakerPositions;
     SarReleaseEndpointAndContext(endpoint);
     return STATUS_SUCCESS;
 }
