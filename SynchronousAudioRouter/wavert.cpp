@@ -26,18 +26,18 @@ NTSTATUS SarKsPinRtGetBufferCore(
     NTSTATUS status;
 
     if (!endpoint) {
-        SAR_LOG("No valid endpoint");
+        SAR_ERROR("No valid endpoint");
         return STATUS_NOT_FOUND;
     }
 
     if (baseAddress != nullptr) {
-        SAR_LOG("It wants a specific address");
+        SAR_ERROR("It wants a specific address");
         SarReleaseEndpointAndContext(endpoint);
         return STATUS_NOT_IMPLEMENTED;
     }
 
     if (endpoint->activeChannelCount == 0) {
-        SAR_LOG("ERROR ! activeChannelCount not set, assuming channelCount");
+        SAR_ERROR("activeChannelCount not set, assuming channelCount");
         KdBreakPoint();
         endpoint->activeChannelCount = endpoint->channelCount;
     }
@@ -46,6 +46,7 @@ NTSTATUS SarKsPinRtGetBufferCore(
         endpoint, PsGetCurrentProcess(), &processContext);
 
     if (!NT_SUCCESS(status)) {
+        SAR_ERROR("Get process context failed: %08X", status);
         SarReleaseEndpointAndContext(endpoint);
         return status;
     }
@@ -61,7 +62,7 @@ NTSTATUS SarKsPinRtGetBufferCore(
     ExAcquireFastMutex(&controlContext->mutex);
 
     if (!controlContext->bufferSection) {
-        SAR_LOG("Buffer isn't allocated");
+        SAR_ERROR("Buffer isn't allocated");
         ExReleaseFastMutex(&controlContext->mutex);
         SarReleaseEndpointAndContext(endpoint);
         return STATUS_INSUFFICIENT_RESOURCES;
@@ -72,6 +73,7 @@ NTSTATUS SarKsPinRtGetBufferCore(
         (ULONG)(viewSize / SAR_BUFFER_CELL_SIZE), 0);
 
     if (cellIndex == 0xFFFFFFFF) {
+        SAR_ERROR("Cell index full 0xFFFFFFFF");
         ExReleaseFastMutex(&controlContext->mutex);
         SarReleaseEndpointAndContext(endpoint);
         return STATUS_INSUFFICIENT_RESOURCES;
@@ -86,7 +88,7 @@ NTSTATUS SarKsPinRtGetBufferCore(
     LARGE_INTEGER sectionOffset;
 
     sectionOffset.QuadPart = cellIndex * SAR_BUFFER_CELL_SIZE;
-    SAR_LOG("Mapping %08lX %016llX %lu %lu", (ULONG)viewSize, sectionOffset.QuadPart,
+    SAR_DEBUG("Mapping %08lX %016llX %lu %lu", (ULONG)viewSize, sectionOffset.QuadPart,
         actualSize, requestedBufferSize);
     status = ZwMapViewOfSection(
         endpoint->owner->bufferSection, ZwCurrentProcess(),
@@ -94,7 +96,7 @@ NTSTATUS SarKsPinRtGetBufferCore(
         0, PAGE_READWRITE);
 
     if (!NT_SUCCESS(status)) {
-        SAR_LOG("Section mapping failed %08X", status);
+        SAR_ERROR("Section mapping failed %08X", status);
         SarReleaseEndpointAndContext(endpoint);
         return status;
     }
@@ -105,6 +107,7 @@ NTSTATUS SarKsPinRtGetBufferCore(
     status = SarReadEndpointRegisters(&regs, endpoint);
 
     if (!NT_SUCCESS(status)) {
+        SAR_ERROR("Read endpoint registers failed %08X", status);
         SarReleaseEndpointAndContext(endpoint);
         return status;
     }
@@ -115,7 +118,7 @@ NTSTATUS SarKsPinRtGetBufferCore(
     status = SarWriteEndpointRegisters(&regs, endpoint);
 
     if (!NT_SUCCESS(status)) {
-        SAR_LOG("Couldn't write endpoint registers: %08X %p %p", status,
+        SAR_ERROR("Couldn't write endpoint registers: %08X %p %p", status,
             processContext->process, PsGetCurrentProcess());
         SarReleaseEndpointAndContext(endpoint);
         return status; // TODO: goto err_out
@@ -171,6 +174,7 @@ NTSTATUS SarKsPinRtGetHwLatency(
     SarEndpoint *endpoint = SarGetEndpointFromIrp(irp, TRUE);
 
     if (!endpoint) {
+        SAR_ERROR("Get endpoint failed");
         return STATUS_UNSUCCESSFUL;
     }
 
@@ -199,6 +203,7 @@ NTSTATUS SarKsPinRtGetPositionRegister(
     SarEndpointProcessContext *context;
 
     if (!endpoint) {
+        SAR_ERROR("Get endpoint failed");
         return STATUS_UNSUCCESSFUL;
     }
 
@@ -250,12 +255,14 @@ NTSTATUS SarKsPinRtRegisterNotificationEvent(
         (PKSRTAUDIO_NOTIFICATION_EVENT_PROPERTY)request;
 
     if (!endpoint) {
+        SAR_ERROR("Get endpoint failed");
         return STATUS_UNSUCCESSFUL;
     }
 
     status = SarReadEndpointRegisters(&regs, endpoint);
 
     if (!NT_SUCCESS(status)) {
+        SAR_ERROR("Read endpoint registers failed %08X", status);
         SarReleaseEndpointAndContext(endpoint);
         return status;
     }

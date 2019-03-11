@@ -75,11 +75,15 @@ SarControlContext *SarCreateControlContext(PFILE_OBJECT fileObject)
         return nullptr;
     }
 
+    SAR_DEBUG("Created controlContext %p", controlContext);
+
     return controlContext;
 }
 
 VOID SarDeleteControlContext(SarControlContext *controlContext)
 {
+    SAR_DEBUG("Deleting controlContext %p", controlContext);
+
     while (!IsListEmpty(&controlContext->endpointList)) {
         PLIST_ENTRY entry = controlContext->endpointList.Flink;
         SarEndpoint *endpoint =
@@ -139,8 +143,12 @@ BOOLEAN SarOrphanControlContext(SarDriverExtension *extension, PIRP irp)
     ExReleaseFastMutex(&extension->mutex);
 
     if (!controlContext) {
+        SAR_TRACE("controlContext not found ! FileObject: %p", irpStack->FileObject);
         return FALSE;
     }
+
+
+    SAR_TRACE("Orphaning controlContext %p, FileObject: %p", controlContext, irpStack->FileObject);
 
     ExAcquireFastMutex(&controlContext->mutex);
     controlContext->orphan = TRUE;
@@ -166,8 +174,304 @@ BOOLEAN SarOrphanControlContext(SarDriverExtension *extension, PIRP irp)
 
     SarCancelAllHandleQueueIrps(&controlContext->handleQueue);
 
-    SarReleaseControlContext(controlContext);
+    if (SarReleaseControlContext(controlContext) == FALSE) {
+        SAR_TRACE("controlContext orphaned but not deleted: %p, refs: %d", controlContext, controlContext->refs);
+    }
     return TRUE;
+}
+
+template<class Key, class T>
+static const char* getKsElementName(Key key, T mapping) {
+    for (size_t i = 0; mapping[i].name != NULL; i++) {
+        if (mapping[i].key == key)
+            return mapping[i].name;
+    }
+    return nullptr;
+}
+
+#ifdef SAR_DEBUG_KS_PROPERTIES
+static void SarToHexString(const char* input, int size, char* output) {
+    static const char* const hexMapping[] = {
+        "00", "01", "02", "03", "04", "05", "06", "07", "08", "09", "0A", "0B", "0C", "0D", "0E", "0F", "10", "11",
+        "12", "13", "14", "15", "16", "17", "18", "19", "1A", "1B", "1C", "1D", "1E", "1F", "20", "21", "22", "23",
+        "24", "25", "26", "27", "28", "29", "2A", "2B", "2C", "2D", "2E", "2F", "30", "31", "32", "33", "34", "35",
+        "36", "37", "38", "39", "3A", "3B", "3C", "3D", "3E", "3F", "40", "41", "42", "43", "44", "45", "46", "47",
+        "48", "49", "4A", "4B", "4C", "4D", "4E", "4F", "50", "51", "52", "53", "54", "55", "56", "57", "58", "59",
+        "5A", "5B", "5C", "5D", "5E", "5F", "60", "61", "62", "63", "64", "65", "66", "67", "68", "69", "6A", "6B",
+        "6C", "6D", "6E", "6F", "70", "71", "72", "73", "74", "75", "76", "77", "78", "79", "7A", "7B", "7C", "7D",
+        "7E", "7F", "80", "81", "82", "83", "84", "85", "86", "87", "88", "89", "8A", "8B", "8C", "8D", "8E", "8F",
+        "90", "91", "92", "93", "94", "95", "96", "97", "98", "99", "9A", "9B", "9C", "9D", "9E", "9F", "A0", "A1",
+        "A2", "A3", "A4", "A5", "A6", "A7", "A8", "A9", "AA", "AB", "AC", "AD", "AE", "AF", "B0", "B1", "B2", "B3",
+        "B4", "B5", "B6", "B7", "B8", "B9", "BA", "BB", "BC", "BD", "BE", "BF", "C0", "C1", "C2", "C3", "C4", "C5",
+        "C6", "C7", "C8", "C9", "CA", "CB", "CC", "CD", "CE", "CF", "D0", "D1", "D2", "D3", "D4", "D5", "D6", "D7",
+        "D8", "D9", "DA", "DB", "DC", "DD", "DE", "DF", "E0", "E1", "E2", "E3", "E4", "E5", "E6", "E7", "E8", "E9",
+        "EA", "EB", "EC", "ED", "EE", "EF", "F0", "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "FA", "FB",
+        "FC", "FD", "FE", "FF" };
+
+    for (int i = 0; i < size; i += 16) {
+        int maxCharNum = size - i;
+        if (maxCharNum > 16)
+            maxCharNum = 16;
+
+        *(output++) = hexMapping[(i >> 8) & 0xFF][0];
+        *(output++) = hexMapping[(i >> 8) & 0xFF][1];
+        *(output++) = hexMapping[(i) & 0xFF][0];
+        *(output++) = hexMapping[(i) & 0xFF][1];
+        *(output++) = ':';
+        *(output++) = ' ';
+
+        for (int row = 0; row < maxCharNum; row++) {
+                *(output++) = hexMapping[(unsigned char)input[i + row]][0];
+                *(output++) = hexMapping[(unsigned char)input[i + row]][1];
+                *(output++) = ' ';
+        }
+        *(output++) = '\n';
+    }
+    *(output++) = 0;
+}
+#endif
+
+static void SarLogKsIrp(PIRP irp) {
+    UNREFERENCED_PARAMETER(irp);
+
+#ifdef SAR_DEBUG_KS_PROPERTIES
+    PIO_STACK_LOCATION irpStack = IoGetCurrentIrpStackLocation(irp);
+    ULONG ioControlCode = irpStack->Parameters.DeviceIoControl.IoControlCode;
+    if (ioControlCode == IOCTL_KS_PROPERTY)
+    {
+
+        struct SetMapping {
+            const GUID key;
+            const char* name;
+        };
+#pragma region Mappings
+
+#define NAMED_GUID(x) {x, #x}
+        static const SetMapping knownSets[] = {
+            NAMED_GUID(KSPROPSETID_AC3),
+            NAMED_GUID(KSPROPSETID_Audio),
+            NAMED_GUID(KSPROPSETID_AudioBufferDuration),
+            NAMED_GUID(KSPROPSETID_AudioDecoderOut),
+            NAMED_GUID(KSPROPSETID_AudioEngine),
+            NAMED_GUID(KSPROPSETID_AudioSignalProcessing),
+            NAMED_GUID(KSPROPSETID_Bibliographic),
+            NAMED_GUID(KSPROPSETID_BtAudio),
+            NAMED_GUID(KSPROPSETID_Clock),
+            NAMED_GUID(KSPROPSETID_Connection),
+            NAMED_GUID(KSPROPSETID_CopyProt),
+            NAMED_GUID(KSPROPSETID_Cyclic),
+            NAMED_GUID(KSPROPSETID_DirectSound3DBuffer),
+            NAMED_GUID(KSPROPSETID_DirectSound3DListener),
+            NAMED_GUID(KSPROPSETID_DrmAudioStream),
+            NAMED_GUID(KSPROPSETID_DvdSubPic),
+            NAMED_GUID(KSPROPSETID_General),
+            NAMED_GUID(KSPROPSETID_GM),
+            NAMED_GUID(KSPROPSETID_Hrtf3d),
+            NAMED_GUID(KSPROPSETID_Itd3d),
+            NAMED_GUID(KSPROPSETID_Jack),
+            NAMED_GUID(KSPROPSETID_MediaSeeking),
+            NAMED_GUID(KSPROPSETID_MemoryTransport),
+            NAMED_GUID(KSPROPSETID_Mpeg2Vid),
+            NAMED_GUID(KSPROPSETID_MPEG4_MediaType_Attributes),
+            NAMED_GUID(KSPROPSETID_OverlayUpdate),
+            NAMED_GUID(KSPROPSETID_Pin),
+            NAMED_GUID(KSPROPSETID_PinMDLCacheClearProp),
+            NAMED_GUID(KSPROPSETID_Quality),
+            NAMED_GUID(KSPROPSETID_RtAudio),
+            NAMED_GUID(KSPROPSETID_SoundDetector),
+            NAMED_GUID(KSPROPSETID_Stream),
+            NAMED_GUID(KSPROPSETID_StreamAllocator),
+            NAMED_GUID(KSPROPSETID_StreamInterface),
+            NAMED_GUID(KSPROPSETID_Topology),
+            NAMED_GUID(KSPROPSETID_TopologyNode),
+            NAMED_GUID(KSPROPSETID_TSRateChange),
+            NAMED_GUID(KSPROPSETID_VBICAP_PROPERTIES),
+            NAMED_GUID(KSPROPSETID_VBICodecFiltering),
+            NAMED_GUID(KSPROPSETID_VPConfig),
+            NAMED_GUID(KSPROPSETID_VPVBIConfig),
+            NAMED_GUID(KSPROPSETID_VramCapture),
+            NAMED_GUID(KSPROPSETID_Wave),
+            NAMED_GUID(PROPSETID_ALLOCATOR_CONTROL),
+            NAMED_GUID(PROPSETID_EXT_DEVICE),
+            NAMED_GUID(PROPSETID_EXT_TRANSPORT),
+            NAMED_GUID(PROPSETID_TIMECODE_READER),
+            NAMED_GUID(PROPSETID_TUNER),
+            NAMED_GUID(PROPSETID_VIDCAP_CAMERACONTROL),
+            NAMED_GUID(PROPSETID_VIDCAP_CROSSBAR),
+            NAMED_GUID(PROPSETID_VIDCAP_DROPPEDFRAMES),
+            NAMED_GUID(PROPSETID_VIDCAP_SELECTOR),
+            NAMED_GUID(PROPSETID_VIDCAP_TVAUDIO),
+            NAMED_GUID(PROPSETID_VIDCAP_VIDEOCOMPRESSION),
+            NAMED_GUID(PROPSETID_VIDCAP_VIDEOCONTROL),
+            NAMED_GUID(PROPSETID_VIDCAP_VIDEODECODER),
+            NAMED_GUID(PROPSETID_VIDCAP_VIDEOENCODER),
+            NAMED_GUID(PROPSETID_VIDCAP_VIDEOPROCAMP),
+            {{0}, NULL}
+        };
+#undef NAMED_GUID
+
+        struct PropertyNameMapping {
+            ULONG key;
+            const char* name;
+        };
+
+#define NAMED_PROPERTY(x) {x, #x}
+        static const PropertyNameMapping pinPropertiesMapping[] = {
+            NAMED_PROPERTY(KSPROPERTY_PIN_CINSTANCES),
+            NAMED_PROPERTY(KSPROPERTY_PIN_CTYPES),
+            NAMED_PROPERTY(KSPROPERTY_PIN_DATAFLOW),
+            NAMED_PROPERTY(KSPROPERTY_PIN_DATARANGES),
+            NAMED_PROPERTY(KSPROPERTY_PIN_DATAINTERSECTION),
+            NAMED_PROPERTY(KSPROPERTY_PIN_INTERFACES),
+            NAMED_PROPERTY(KSPROPERTY_PIN_MEDIUMS),
+            NAMED_PROPERTY(KSPROPERTY_PIN_COMMUNICATION),
+            NAMED_PROPERTY(KSPROPERTY_PIN_GLOBALCINSTANCES),
+            NAMED_PROPERTY(KSPROPERTY_PIN_NECESSARYINSTANCES),
+            NAMED_PROPERTY(KSPROPERTY_PIN_PHYSICALCONNECTION),
+            NAMED_PROPERTY(KSPROPERTY_PIN_CATEGORY),
+            NAMED_PROPERTY(KSPROPERTY_PIN_NAME),
+            NAMED_PROPERTY(KSPROPERTY_PIN_CONSTRAINEDDATARANGES),
+            NAMED_PROPERTY(KSPROPERTY_PIN_PROPOSEDATAFORMAT),
+            NAMED_PROPERTY(KSPROPERTY_PIN_PROPOSEDATAFORMAT2),
+            {0, NULL}
+        };
+
+#define NAMED_PROPERTY(x) {x, #x}
+        static const PropertyNameMapping audioPropertiesMapping[] = {
+            NAMED_PROPERTY(KSPROPERTY_AUDIO_LATENCY),
+            NAMED_PROPERTY(KSPROPERTY_AUDIO_COPY_PROTECTION),
+            NAMED_PROPERTY(KSPROPERTY_AUDIO_CHANNEL_CONFIG),
+            NAMED_PROPERTY(KSPROPERTY_AUDIO_VOLUMELEVEL),
+            NAMED_PROPERTY(KSPROPERTY_AUDIO_POSITION),
+            NAMED_PROPERTY(KSPROPERTY_AUDIO_DYNAMIC_RANGE),
+            NAMED_PROPERTY(KSPROPERTY_AUDIO_QUALITY),
+            NAMED_PROPERTY(KSPROPERTY_AUDIO_SAMPLING_RATE),
+            NAMED_PROPERTY(KSPROPERTY_AUDIO_DYNAMIC_SAMPLING_RATE),
+            NAMED_PROPERTY(KSPROPERTY_AUDIO_MIX_LEVEL_TABLE),
+            NAMED_PROPERTY(KSPROPERTY_AUDIO_MIX_LEVEL_CAPS),
+            NAMED_PROPERTY(KSPROPERTY_AUDIO_MUX_SOURCE),
+            NAMED_PROPERTY(KSPROPERTY_AUDIO_MUTE),
+            NAMED_PROPERTY(KSPROPERTY_AUDIO_BASS),
+            NAMED_PROPERTY(KSPROPERTY_AUDIO_MID),
+            NAMED_PROPERTY(KSPROPERTY_AUDIO_TREBLE),
+            NAMED_PROPERTY(KSPROPERTY_AUDIO_BASS_BOOST),
+            NAMED_PROPERTY(KSPROPERTY_AUDIO_EQ_LEVEL),
+            NAMED_PROPERTY(KSPROPERTY_AUDIO_NUM_EQ_BANDS),
+            NAMED_PROPERTY(KSPROPERTY_AUDIO_EQ_BANDS),
+            NAMED_PROPERTY(KSPROPERTY_AUDIO_AGC),
+            NAMED_PROPERTY(KSPROPERTY_AUDIO_DELAY),
+            NAMED_PROPERTY(KSPROPERTY_AUDIO_LOUDNESS),
+            NAMED_PROPERTY(KSPROPERTY_AUDIO_WIDE_MODE),
+            NAMED_PROPERTY(KSPROPERTY_AUDIO_WIDENESS),
+            NAMED_PROPERTY(KSPROPERTY_AUDIO_REVERB_LEVEL),
+            NAMED_PROPERTY(KSPROPERTY_AUDIO_CHORUS_LEVEL),
+            NAMED_PROPERTY(KSPROPERTY_AUDIO_DEV_SPECIFIC),
+            NAMED_PROPERTY(KSPROPERTY_AUDIO_DEMUX_DEST),
+            NAMED_PROPERTY(KSPROPERTY_AUDIO_STEREO_ENHANCE),
+            NAMED_PROPERTY(KSPROPERTY_AUDIO_MANUFACTURE_GUID),
+            NAMED_PROPERTY(KSPROPERTY_AUDIO_PRODUCT_GUID),
+            NAMED_PROPERTY(KSPROPERTY_AUDIO_CPU_RESOURCES),
+            NAMED_PROPERTY(KSPROPERTY_AUDIO_STEREO_SPEAKER_GEOMETRY),
+            NAMED_PROPERTY(KSPROPERTY_AUDIO_SURROUND_ENCODE),
+            NAMED_PROPERTY(KSPROPERTY_AUDIO_3D_INTERFACE),
+            NAMED_PROPERTY(KSPROPERTY_AUDIO_PEAKMETER),
+            NAMED_PROPERTY(KSPROPERTY_AUDIO_ALGORITHM_INSTANCE),
+            NAMED_PROPERTY(KSPROPERTY_AUDIO_FILTER_STATE),
+            NAMED_PROPERTY(KSPROPERTY_AUDIO_PREFERRED_STATUS),
+            NAMED_PROPERTY(KSPROPERTY_AUDIO_PEQ_MAX_BANDS),
+            NAMED_PROPERTY(KSPROPERTY_AUDIO_PEQ_NUM_BANDS),
+            NAMED_PROPERTY(KSPROPERTY_AUDIO_PEQ_BAND_CENTER_FREQ),
+            NAMED_PROPERTY(KSPROPERTY_AUDIO_PEQ_BAND_Q_FACTOR),
+            NAMED_PROPERTY(KSPROPERTY_AUDIO_PEQ_BAND_LEVEL),
+            NAMED_PROPERTY(KSPROPERTY_AUDIO_CHORUS_MODULATION_RATE),
+            NAMED_PROPERTY(KSPROPERTY_AUDIO_CHORUS_MODULATION_DEPTH),
+            NAMED_PROPERTY(KSPROPERTY_AUDIO_REVERB_TIME),
+            NAMED_PROPERTY(KSPROPERTY_AUDIO_REVERB_DELAY_FEEDBACK),
+            NAMED_PROPERTY(KSPROPERTY_AUDIO_POSITIONEX),
+            NAMED_PROPERTY(KSPROPERTY_AUDIO_MIC_ARRAY_GEOMETRY),
+            {0, NULL}
+        };
+
+        static const PropertyNameMapping rtaudioPropertiesMapping[] = {
+            NAMED_PROPERTY(KSPROPERTY_RTAUDIO_GETPOSITIONFUNCTION),
+            NAMED_PROPERTY(KSPROPERTY_RTAUDIO_BUFFER),
+            NAMED_PROPERTY(KSPROPERTY_RTAUDIO_HWLATENCY),
+            NAMED_PROPERTY(KSPROPERTY_RTAUDIO_POSITIONREGISTER),
+            NAMED_PROPERTY(KSPROPERTY_RTAUDIO_CLOCKREGISTER),
+            NAMED_PROPERTY(KSPROPERTY_RTAUDIO_BUFFER_WITH_NOTIFICATION),
+            NAMED_PROPERTY(KSPROPERTY_RTAUDIO_REGISTER_NOTIFICATION_EVENT),
+            NAMED_PROPERTY(KSPROPERTY_RTAUDIO_UNREGISTER_NOTIFICATION_EVENT),
+            NAMED_PROPERTY(KSPROPERTY_RTAUDIO_QUERY_NOTIFICATION_SUPPORT),
+            {9, "KSPROPERTY_RTAUDIO_PACKETCOUNT"},
+            {10, "KSPROPERTY_RTAUDIO_PRESENTATION_POSITION"},
+            {11, "KSPROPERTY_RTAUDIO_GETREADPACKET"},
+            {12, "KSPROPERTY_RTAUDIO_SETWRITEPACKET"},
+            {13, "KSPROPERTY_RTAUDIO_PACKETVREGISTER"},
+            {0, NULL}
+        };
+
+        static const PropertyNameMapping connectionPropertiesMapping[] = {
+            NAMED_PROPERTY(KSPROPERTY_CONNECTION_PRIORITY),
+            NAMED_PROPERTY(KSPROPERTY_CONNECTION_DATAFORMAT),
+            NAMED_PROPERTY(KSPROPERTY_CONNECTION_ALLOCATORFRAMING),
+            NAMED_PROPERTY(KSPROPERTY_CONNECTION_PROPOSEDATAFORMAT),
+            NAMED_PROPERTY(KSPROPERTY_CONNECTION_ACQUIREORDERING),
+            NAMED_PROPERTY(KSPROPERTY_CONNECTION_ALLOCATORFRAMING_EX),
+            NAMED_PROPERTY(KSPROPERTY_CONNECTION_STARTAT),
+            {0, NULL}
+        };
+
+
+#pragma endregion
+
+        KSPROPERTY property;
+        char inputBuffer[1024];
+        char inputBufferString[4096];
+        NTSTATUS result = SarReadUserBuffer(
+            &property, irp, sizeof(property));
+        int size = irpStack->Parameters.DeviceIoControl.InputBufferLength;
+        if (size > 1024)
+            size = 1024;
+
+        SarReadUserBuffer(
+            inputBuffer, irp, size);
+
+        if (result == 0) {
+            const char* setName = getKsElementName(property.Set, knownSets);
+            const char* propertyNameStr = nullptr;
+            char propertyName[256];
+            if (property.Set == KSPROPSETID_Pin)
+                propertyNameStr = getKsElementName(property.Id, pinPropertiesMapping);
+            else if (property.Set == KSPROPSETID_Audio)
+                propertyNameStr = getKsElementName(property.Id, audioPropertiesMapping);
+            else if (property.Set == KSPROPSETID_RtAudio)
+                propertyNameStr = getKsElementName(property.Id, rtaudioPropertiesMapping);
+            else if (property.Set == KSPROPSETID_Connection)
+                propertyNameStr = getKsElementName(property.Id, connectionPropertiesMapping);
+
+            if(propertyNameStr)
+                strncpy(propertyName, propertyNameStr, sizeof(propertyName));
+            else
+                _snprintf(propertyName, sizeof(propertyName), "%d", property.Id);
+
+            SAR_TRACE("IRQ KS_PROPERTY: Set: %s, Property: %s, Flags: 0x%x, inputSize: %d, outputSize: %d",
+                setName, propertyName, property.Flags, irpStack->Parameters.DeviceIoControl.InputBufferLength, irpStack->Parameters.DeviceIoControl.OutputBufferLength);
+        }
+        else {
+            SAR_TRACE("IRQ KS_PROPERTY: unknown (size too small: %d), error: 0x%x, inputSize: %d, outputSize: %d", irpStack->Parameters.DeviceIoControl.InputBufferLength, result, irpStack->Parameters.DeviceIoControl.InputBufferLength, irpStack->Parameters.DeviceIoControl.OutputBufferLength);
+        }
+
+        if (size < 1024) {
+            SarToHexString(inputBuffer, size, inputBufferString);
+            SAR_TRACE("Data: %s", inputBufferString);
+        }
+
+    }
+    else
+    {
+        SAR_TRACE("IRQ 0x%x", ioControlCode);
+    }
+#endif
 }
 
 BOOL SarIsControlIrp(PIRP irp) {
@@ -188,7 +492,7 @@ NTSTATUS SarIrpCreate(PDEVICE_OBJECT deviceObject, PIRP irp)
             deviceObject->DriverObject, DriverEntry);
     SarControlContext *controlContext = nullptr;
 
-
+    SAR_DEBUG("IRP_MJ_CREATE %wZ", &irpStack->FileObject->FileName);
 
     if (!SarIsControlIrp(irp)) {
         NTSTATUS result = extension->ksDispatchCreate(deviceObject, irp);
@@ -227,14 +531,19 @@ out:
 NTSTATUS SarIrpClose(PDEVICE_OBJECT deviceObject, PIRP irp)
 {
     NTSTATUS status;
+    PIO_STACK_LOCATION irpStack = IoGetCurrentIrpStackLocation(irp);
     SarDriverExtension *extension =
         (SarDriverExtension *)IoGetDriverObjectExtension(
             deviceObject->DriverObject, DriverEntry);
 
+    UNREFERENCED_PARAMETER(irpStack);
+
     if (!SarIsControlIrp(irp)) {
+        SAR_DEBUG("close KS %wZ", &irpStack->FileObject->FileName);
         return extension->ksDispatchClose(deviceObject, irp);
     }
 
+    SAR_DEBUG("IRP_MJ_CLOSE: %wZ", &irpStack->FileObject->FileName);
     SarOrphanControlContext(extension, irp);
 
     status = STATUS_SUCCESS;
@@ -246,14 +555,19 @@ NTSTATUS SarIrpClose(PDEVICE_OBJECT deviceObject, PIRP irp)
 NTSTATUS SarIrpCleanup(PDEVICE_OBJECT deviceObject, PIRP irp)
 {
     NTSTATUS status;
+    PIO_STACK_LOCATION irpStack = IoGetCurrentIrpStackLocation(irp);
     SarDriverExtension *extension =
         (SarDriverExtension *)IoGetDriverObjectExtension(
             deviceObject->DriverObject, DriverEntry);
 
+    UNREFERENCED_PARAMETER(irpStack);
+
     if (!SarIsControlIrp(irp)) {
+        SAR_DEBUG("cleanup KS %wZ", &irpStack->FileObject->FileName);
         return extension->ksDispatchCleanup(deviceObject, irp);
     }
 
+    SAR_DEBUG("IRP_MJ_CLEANUP: %wZ", &irpStack->FileObject->FileName);
     SarOrphanControlContext(extension, irp);
 
     status = STATUS_SUCCESS;
@@ -272,8 +586,8 @@ NTSTATUS SarIrpDeviceControl(PDEVICE_OBJECT deviceObject, PIRP irp)
             deviceObject->DriverObject, DriverEntry);
 
     if (!SarIsControlIrp(irp)) {
-        NTSTATUS status = extension->ksDispatchDeviceControl(deviceObject, irp);
-        return status;
+        SarLogKsIrp(irp);
+        return extension->ksDispatchDeviceControl(deviceObject, irp);
     }
 
     irpStack = IoGetCurrentIrpStackLocation(irp);
@@ -284,10 +598,9 @@ NTSTATUS SarIrpDeviceControl(PDEVICE_OBJECT deviceObject, PIRP irp)
         &extension->controlContextTable, irpStack->FileObject);
     ExReleaseFastMutex(&extension->mutex);
 
-
     switch (ioControlCode) {
         case SAR_SET_BUFFER_LAYOUT: {
-            SAR_LOG("(SAR) create audio buffers");
+            SAR_INFO("create audio buffers");
 
             SarSetBufferLayoutRequest request;
             SarSetBufferLayoutResponse response;
@@ -310,6 +623,7 @@ NTSTATUS SarIrpDeviceControl(PDEVICE_OBJECT deviceObject, PIRP irp)
             break;
         }
         case SAR_CREATE_ENDPOINT: {
+            SAR_INFO("create audio endpoint");
             SarCreateEndpointRequest request;
 
             ntStatus = SarReadUserBuffer(
@@ -324,6 +638,7 @@ NTSTATUS SarIrpDeviceControl(PDEVICE_OBJECT deviceObject, PIRP irp)
             break;
         }
         case SAR_WAIT_HANDLE_QUEUE: {
+            SAR_INFO("wait handle queue");
             ntStatus = SarWaitHandleQueue(&controlContext->handleQueue, irp);
             break;
         }
@@ -365,7 +680,7 @@ NTSTATUS SarIrpDeviceControl(PDEVICE_OBJECT deviceObject, PIRP irp)
             ntStatus = SarSendFormatChangeEvent(deviceObject, extension);
             break;
         default:
-            SAR_LOG("(SAR) Unknown ioctl %lu", ioControlCode);
+            SAR_ERROR("Unknown ioctl %lu", ioControlCode);
             break;
     }
 
@@ -374,12 +689,14 @@ NTSTATUS SarIrpDeviceControl(PDEVICE_OBJECT deviceObject, PIRP irp)
         IoCompleteRequest(irp, IO_NO_INCREMENT);
     }
 
+    SAR_INFO("device_control result: 0x%x", ntStatus);
+
     return ntStatus;
 }
 
 VOID SarUnload(PDRIVER_OBJECT driverObject)
 {
-    SAR_LOG("SAR is unloading");
+    SAR_INFO("SAR is unloading");
     KIRQL irql;
     SarDriverExtension *extension =
         (SarDriverExtension *)IoGetDriverObjectExtension(
@@ -746,14 +1063,18 @@ static NTSTATUS SarAddAllRegistryRedirects(SarDriverExtension *extension)
          p = RtlEnumerateGenericTableAvl(table, FALSE)) {
 
         SarStringTableEntry *entry = (SarStringTableEntry *)p;
-        SAR_LOG("Registry mapping: %wZ -> %wZ", &entry->key, entry->value);
+        UNREFERENCED_PARAMETER(entry);
+
+        SAR_DEBUG("Registry mapping: %wZ -> %wZ", &entry->key, entry->value);
     }
 
     for (p = RtlEnumerateGenericTableAvl(wow64, TRUE); p;
          p = RtlEnumerateGenericTableAvl(wow64, FALSE)) {
 
         SarStringTableEntry *entry = (SarStringTableEntry *)p;
-        SAR_LOG("WOW64 Registry mapping: %wZ -> %wZ",
+        UNREFERENCED_PARAMETER(entry);
+
+        SAR_DEBUG("WOW64 Registry mapping: %wZ -> %wZ",
             &entry->key, entry->value);
     }
 
@@ -767,7 +1088,7 @@ extern "C" NTSTATUS DriverEntry(
     SarDriverExtension *extension;
     NTSTATUS status;
 
-    SAR_LOG("SAR is loading.");
+    SAR_INFO("SAR is loading.");
 
     ExInitializeDriverRuntime(DrvRtPoolNxOptIn);
 

@@ -75,7 +75,7 @@ NTSTATUS SarSetBufferLayout(
         &sectionAttributes, &sectionSize, PAGE_READWRITE, SEC_COMMIT, nullptr);
 
     if (!NT_SUCCESS(status)) {
-        SAR_LOG("Failed to allocate buffer section %08X", status);
+        SAR_ERROR("Failed to allocate buffer section %08X", status);
         goto err_out;
     }
 
@@ -84,7 +84,7 @@ NTSTATUS SarSetBufferLayout(
         &viewSize, ViewUnmap, 0, PAGE_READWRITE);
 
     if (!NT_SUCCESS(status)) {
-        SAR_LOG("Couldn't map view of section");
+        SAR_ERROR("Couldn't map view of section");
         goto err_out;
     }
     
@@ -170,7 +170,7 @@ NTSTATUS SarSetDeviceInterfaceProperties(
         symbolicLinkName, aliasInterfaceClassGuid, &aliasLink);
 
     if (!NT_SUCCESS(status)) {
-        SAR_LOG("Couldn't get device alias: %08X", status);
+        SAR_ERROR("Couldn't get device alias: %08X", status);
         goto out;
     }
 
@@ -178,14 +178,14 @@ NTSTATUS SarSetDeviceInterfaceProperties(
         &aliasLink, KEY_ALL_ACCESS, &deviceInterfaceKey);
 
     if (!NT_SUCCESS(status)) {
-        SAR_LOG("Couldn't open registry key: %08X", status);
+        SAR_ERROR("Couldn't open registry key: %08X", status);
         goto out;
     }
 
     status = RtlStringFromGUID(CLSID_Proxy, &clsidData);
 
     if (!NT_SUCCESS(status)) {
-        SAR_LOG("Couldn't convert GUID to string: %08X", status);
+        SAR_ERROR("Couldn't convert GUID to string: %08X", status);
         goto out;
     }
 
@@ -195,7 +195,7 @@ NTSTATUS SarSetDeviceInterfaceProperties(
         endpoint->deviceName.Length + sizeof(UNICODE_NULL));
 
     if (!NT_SUCCESS(status)) {
-        SAR_LOG("Couldn't set friendly name: %08X", status);
+        SAR_ERROR("Couldn't set friendly name: %08X", status);
         goto out;
     }
 
@@ -204,7 +204,7 @@ NTSTATUS SarSetDeviceInterfaceProperties(
         clsidData.Length + sizeof(UNICODE_NULL));
 
     if (!NT_SUCCESS(status)) {
-        SAR_LOG("Couldn't set CLSID: %08X", status);
+        SAR_ERROR("Couldn't set CLSID: %08X", status);
         goto out;
     }
 
@@ -214,7 +214,7 @@ NTSTATUS SarSetDeviceInterfaceProperties(
         &epSubKey, KEY_ALL_ACCESS, &oa, 0, nullptr, 0, nullptr);
 
     if (!NT_SUCCESS(status)) {
-        SAR_LOG("Couldn't open EP subkey");
+        SAR_ERROR("Couldn't open EP subkey");
         goto out;
     }
 
@@ -224,7 +224,7 @@ NTSTATUS SarSetDeviceInterfaceProperties(
         &zeroSubKey, KEY_ALL_ACCESS, &oa, 0, nullptr, 0, nullptr);
 
     if (!NT_SUCCESS(status)) {
-        SAR_LOG("Couldn't open EP\\0 subkey");
+        SAR_ERROR("Couldn't open EP\\0 subkey");
         goto out;
     }
 
@@ -232,7 +232,7 @@ NTSTATUS SarSetDeviceInterfaceProperties(
         zeroSubKey, &supportsEventModeValue, 0, REG_DWORD, &one, sizeof(DWORD));
 
     if (!NT_SUCCESS(status)) {
-        SAR_LOG("Couldn't set registry value for evented mode support");
+        SAR_ERROR("Couldn't set registry value for evented mode support");
         goto out;
     }
 
@@ -241,7 +241,7 @@ NTSTATUS SarSetDeviceInterfaceProperties(
         guidEmpty.Length + sizeof(UNICODE_NULL));
 
     if (!NT_SUCCESS(status)) {
-        SAR_LOG("Couldn't set kscategory association for endpoint");
+        SAR_ERROR("Couldn't set kscategory association for endpoint");
     }
 
     // Required to make windows 10 uses our endpoint name instead of a generic name based on the category
@@ -250,7 +250,7 @@ NTSTATUS SarSetDeviceInterfaceProperties(
         endpoint->deviceName.Length + sizeof(UNICODE_NULL));
 
     if (!NT_SUCCESS(status)) {
-        SAR_LOG("Couldn't set device description for endpoint");
+        SAR_ERROR("Couldn't set device description for endpoint");
     }
 
     status = ZwSetValueKey(
@@ -258,7 +258,7 @@ NTSTATUS SarSetDeviceInterfaceProperties(
         endpoint->deviceId.Length + sizeof(UNICODE_NULL));
 
     if (!NT_SUCCESS(status)) {
-        SAR_LOG("Couldn't set sar endpoint id for endpoint");
+        SAR_ERROR("Couldn't set sar endpoint id for endpoint");
     }
 
 out:
@@ -358,11 +358,17 @@ retry:
 
         status = KsFilterFactorySetDeviceClassesState(
             endpoint->filterFactory, TRUE);
+
+        if (!NT_SUCCESS(status)) {
+            SAR_ERROR("Couldn't enable KS wave filter factory");
+            goto out;
+        }
+
         status = KsFilterFactorySetDeviceClassesState(
             endpoint->topologyFilterFactory, TRUE);
 
         if (!NT_SUCCESS(status)) {
-            SAR_LOG("Couldn't enable KS filter factory");
+            SAR_ERROR("Couldn't enable KS topology filter factory");
             goto out;
         }
 
@@ -413,7 +419,7 @@ NTSTATUS SarCreateEndpoint(
 
     // Endpoints assume buffer parameters are not 0 (else division by 0 could occur)
     if (!controlContext->bufferSize) {
-        SAR_LOG("(SAR) Creating endpoints require setting buffer beforehand");
+        SAR_ERROR("Creating endpoints require setting buffer beforehand");
         return STATUS_INVALID_STATE_TRANSITION;
     }
 
@@ -544,6 +550,10 @@ NTSTATUS SarCreateEndpoint(
     }
 
     ExReleaseFastMutex(&controlContext->mutex);
+
+
+    SAR_DEBUG("Created endpoint %p with context %p", endpoint, controlContext);
+
     return STATUS_PENDING;
 
 err_out:
@@ -561,11 +571,13 @@ err_out:
 
 VOID SarDeleteEndpoint(SarEndpoint *endpoint)
 {
+    SAR_DEBUG("Deleting endpoint %p", endpoint);
 
     if (endpoint->topologyFilterFactory) {
         PKSDEVICE ksDevice = KsFilterFactoryGetDevice(endpoint->topologyFilterFactory);
 
         KsAcquireDevice(ksDevice);
+        SAR_TRACE("Removing in device: %p factory %p", ksDevice, endpoint->topologyFilterFactory);
         KsDeleteFilterFactory(endpoint->topologyFilterFactory);
         KsReleaseDevice(ksDevice);
     }
@@ -574,6 +586,7 @@ VOID SarDeleteEndpoint(SarEndpoint *endpoint)
         PKSDEVICE ksDevice = KsFilterFactoryGetDevice(endpoint->filterFactory);
 
         KsAcquireDevice(ksDevice);
+        SAR_TRACE("Removing in device: %p factory %p", ksDevice, endpoint->filterFactory);
         KsDeleteFilterFactory(endpoint->filterFactory);
         KsReleaseDevice(ksDevice);
     }
@@ -599,12 +612,15 @@ VOID SarDeleteEndpoint(SarEndpoint *endpoint)
 
 VOID SarOrphanEndpoint(SarEndpoint *endpoint)
 {
+    SAR_TRACE("Orphaning endpoint %p", endpoint);
     ExAcquireFastMutex(&endpoint->mutex);
     endpoint->orphan = TRUE;
     ExReleaseFastMutex(&endpoint->mutex);
     KsFilterFactorySetDeviceClassesState(endpoint->topologyFilterFactory, FALSE);
     KsFilterFactorySetDeviceClassesState(endpoint->filterFactory, FALSE);
-    SarReleaseEndpoint(endpoint);
+    if (SarReleaseEndpoint(endpoint) == FALSE) {
+        SAR_TRACE("Endpoint orphaned but not deleted: %p, refs: %d", endpoint, endpoint->refs);
+    }
 }
 
 NTSTATUS SarSendFormatChangeEvent(PDEVICE_OBJECT deviceObject, SarDriverExtension *extension)

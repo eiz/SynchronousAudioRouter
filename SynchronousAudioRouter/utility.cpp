@@ -73,12 +73,15 @@ SarEndpoint *SarGetEndpointFromIrp(PIRP irp, BOOLEAN retain)
 
         PLIST_ENTRY entry = controlContext->endpointList.Flink;
 
+        SAR_TRACE("Searching for factory %p", factory);
+
         while (entry != &controlContext->endpointList) {
             SarEndpoint *endpoint =
                 CONTAINING_RECORD(entry, SarEndpoint, listEntry);
 
             entry = entry->Flink;
 
+            SAR_TRACE(" Endpoint %p, topology %p", endpoint->filterFactory, endpoint->topologyFilterFactory);
             if (endpoint->filterFactory == factory || endpoint->topologyFilterFactory == factory) {
                 found = endpoint;
 
@@ -296,6 +299,8 @@ void SarCancelAllHandleQueueIrps(SarHandleQueue *handleQueue)
         ZwClose(pendingIrp->kernelProcessHandle);
         ExFreePoolWithTag(pendingIrp, SAR_TAG);
 
+        SAR_INFO("Cancelling IRP %p", irp);
+
         irp->IoStatus.Information = 0;
         irp->IoStatus.Status = STATUS_CANCELLED;
         IoSetCancelRoutine(irp, nullptr);
@@ -317,6 +322,7 @@ void SarCancelHandleQueueIrp(PDEVICE_OBJECT deviceObject, PIRP irp)
     KIRQL irql;
 
     if (!controlContext) {
+        SAR_WARNING("Received Cancel IRP without control context");
         return;
     }
 
@@ -396,6 +402,8 @@ NTSTATUS SarPostHandleQueue(
         status = SarTransferQueuedHandle(
             queuedIrp->irp, queuedIrp->kernelProcessHandle,
             0, kernelProcessHandle, userHandle, associatedData);
+
+        SAR_DEBUG("complete handle queue");
 
         queuedIrp->irp->IoStatus.Status = status;
         queuedIrp->irp->IoStatus.Information = sizeof(SarHandleQueueResponse);

@@ -145,10 +145,22 @@ typedef struct SarNdisEnumerateResponse
 #define SAR_TAG '1RAS'
 
 #ifdef NO_LOGGING
-#define SAR_LOG(...)
+#define SAR_INFO(fmt, ...)
+#define SAR_ERROR(fmt, ...)
+#define SAR_WARNING(fmt, ...)
+#define SAR_DEBUG(fmt, ...)
+#define SAR_TRACE(fmt, ...)
 #else
-#define SAR_LOG(fmt, ...) \
-    DbgPrintEx(DPFLTR_DEFAULT_ID, DPFLTR_INFO_LEVEL, fmt "\n", __VA_ARGS__)
+#define SAR_INFO(fmt, ...) \
+    DbgPrintEx(DPFLTR_DEFAULT_ID, DPFLTR_INFO_LEVEL, __FUNCTION__ " (SAR) " fmt "\n", __VA_ARGS__)
+#define SAR_ERROR(fmt, ...) \
+    DbgPrintEx(DPFLTR_DEFAULT_ID, DPFLTR_ERROR_LEVEL, "ERROR: " __FUNCTION__ " (SAR) " fmt "\n", __VA_ARGS__)
+#define SAR_WARNING(fmt, ...) \
+    DbgPrintEx(DPFLTR_DEFAULT_ID, DPFLTR_WARNING_LEVEL, "WARNING: " __FUNCTION__ " (SAR) " fmt "\n", __VA_ARGS__)
+#define SAR_DEBUG(fmt, ...) \
+    DbgPrintEx(DPFLTR_DEFAULT_ID, DPFLTR_TRACE_LEVEL, __FUNCTION__ " (SAR) " fmt "\n", __VA_ARGS__)
+#define SAR_TRACE(fmt, ...) \
+    DbgPrintEx(DPFLTR_DEFAULT_ID, DPFLTR_TRACE_LEVEL, __FUNCTION__ " (SAR) " fmt "\n", __VA_ARGS__)
 #endif
 
 typedef struct SarHandleQueue
@@ -194,7 +206,7 @@ typedef struct SarDriverExtension
     PKSDEVICE ksDevice;
     UNICODE_STRING sarInterfaceName;
     FAST_MUTEX mutex;
-    RTL_GENERIC_TABLE controlContextTable;
+    RTL_GENERIC_TABLE controlContextTable; // table<PFILE_OBJECT, SarControlContext*>
     // This shouldn't really be needed as long as CmUnRegisterCallback can't
     // complete while one of our callback routines is still running, but there
     // is no explicit documentation of that, so we protect the registry redirect
@@ -217,8 +229,8 @@ typedef struct SarControlContext
     BOOLEAN orphan;
     PFILE_OBJECT fileObject;
     PIO_WORKITEM workItem;
-    LIST_ENTRY endpointList;
-    LIST_ENTRY pendingEndpointList;
+    LIST_ENTRY endpointList;       // List<SarEndpoint>
+    LIST_ENTRY pendingEndpointList;  // List<SarEndpoint> Endpoints created but not configured
     HANDLE bufferSection;
     PVOID sectionViewBaseAddress;
     SarHandleQueue handleQueue;
@@ -312,11 +324,13 @@ NTSTATUS SarSendFormatChangeEvent(
 
 FORCEINLINE VOID SarRetainEndpoint(SarEndpoint *endpoint)
 {
+    SAR_TRACE("endpoint %p refs++", endpoint);
     InterlockedIncrement(&endpoint->refs);
 }
 
 FORCEINLINE BOOLEAN SarReleaseEndpoint(SarEndpoint *endpoint)
 {
+    SAR_TRACE("endpoint %p refs--", endpoint);
     if (InterlockedDecrement(&endpoint->refs) == 0) {
         SarDeleteEndpoint(endpoint);
         return TRUE;
@@ -395,11 +409,13 @@ BOOLEAN SarOrphanControlContext(SarDriverExtension *extension, PIRP irp);
 
 FORCEINLINE VOID SarRetainControlContext(SarControlContext *controlContext)
 {
+    SAR_TRACE("controlContext %p refs++", controlContext);
     InterlockedIncrement(&controlContext->refs);
 }
 
 FORCEINLINE BOOLEAN SarReleaseControlContext(SarControlContext *controlContext)
 {
+    SAR_TRACE("controlContext %p refs--", controlContext);
     if (InterlockedDecrement(&controlContext->refs) == 0) {
         SarDeleteControlContext(controlContext);
         return TRUE;
