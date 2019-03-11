@@ -120,7 +120,7 @@ typedef struct SarEndpointRegisters
 {
     ULONG generation;
     DWORD positionRegister;
-    DWORD clockRegister;
+    DWORD reserved; //clockRegister;
     DWORD bufferOffset;
     DWORD bufferSize;
     DWORD notificationCount;

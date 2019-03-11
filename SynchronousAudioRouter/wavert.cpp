@@ -153,33 +153,13 @@ NTSTATUS SarKsPinRtGetBufferWithNotification(
 NTSTATUS SarKsPinRtGetClockRegister(
     PIRP irp, PKSIDENTIFIER request, PVOID data)
 {
+    UNREFERENCED_PARAMETER(irp);
     UNREFERENCED_PARAMETER(request);
+    UNREFERENCED_PARAMETER(data);
 
-    NTSTATUS status;
-    PKSRTAUDIO_HWREGISTER reg = (PKSRTAUDIO_HWREGISTER)data;
-    SarEndpoint *endpoint = SarGetEndpointFromIrp(irp, TRUE);
-    SarEndpointProcessContext *context;
-
-    if (!endpoint) {
-        return STATUS_UNSUCCESSFUL;
-    }
-
-    status = SarGetOrCreateEndpointProcessContext(
-        endpoint, PsGetCurrentProcess(), &context);
-
-    if (!NT_SUCCESS(status)) {
-        SarReleaseEndpointAndContext(endpoint);
-        return status;
-    }
-
-    reg->Register =
-        &context->registerFileUVA[endpoint->index].clockRegister;
-    reg->Width = 32;
-    reg->Accuracy = 0;
-    reg->Numerator = endpoint->owner->sampleRate;
-    reg->Denominator = endpoint->owner->frameSize / endpoint->owner->sampleSize;
-    SarReleaseEndpointAndContext(endpoint);
-    return STATUS_SUCCESS;
+    // The clock register should be a continuously updated register at a fixed frequency.
+    // We don't have anything like this to map as a register, report it as not implemented.
+    return STATUS_NOT_IMPLEMENTED;
 }
 
 NTSTATUS SarKsPinRtGetHwLatency(

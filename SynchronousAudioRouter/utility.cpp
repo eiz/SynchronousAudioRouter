@@ -166,7 +166,6 @@ NTSTATUS SarWriteEndpointRegisters(
         ProbeForWrite(dest,
             sizeof(SarEndpointRegisters), TYPE_ALIGNMENT(ULONG));
         dest->positionRegister = regs->positionRegister;
-        dest->clockRegister = regs->clockRegister;
         dest->bufferOffset = regs->bufferOffset;
         dest->bufferSize = regs->bufferSize;
         dest->notificationCount = regs->notificationCount;
