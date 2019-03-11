@@ -36,6 +36,13 @@ void SarClient::tick(long bufferIndex)
     ATLASSERT(bufferIndex == 0 || bufferIndex == 1);
     bool hasUpdatedNotificationHandles = false;
 
+    // tick might be called from a different thread than the main thread.
+    // guard against concurrent tick and close which cause the _sharedBuffer
+    // to be invalidated. Accessing its stale value will cause a crash in that case.
+    std::lock_guard<std::mutex> registersLockGuard(_registersLock);
+    if (!_registers)
+        return;
+
     if (_updateSampleRateOnTick.exchange(false)) {
         DWORD dummy;
 
@@ -223,9 +230,15 @@ void SarClient::stop()
     }
 
     if (_device != INVALID_HANDLE_VALUE) {
+        _registersLock.lock();
         CancelIoEx(_device, nullptr);
         CloseHandle(_device);
+
         _device = INVALID_HANDLE_VALUE;
+        _registers = nullptr;
+        _sharedBuffer = nullptr;
+        _sharedBufferSize = 0;
+        _registersLock.unlock();
     }
 
     if (_completionPort) {

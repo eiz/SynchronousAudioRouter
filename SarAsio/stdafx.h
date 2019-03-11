@@ -48,6 +48,7 @@
 #include <vector>
 #include <unordered_map>
 #include <array>
+#include <mutex>
 
 #include "resource.h"
 

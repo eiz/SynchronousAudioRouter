@@ -131,6 +131,7 @@ private:
     CComObject<NotificationClient> *_mmNotificationClient = nullptr;
     bool _mmNotificationClientRegistered = false;
     std::atomic<bool> _updateSampleRateOnTick = false;
+    std::mutex _registersLock;
 };
 
 } // namespace Sar
