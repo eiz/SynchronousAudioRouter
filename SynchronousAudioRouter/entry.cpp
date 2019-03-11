@@ -103,6 +103,11 @@ VOID SarDeleteControlContext(SarControlContext *controlContext)
         controlContext->workItem = nullptr;
     }
 
+    if (controlContext->sectionViewBaseAddress) {
+        ZwUnmapViewOfSection(ZwCurrentProcess(), controlContext->sectionViewBaseAddress);
+        controlContext->sectionViewBaseAddress = nullptr;
+    }
+
     if (controlContext->bufferSection) {
         ZwClose(controlContext->bufferSection);
         controlContext->bufferSection = nullptr;

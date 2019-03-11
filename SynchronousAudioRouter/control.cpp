@@ -295,16 +295,23 @@ NTSTATUS SarSetBufferLayout(
     controlContext->bufferMapStorage = bufferMap;
     bufferMap = nullptr;
 
+    controlContext->sectionViewBaseAddress = baseAddress;
+    baseAddress = nullptr;
+
     controlContext->bufferSection = section;
     ExReleaseFastMutex(&controlContext->mutex);
 
     response->actualSize = sectionSize.LowPart;
-    response->virtualAddress = baseAddress;
+    response->virtualAddress = controlContext->sectionViewBaseAddress;
     response->registerBase = sectionSize.LowPart - SAR_BUFFER_CELL_SIZE;
 
     return STATUS_SUCCESS;
 
 err_out:
+    if (baseAddress) {
+        ZwUnmapViewOfSection(ZwCurrentProcess(), baseAddress);
+    }
+
     if (section) {
         ZwClose(section);
     }

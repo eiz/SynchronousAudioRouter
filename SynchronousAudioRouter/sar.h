@@ -217,6 +217,7 @@ typedef struct SarControlContext
     LIST_ENTRY endpointList;
     LIST_ENTRY pendingEndpointList;
     HANDLE bufferSection;
+    PVOID sectionViewBaseAddress;
     SarHandleQueue handleQueue;
     RTL_BITMAP bufferMap;
     PULONG bufferMapStorage;
