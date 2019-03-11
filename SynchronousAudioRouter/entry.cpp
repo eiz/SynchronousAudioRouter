@@ -758,6 +758,8 @@ extern "C" NTSTATUS DriverEntry(
 
     SAR_LOG("SAR is loading.");
 
+    ExInitializeDriverRuntime(DrvRtPoolNxOptIn);
+
     status = IoAllocateDriverObjectExtension(
         driverObject, DriverEntry, sizeof(SarDriverExtension),
         (PVOID *)&extension);
