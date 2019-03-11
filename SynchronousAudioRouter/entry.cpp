@@ -170,22 +170,29 @@ BOOLEAN SarOrphanControlContext(SarDriverExtension *extension, PIRP irp)
     return TRUE;
 }
 
+BOOL SarIsControlIrp(PIRP irp) {
+    UNICODE_STRING referencePath;
+    PIO_STACK_LOCATION irpStack = IoGetCurrentIrpStackLocation(irp);
+
+    RtlUnicodeStringInit(&referencePath, SAR_CONTROL_REFERENCE_STRING);
+
+    return RtlCompareUnicodeString(&irpStack->FileObject->FileName, &referencePath, TRUE) == 0;
+}
+
 NTSTATUS SarIrpCreate(PDEVICE_OBJECT deviceObject, PIRP irp)
 {
     NTSTATUS status = STATUS_SUCCESS;
-    UNICODE_STRING referencePath;
     PIO_STACK_LOCATION irpStack = IoGetCurrentIrpStackLocation(irp);
     SarDriverExtension *extension =
         (SarDriverExtension *)IoGetDriverObjectExtension(
             deviceObject->DriverObject, DriverEntry);
     SarControlContext *controlContext = nullptr;
 
-    RtlUnicodeStringInit(&referencePath, SAR_CONTROL_REFERENCE_STRING);
 
-    if (RtlCompareUnicodeString(
-        &irpStack->FileObject->FileName, &referencePath, TRUE) != 0) {
 
-        return extension->ksDispatchCreate(deviceObject, irp);
+    if (!SarIsControlIrp(irp)) {
+        NTSTATUS result = extension->ksDispatchCreate(deviceObject, irp);
+        return result;
     }
 
     controlContext = SarCreateControlContext(irpStack->FileObject);
@@ -223,11 +230,12 @@ NTSTATUS SarIrpClose(PDEVICE_OBJECT deviceObject, PIRP irp)
     SarDriverExtension *extension =
         (SarDriverExtension *)IoGetDriverObjectExtension(
             deviceObject->DriverObject, DriverEntry);
-    BOOLEAN deleted = SarOrphanControlContext(extension, irp);
 
-    if (!deleted) {
+    if (!SarIsControlIrp(irp)) {
         return extension->ksDispatchClose(deviceObject, irp);
     }
+
+    SarOrphanControlContext(extension, irp);
 
     status = STATUS_SUCCESS;
     irp->IoStatus.Status = status;
@@ -241,11 +249,12 @@ NTSTATUS SarIrpCleanup(PDEVICE_OBJECT deviceObject, PIRP irp)
     SarDriverExtension *extension =
         (SarDriverExtension *)IoGetDriverObjectExtension(
             deviceObject->DriverObject, DriverEntry);
-    BOOLEAN deleted = SarOrphanControlContext(extension, irp);
 
-    if (!deleted) {
+    if (!SarIsControlIrp(irp)) {
         return extension->ksDispatchCleanup(deviceObject, irp);
     }
+
+    SarOrphanControlContext(extension, irp);
 
     status = STATUS_SUCCESS;
     irp->IoStatus.Status = status;
@@ -261,18 +270,20 @@ NTSTATUS SarIrpDeviceControl(PDEVICE_OBJECT deviceObject, PIRP irp)
     SarDriverExtension *extension =
         (SarDriverExtension *)IoGetDriverObjectExtension(
             deviceObject->DriverObject, DriverEntry);
-    SarControlContext *controlContext;
+
+    if (!SarIsControlIrp(irp)) {
+        NTSTATUS status = extension->ksDispatchDeviceControl(deviceObject, irp);
+        return status;
+    }
 
     irpStack = IoGetCurrentIrpStackLocation(irp);
     ioControlCode = irpStack->Parameters.DeviceIoControl.IoControlCode;
+
     ExAcquireFastMutex(&extension->mutex);
-    controlContext = (SarControlContext *)SarGetTableEntry(
+    SarControlContext * controlContext = (SarControlContext *)SarGetTableEntry(
         &extension->controlContextTable, irpStack->FileObject);
     ExReleaseFastMutex(&extension->mutex);
 
-    if (!controlContext) {
-        return extension->ksDispatchDeviceControl(deviceObject, irp);
-    }
 
     switch (ioControlCode) {
         case SAR_SET_BUFFER_LAYOUT: {
