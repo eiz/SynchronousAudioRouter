@@ -30,7 +30,7 @@ enum class EndpointType
 struct EndpointConfig
 {
     std::string id;
-    std::string description;
+    std::wstring description;
     EndpointType type;
     int channelCount = 2;
     bool attachPhysical = false;
@@ -52,10 +52,10 @@ struct DefaultEndpointConfig
 
 struct ApplicationConfig
 {
-    std::string description;
-    std::string path;
+    std::wstring description;
+    std::wstring path;
     bool regexMatch = false;
-    std::regex pattern;
+    std::wregex pattern;
     std::vector<DefaultEndpointConfig> defaults;
 
     bool load(picojson::object& obj);
@@ -72,8 +72,8 @@ struct DriverConfig
 
     void load(picojson::object& obj);
     picojson::object save();
-    bool writeFile(const std::string& path);
-    static DriverConfig fromFile(const std::string& path);
+    bool writeFile(const std::wstring& path);
+    static DriverConfig fromFile(const std::wstring& path);
     EndpointConfig *findEndpoint(const std::string& id);
 };
 

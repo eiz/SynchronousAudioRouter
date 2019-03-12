@@ -31,7 +31,7 @@ static const char kNoInterfaceSelected[] = "No Interface Selected";
 SarAsioWrapper::SarAsioWrapper()
 {
     LOG(INFO) << "SarAsioWrapper::SarAsioWrapper";
-    _config = DriverConfig::fromFile(ConfigurationPath("default.json"));
+    _config = DriverConfig::fromFile(ConfigurationPath(L"default.json"));
 }
 
 AsioBool SarAsioWrapper::init(void *sysHandle)
@@ -532,7 +532,7 @@ AsioStatus SarAsioWrapper::controlPanel()
 
     if (sheet->show(_hwnd) > 0) {
         _config = sheet->newConfig();
-        _config.writeFile(ConfigurationPath("default.json"));
+        _config.writeFile(ConfigurationPath(L"default.json"));
 
         if (_callbacks.asioMessage) {
             _callbacks.asioMessage(
@@ -596,7 +596,7 @@ void SarAsioWrapper::initVirtualChannels()
             VirtualChannel chan;
             std::ostringstream os;
 
-            os << endpoint.description << " " << (i + 1);
+            os << TCHARToUTF8(endpoint.description.c_str()) << " " << (i + 1);
             chan.endpointIndex = endpointIndex;
             chan.channelIndex = i;
             chan.name = os.str();

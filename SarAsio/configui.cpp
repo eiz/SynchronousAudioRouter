@@ -324,11 +324,10 @@ void EndpointsPropertySheetPage::refreshEndpointList()
 
     for (auto& endpoint : _config.endpoints) {
         LVITEM item = {};
-        std::wstring description = UTF8ToWide(endpoint.description);
 
         item.iItem = i;
         ListView_InsertItem(_listView, &item);
-        ListView_SetItemText(_listView, i, 2, (LPWSTR)description.c_str());
+        ListView_SetItemText(_listView, i, 2, (LPWSTR)endpoint.description.c_str());
 
         if (endpoint.type == EndpointType::Recording) {
             ListView_SetItemText(_listView, i, 0, L"Recording");
@@ -382,7 +381,7 @@ void EndpointsPropertySheetPage::updateEpDialogConfig()
     auto buf = new WCHAR[len + 1];
 
     Edit_GetText(_epDialogName, buf, len + 1);
-    _epDialogConfig.description = TCHARToUTF8(buf);
+    _epDialogConfig.description = buf;
     delete[] buf;
 
     len = Edit_GetTextLength(_epDialogChannelCount);
@@ -535,8 +534,6 @@ void ApplicationsPropertySheetPage::refreshApplicationList()
     int i = 0;
 
     for (auto& application : _config.applications) {
-        std::wstring description = UTF8ToWide(application.description);
-        std::wstring path = UTF8ToWide(application.path);
         LVITEM item = {};
 
         item.iItem = i;
@@ -544,10 +541,10 @@ void ApplicationsPropertySheetPage::refreshApplicationList()
 
         ListView_InsertItem(_listView, &item);
         ListView_SetItemText(
-            _listView, item.iItem, 0, (LPWSTR)description.c_str());
+            _listView, item.iItem, 0, (LPWSTR)application.description.c_str());
         ListView_SetItemText(
             _listView, item.iItem, 1, application.regexMatch ? L"Yes" : L"No");
-        ListView_SetItemText(_listView, item.iItem, 2, (LPWSTR)path.c_str());
+        ListView_SetItemText(_listView, item.iItem, 2, (LPWSTR)application.path.c_str());
     }
 
     ListView_SetColumnWidth(_listView, 0, LVSCW_AUTOSIZE_USEHEADER);
@@ -680,20 +677,15 @@ void ApplicationConfigDialog::initEndpointDropdown(
             continue;
         }
 
-        std::wstring str = UTF8ToWide(endpoint.description);
-
-        ComboBox_AddString(control, str.c_str());
+        ComboBox_AddString(control, endpoint.description.c_str());
     }
 }
 
 void ApplicationConfigDialog::refreshControls()
 {
-    auto description = UTF8ToWide(_config.description);
-    auto path = UTF8ToWide(_config.path);
-
     Button_SetCheck(_useRegularExpressions, _config.regexMatch);
-    Edit_SetText(_name, description.c_str());
-    Edit_SetText(_path, path.c_str());
+    Edit_SetText(_name, _config.description.c_str());
+    Edit_SetText(_path, _config.path.c_str());
 
     refreshEndpointDropdown(
         _playbackSystem, EDataFlow::eRender, ERole::eConsole);
@@ -774,13 +766,13 @@ void ApplicationConfigDialog::updateConfig()
     auto buf = new WCHAR[len + 1];
 
     Edit_GetText(_name, buf, len + 1);
-    _config.description = TCHARToUTF8(buf);
+    _config.description = buf;
     delete[] buf;
 
     len = Edit_GetTextLength(_path);
     buf = new WCHAR[len + 1];
     Edit_GetText(_path, buf, len + 1);
-    _config.path = TCHARToUTF8(buf);
+    _config.path = buf;
     delete[] buf;
 
     _config.defaults.clear();
@@ -827,7 +819,7 @@ void ApplicationConfigDialog::onRunningApplicationsClicked()
     }
 
     for (auto& app : apps) {
-        AppendMenu(menu, MF_STRING, i++, UTF8ToWide(app.name).c_str());
+        AppendMenu(menu, MF_STRING, i++, app.name.c_str());
     }
 
     GetCursorPos(&pt);
@@ -839,7 +831,7 @@ void ApplicationConfigDialog::onRunningApplicationsClicked()
     if (result > 0) {
         result--;
 
-        Edit_SetText(_path, UTF8ToWide(apps[result].path).c_str());
+        Edit_SetText(_path, apps[result].path.c_str());
         Button_SetCheck(_useRegularExpressions, BST_UNCHECKED);
     }
 

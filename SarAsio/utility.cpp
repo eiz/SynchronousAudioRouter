@@ -33,7 +33,16 @@ std::wstring UTF8ToWide(const std::string& str)
     return converter.from_bytes(str);
 }
 
-std::string LoggingPath()
+std::string TCHARToLocal(const TCHAR *ptr)
+{
+    UINT codePage = GetACP();
+    int len = WideCharToMultiByte(codePage, 0, ptr, -1, 0, 0, 0, 0);
+    std::string out(len, '\0');
+    WideCharToMultiByte(codePage, 0, ptr, -1, &out[0], out.size(), 0, 0);
+    return out;
+}
+
+std::wstring LoggingPath()
 {
     TCHAR path[MAX_PATH];
 
@@ -46,38 +55,37 @@ std::string LoggingPath()
         CreateDirectory(path, nullptr);
     }
 
-    return TCHARToUTF8(path);
+    return std::wstring(path);
 }
 
-std::string ConfigurationPath(const std::string& name)
+std::wstring ConfigurationPath(const std::wstring& name)
 {
-    TCHAR path[MAX_PATH];
+    TCHAR path[MAX_PATH] = { 0 };
 
     if (SUCCEEDED(SHGetFolderPath(
         nullptr, CSIDL_APPDATA, nullptr, 0, path))) {
 
         PathAppend(path, TEXT("\\SynchronousAudioRouter\\"));
         CreateDirectory(path, nullptr);
-        PathAppend(path, UTF8ToWide(name).c_str());
+        PathAppend(path, name.c_str());
     }
 
-    return TCHARToUTF8(path);
+    return std::wstring(path);
 }
 
-static std::string getProductName(const std::string& path)
+static std::wstring getProductName(const std::wstring& wpath)
 {
-    auto wpath = UTF8ToWide(path);
     auto verLength = GetFileVersionInfoSize(wpath.c_str(), nullptr);
 
     if (!verLength) {
-        return "";
+        return L"";
     }
 
     auto buffer = malloc(verLength);
 
     if (!GetFileVersionInfo(wpath.c_str(), 0, verLength, buffer)) {
         free(buffer);
-        return "";
+        return L"";
     }
 
     struct LANGANDCODEPAGE
@@ -94,12 +102,12 @@ static std::string getProductName(const std::string& path)
         (void **)&translations, &translationsLength)) {
 
         free(buffer);
-        return "";
+        return L"";
     }
 
     if (translationsLength < sizeof(LANGANDCODEPAGE)) {
         free(buffer);
-        return "";
+        return L"";
     }
 
     // TODO: try current locale/codepage
@@ -110,11 +118,11 @@ static std::string getProductName(const std::string& path)
 
         if (!VerQueryValue(buffer, subBlockName, (void **)&name, &nameLength)) {
             free(buffer);
-            return "";
+            return L"";
         }
     }
 
-    std::string result = TCHARToUTF8(name);
+    std::wstring result = name;
 
     free(buffer);
     return result;
@@ -122,7 +130,7 @@ static std::string getProductName(const std::string& path)
 
 std::vector<RunningApplication> RunningApplications()
 {
-    std::unordered_map<std::string, std::vector<std::string>> processMap;
+    std::unordered_map<std::wstring, std::vector<std::wstring>> processMap;
     using MapType = decltype(processMap);
 
     EnumWindows([](HWND hwnd, LPARAM lparam) {
@@ -150,8 +158,8 @@ std::vector<RunningApplication> RunningApplications()
             if (GetModuleFileNameEx(hprocess, nullptr, path, MAX_PATH) &&
                 GetWindowText(hwnd, name, MAX_PATH)) {
 
-                (*processMapPtr)[TCHARToUTF8(path)].emplace_back(
-                    TCHARToUTF8(name));
+                (*processMapPtr)[std::wstring(path)].emplace_back(
+                    std::wstring(name));
             }
 
             CloseHandle(hprocess);
@@ -164,7 +172,7 @@ std::vector<RunningApplication> RunningApplications()
 
     for (auto& kv : processMap) {
         RunningApplication app;
-        auto productName = getProductName(kv.first);
+        std::wstring productName = getProductName(kv.first);
 
         app.path = kv.first;
         app.name = productName.size() > 0 ? productName : kv.second[0];
