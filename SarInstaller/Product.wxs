@@ -38,9 +38,13 @@
       <?if $(var.Platform) = x64 ?>
         <ComponentRef Id="AsioDriver64"/>
         <ComponentRef Id="AsioDriver64_32"/>
+        <ComponentRef Id="SarConfigure64"/>
       <?else ?>
         <ComponentRef Id="AsioDriver32"/>
+        <ComponentRef Id="SarConfigure32"/>
       <?endif ?>
+
+      <ComponentRef Id="ApplicationShortcut"/>
 		</Feature>
 
     <?if $(var.Platform) = x64 ?>
@@ -110,6 +114,9 @@
       </Directory>
       <Directory Id="ProgramFilesFolder">
         <Directory Id="INSTALLDIR" Name="Synchronous Audio Router"/>
+      </Directory>
+      <Directory Id="ProgramMenuFolder">
+        <Directory Id="ApplicationProgramsFolder" Name="Synchronous Audio Router"/>
       </Directory>
     </Directory>
 
@@ -277,6 +284,14 @@
                        Type="string"
                        Action="write" />
       </Component>
+      <Component Id="SarConfigure64"
+                 Guid="{7E9D972E-350B-4DD5-8E68-359A1B6049C4}"
+                 Win64="yes">
+        <File Id="SarConfigure.exe"
+              Name="SarConfigure.exe"
+              Source="..\x64\Release\SarConfigure.exe"
+              KeyPath="yes"/>
+      </Component>
     </DirectoryRef>
     <?else ?>
     <DirectoryRef Id="INSTALLDIR">
@@ -380,7 +395,27 @@
                        Type="string"
                        Action="write" />
       </Component>
+      <Component Id="SarConfigure32"
+                 Guid="{768F46C3-E17B-41C0-88BA-BCA4C6526A78}"
+                 Win64="no">
+        <File Id="SarConfigure.exe"
+              Name="SarConfigure.exe"
+              Source="..\Release\SarConfigure.exe"
+              KeyPath="yes"/>
+      </Component>
     </DirectoryRef>
     <?endif ?>
+    
+    <DirectoryRef Id="ApplicationProgramsFolder">
+      <Component Id="ApplicationShortcut" Guid="{BB519534-E09F-4424-BE20-48116DF6B8E8}">
+        <Shortcut Id="SarConfigure_x86_StartMenuShortcut" 
+                  Name="SAR Configuration"
+                  Description="Configure Synchronous Audio Router"
+                  Target="[#SarConfigure.exe]"
+                  WorkingDirectory="APPLICATIONROOTDIRECTORY"/>
+        <RemoveFolder Id="CleanUpShortCut" Directory="ApplicationProgramsFolder" On="uninstall"/>
+        <RegistryValue Root="HKCU" Key="Software\SynchronousAudioRouter" Name="installed" Type="integer" Value="1" KeyPath="yes"/>
+      </Component>
+    </DirectoryRef>
 	</Product>
 </Wix>
