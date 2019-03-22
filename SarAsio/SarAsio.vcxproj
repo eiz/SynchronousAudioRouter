@@ -153,7 +153,8 @@
       </AdditionalLibraryDirectories>
     </Link>
     <PostBuildEvent>
-      <Command>signtool sign /n "Mackenzie Straight" /tr http://timestamp.digicert.com $(OutDir)\SarAsio.dll</Command>
+      <Command>
+      </Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -181,7 +182,8 @@
       </AdditionalLibraryDirectories>
     </Link>
     <PostBuildEvent>
-      <Command>signtool sign /n "Mackenzie Straight" /tr http://timestamp.digicert.com $(OutDir)\SarAsio.dll</Command>
+      <Command>
+      </Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
