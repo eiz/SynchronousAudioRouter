@@ -13,6 +13,18 @@
       <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
       <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
     </Filter>
+    <Filter Include="Source Files\glog">
+      <UniqueIdentifier>{e5302597-6083-4d5c-81a5-9b2f78a738f4}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\glog">
+      <UniqueIdentifier>{f123f979-c32f-46f3-9f8a-1ca5b473e1f7}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\glog\base">
+      <UniqueIdentifier>{4638323e-3d66-47f6-80f1-04fc89e80999}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\glog\glog">
+      <UniqueIdentifier>{0a096e2e-4cb4-48be-aad0-414692c35dfc}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="stdafx.h">
@@ -54,6 +66,66 @@
     <ClInclude Include="network.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="glog\config.h">
+      <Filter>Header Files\glog</Filter>
+    </ClInclude>
+    <ClInclude Include="glog\demangle.h">
+      <Filter>Header Files\glog</Filter>
+    </ClInclude>
+    <ClInclude Include="glog\port.h">
+      <Filter>Header Files\glog</Filter>
+    </ClInclude>
+    <ClInclude Include="glog\stacktrace.h">
+      <Filter>Header Files\glog</Filter>
+    </ClInclude>
+    <ClInclude Include="glog\stacktrace_generic-inl.h">
+      <Filter>Header Files\glog</Filter>
+    </ClInclude>
+    <ClInclude Include="glog\stacktrace_libunwind-inl.h">
+      <Filter>Header Files\glog</Filter>
+    </ClInclude>
+    <ClInclude Include="glog\stacktrace_powerpc-inl.h">
+      <Filter>Header Files\glog</Filter>
+    </ClInclude>
+    <ClInclude Include="glog\stacktrace_windows-inl.h">
+      <Filter>Header Files\glog</Filter>
+    </ClInclude>
+    <ClInclude Include="glog\stacktrace_x86_64-inl.h">
+      <Filter>Header Files\glog</Filter>
+    </ClInclude>
+    <ClInclude Include="glog\stacktrace_x86-inl.h">
+      <Filter>Header Files\glog</Filter>
+    </ClInclude>
+    <ClInclude Include="glog\symbolize.h">
+      <Filter>Header Files\glog</Filter>
+    </ClInclude>
+    <ClInclude Include="glog\utilities.h">
+      <Filter>Header Files\glog</Filter>
+    </ClInclude>
+    <ClInclude Include="glog\base\commandlineflags.h">
+      <Filter>Header Files\glog\base</Filter>
+    </ClInclude>
+    <ClInclude Include="glog\base\googleinit.h">
+      <Filter>Header Files\glog\base</Filter>
+    </ClInclude>
+    <ClInclude Include="glog\base\mutex.h">
+      <Filter>Header Files\glog\base</Filter>
+    </ClInclude>
+    <ClInclude Include="glog\glog\log_severity.h">
+      <Filter>Header Files\glog\glog</Filter>
+    </ClInclude>
+    <ClInclude Include="glog\glog\logging.h">
+      <Filter>Header Files\glog\glog</Filter>
+    </ClInclude>
+    <ClInclude Include="glog\glog\raw_logging.h">
+      <Filter>Header Files\glog\glog</Filter>
+    </ClInclude>
+    <ClInclude Include="glog\glog\stl_logging.h">
+      <Filter>Header Files\glog\glog</Filter>
+    </ClInclude>
+    <ClInclude Include="glog\glog\vlog_is_on.h">
+      <Filter>Header Files\glog\glog</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="stdafx.cpp">
@@ -88,6 +160,30 @@
     </ClCompile>
     <ClCompile Include="initguid.cpp">
       <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="glog\demangle.cc">
+      <Filter>Source Files\glog</Filter>
+    </ClCompile>
+    <ClCompile Include="glog\logging.cc">
+      <Filter>Source Files\glog</Filter>
+    </ClCompile>
+    <ClCompile Include="glog\port.cc">
+      <Filter>Source Files\glog</Filter>
+    </ClCompile>
+    <ClCompile Include="glog\raw_logging.cc">
+      <Filter>Source Files\glog</Filter>
+    </ClCompile>
+    <ClCompile Include="glog\signalhandler.cc">
+      <Filter>Source Files\glog</Filter>
+    </ClCompile>
+    <ClCompile Include="glog\symbolize.cc">
+      <Filter>Source Files\glog</Filter>
+    </ClCompile>
+    <ClCompile Include="glog\utilities.cc">
+      <Filter>Source Files\glog</Filter>
+    </ClCompile>
+    <ClCompile Include="glog\vlog_is_on.cc">
+      <Filter>Source Files\glog</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
