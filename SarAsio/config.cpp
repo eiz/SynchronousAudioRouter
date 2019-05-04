@@ -16,6 +16,7 @@
 
 #include "stdafx.h"
 #include "config.h"
+#include "utility.h"
 
 #include <fstream>
 
@@ -51,7 +52,7 @@ bool EndpointConfig::load(picojson::object& obj)
     }
 
     id = poId->second.get<std::string>();
-    description = poDescription->second.get<std::string>();
+    description = UTF8ToWide(poDescription->second.get<std::string>());
     channelCount = (int)poChannelCount->second.get<double>();
 
     if (poAttachPhysical != obj.end() && poAttachPhysical->second.is<bool>()) {
@@ -72,7 +73,7 @@ picojson::object EndpointConfig::save()
     picojson::object result;
 
     result.insert(std::make_pair("id", picojson::value(id)));
-    result.insert(std::make_pair("description", picojson::value(description)));
+    result.insert(std::make_pair("description", picojson::value(TCHARToUTF8(description.c_str()))));
     result.insert(std::make_pair("type", picojson::value(
         type == EndpointType::Recording ? "recording" : "playback")));
     result.insert(std::make_pair("channelCount",
@@ -155,13 +156,13 @@ picojson::object DefaultEndpointConfig::save()
     return result;
 }
 
-static std::string constantRegex(const std::string& path)
+static std::wstring constantRegex(const std::wstring& path)
 {
-    static const std::regex escape("[.^$|()\\[\\]{}*+?\\\\]");
-    std::ostringstream os;
+    static const std::wregex escape(L"[.^$|()\\[\\]{}*+?\\\\]");
+    std::wostringstream os;
 
     os << "^"
-       << std::regex_replace(path, escape, "\\\\&",
+       << std::regex_replace(path, escape, L"\\\\&",
               std::regex_constants::match_default |
               std::regex_constants::format_sed)
        << "$";
@@ -199,7 +200,7 @@ bool ApplicationConfig::load(picojson::object& obj)
         }
     }
 
-    description = poDescription->second.get<std::string>();
+    description = UTF8ToWide(poDescription->second.get<std::string>());
 
     if (poRegexMatch != obj.end() &&
         poRegexMatch->second.is<bool>()) {
@@ -208,11 +209,11 @@ bool ApplicationConfig::load(picojson::object& obj)
     }
 
     try {
-        path = poPath->second.get<std::string>();
+        path = UTF8ToWide(poPath->second.get<std::string>());
 
         // TODO: UTF-8 support on Windows is very sad. This might need ICU or
         // PCRE.
-        pattern = std::regex(regexMatch ? path : constantRegex(path),
+        pattern = std::wregex(regexMatch ? path : constantRegex(path),
             std::regex_constants::ECMAScript | std::regex_constants::icase);
     } catch (std::exception&) {
         // nom nom
@@ -225,8 +226,8 @@ picojson::object ApplicationConfig::save()
 {
     picojson::object result;
 
-    result.insert(std::make_pair("description", picojson::value(description)));
-    result.insert(std::make_pair("path", picojson::value(path)));
+    result.insert(std::make_pair("description", picojson::value(TCHARToUTF8(description.c_str()))));
+    result.insert(std::make_pair("path", picojson::value(TCHARToUTF8(path.c_str()))));
 
     if (regexMatch) {
         result.insert(std::make_pair("regexMatch", picojson::value(true)));
@@ -338,7 +339,7 @@ picojson::object DriverConfig::save()
     return result;
 }
 
-bool DriverConfig::writeFile(const std::string& path)
+bool DriverConfig::writeFile(const std::wstring& path)
 {
     std::ofstream fp(path);
 
@@ -350,7 +351,7 @@ bool DriverConfig::writeFile(const std::string& path)
     return true;
 }
 
-DriverConfig DriverConfig::fromFile(const std::string& path)
+DriverConfig DriverConfig::fromFile(const std::wstring& path)
 {
     std::ifstream fp(path);
     picojson::value json;

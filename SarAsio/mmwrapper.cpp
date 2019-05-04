@@ -113,7 +113,7 @@ SarMMDeviceEnumerator::SarMMDeviceEnumerator()
     LOG(INFO) << "Initializing SarMMDeviceEnumerator.";
     HRESULT hr;
 
-    _config = DriverConfig::fromFile(ConfigurationPath("default.json"));
+    _config = DriverConfig::fromFile(ConfigurationPath(L"default.json"));
 
     hr = CreateMMDevAPIObject(
         __uuidof(MMDeviceEnumerator), __uuidof(IMMDeviceEnumerator),
@@ -204,9 +204,9 @@ HRESULT STDMETHODCALLTYPE SarMMDeviceEnumerator::GetDefaultAudioEndpoint(
     WCHAR processNameWide[512] = {};
     ApplicationConfig *appConfig = nullptr;
 
-    GetModuleFileName(nullptr, processNameWide, sizeof(processNameWide));
+    GetModuleFileName(nullptr, processNameWide, sizeof(processNameWide)/sizeof(processNameWide[0]));
 
-    auto processName = TCHARToUTF8(processNameWide);
+    auto processName = std::wstring(processNameWide);
 
     for (auto& candidateApp : _config.applications) {
         if (std::regex_search(processName, candidateApp.pattern)) {

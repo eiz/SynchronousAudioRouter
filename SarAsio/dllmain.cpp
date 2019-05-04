@@ -29,7 +29,9 @@ BOOL WINAPI DllMain(HMODULE hModule, DWORD reason, LPVOID reserved)
 {
     if (reason == DLL_PROCESS_ATTACH) {
         char buf[1024] = {};
-        FLAGS_log_dir = Sar::LoggingPath();
+
+        // Google Log use native open() using std::string which uses system codepage
+        FLAGS_log_dir = Sar::TCHARToLocal(Sar::LoggingPath().c_str());
         FLAGS_logbuflevel = -1;
 
         char *sarLogVar = getenv("SAR_ASIO_LOG");

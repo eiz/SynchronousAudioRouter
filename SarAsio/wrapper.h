@@ -95,6 +95,8 @@ private:
     static void onTickStub(long bufferIndex, AsioBool directProcess);
     static AsioTime *onTickWithTimeStub(
         AsioTime *time, long bufferIndex, AsioBool directProcess);
+    AsioSampleType getSampleType();
+    int getSampleSize(AsioSampleType sampleType);
 
     HWND _hwnd;
     DriverConfig _config;
@@ -109,6 +111,7 @@ private:
     AsioCallbacks _callbacks = {};
     AsioBool _isFakeChannelStarted[2] = {};
     std::vector<void *> _fakeBuffers;
+    AsioSampleType _sampleType;
 };
 
 OBJECT_ENTRY_AUTO(CLSID_SarAsioWrapper, SarAsioWrapper)

@@ -67,8 +67,8 @@ NDIS_STATUS SarNdisFilterAttach(
     _In_ NDIS_HANDLE filterDriverContext,
     _In_ PNDIS_FILTER_ATTACH_PARAMETERS attachParameters)
 {
-    SAR_LOG("SarNdisFilterAttach");
-    SAR_LOG("Attaching to miniport: %wZ (instance name %wZ)",
+    SAR_TRACE("SarNdisFilterAttach");
+    SAR_DEBUG("Attaching to miniport: %wZ (instance name %wZ)",
         attachParameters->BaseMiniportName,
         attachParameters->BaseMiniportInstanceName);
     UNREFERENCED_PARAMETER(filterDriverContext);
@@ -117,7 +117,7 @@ err_out:
 _Use_decl_annotations_
 VOID SarNdisFilterDetach(_In_ NDIS_HANDLE filterModuleContext)
 {
-    SAR_LOG("SarNdisFilterDetach");
+    SAR_TRACE("SarNdisFilterDetach");
     SarNdisFilterModuleContext *context =
         (SarNdisFilterModuleContext *)filterModuleContext;
 
@@ -129,7 +129,7 @@ NDIS_STATUS SarNdisFilterRestart(
     _In_ NDIS_HANDLE filterModuleContext,
     _In_ PNDIS_FILTER_RESTART_PARAMETERS filterRestartParameters)
 {
-    SAR_LOG("SarNdisFilterRestart");
+    SAR_TRACE("SarNdisFilterRestart");
     UNREFERENCED_PARAMETER(filterRestartParameters);
     SarNdisFilterModuleContext *context =
         (SarNdisFilterModuleContext *)filterModuleContext;
@@ -147,7 +147,7 @@ NDIS_STATUS SarNdisFilterPause(
     _In_ NDIS_HANDLE filterModuleContext,
     _In_ PNDIS_FILTER_PAUSE_PARAMETERS filterPauseParameters)
 {
-    SAR_LOG("SarNdisFilterPause");
+    SAR_TRACE("SarNdisFilterPause");
     UNREFERENCED_PARAMETER(filterPauseParameters);
     SarNdisFilterModuleContext *context =
         (SarNdisFilterModuleContext *)filterModuleContext;
@@ -172,7 +172,7 @@ VOID SarNdisFilterSendNetBufferLists(
         (SarNdisFilterModuleContext *)filterModuleContext;
 
     if (context->running && context->enabled) {
-        SAR_LOG("SarNdisFilterSendNetBufferLists");
+        SAR_TRACE("SarNdisFilterSendNetBufferLists");
         NdisFSendNetBufferListsComplete(
             context->filterHandle, netBufferLists,
             (sendFlags & NDIS_SEND_FLAGS_SWITCH_SINGLE_SOURCE) ?
@@ -188,7 +188,7 @@ NTSTATUS SarNdisIrpCreate(
     _In_ PDEVICE_OBJECT deviceObject,
     _In_ PIRP irp)
 {
-    SAR_LOG("SarNdisIrpCreate");
+    SAR_TRACE("SarNdisIrpCreate");
     UNREFERENCED_PARAMETER(deviceObject);
 
     irp->IoStatus.Status = STATUS_SUCCESS;
@@ -201,7 +201,7 @@ NTSTATUS SarNdisIrpClose(
     _In_ PDEVICE_OBJECT deviceObject,
     _In_ PIRP irp)
 {
-    SAR_LOG("SarNdisIrpClose");
+    SAR_TRACE("SarNdisIrpClose");
     UNREFERENCED_PARAMETER(deviceObject);
 
     irp->IoStatus.Status = STATUS_SUCCESS;
@@ -214,7 +214,7 @@ NTSTATUS SarNdisIrpCleanup(
     _In_ PDEVICE_OBJECT deviceObject,
     _In_ PIRP irp)
 {
-    SAR_LOG("SarNdisIrpCleanup");
+    SAR_TRACE("SarNdisIrpCleanup");
     UNREFERENCED_PARAMETER(deviceObject);
 
     irp->IoStatus.Status = STATUS_SUCCESS;
@@ -227,7 +227,7 @@ NTSTATUS SarNdisIrpDeviceIoControl(
     _In_ PDEVICE_OBJECT deviceObject,
     _In_ PIRP irp)
 {
-    SAR_LOG("SarNdisIrpDeviceIoControl");
+    SAR_TRACE("SarNdisIrpDeviceIoControl");
     UNREFERENCED_PARAMETER(deviceObject);
     NTSTATUS status = STATUS_UNSUCCESSFUL;
     PIO_STACK_LOCATION irpStack = IoGetCurrentIrpStackLocation(irp);
@@ -246,7 +246,7 @@ NTSTATUS SarNdisIrpDeviceIoControl(
             }
 
             ExReleaseFastMutex(&gDriverState.mutex);
-            SAR_LOG("Total number of attached and unpaused filters: %d", count);
+            SAR_INFO("Total number of attached and unpaused filters: %d", count);
             break;
         }
         case SARNDIS_ENABLE:
@@ -266,7 +266,7 @@ NTSTATUS SarNdisIrpDeviceIoControl(
 _Use_decl_annotations_
 VOID SarNdisDriverUnload(PDRIVER_OBJECT driverObject)
 {
-    SAR_LOG("SarNdisDriverUnload");
+    SAR_TRACE("SarNdisDriverUnload");
     UNREFERENCED_PARAMETER(driverObject);
 
     if (gDriverState.deviceHandle) {
@@ -285,7 +285,7 @@ extern "C" NTSTATUS DriverEntry(
     _In_ PDRIVER_OBJECT driverObject,
     _In_ PUNICODE_STRING registryPath)
 {
-    SAR_LOG("SarNdis DriverEntry");
+    SAR_INFO("SarNdis DriverEntry");
     UNREFERENCED_PARAMETER(registryPath);
     NDIS_FILTER_DRIVER_CHARACTERISTICS fdc = {};
     NDIS_DEVICE_OBJECT_ATTRIBUTES doa = {};

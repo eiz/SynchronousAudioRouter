@@ -26,20 +26,27 @@ NTSTATUS SarKsPinRtGetBufferCore(
     NTSTATUS status;
 
     if (!endpoint) {
-        SAR_LOG("No valid endpoint");
+        SAR_ERROR("No valid endpoint");
         return STATUS_NOT_FOUND;
     }
 
     if (baseAddress != nullptr) {
-        SAR_LOG("It wants a specific address");
+        SAR_ERROR("It wants a specific address");
         SarReleaseEndpointAndContext(endpoint);
         return STATUS_NOT_IMPLEMENTED;
+    }
+
+    if (endpoint->activeChannelCount == 0) {
+        SAR_ERROR("activeChannelCount not set, assuming channelCount");
+        KdBreakPoint();
+        endpoint->activeChannelCount = endpoint->channelCount;
     }
 
     status = SarGetOrCreateEndpointProcessContext(
         endpoint, PsGetCurrentProcess(), &processContext);
 
     if (!NT_SUCCESS(status)) {
+        SAR_ERROR("Get process context failed: %08X", status);
         SarReleaseEndpointAndContext(endpoint);
         return status;
     }
@@ -47,15 +54,15 @@ NTSTATUS SarKsPinRtGetBufferCore(
     ULONG actualSize = ROUND_UP(
         max(requestedBufferSize,
             controlContext->minimumFrameCount *
-            controlContext->frameSize *
-            endpoint->channelCount),
-        controlContext->sampleSize * endpoint->channelCount);
+            controlContext->periodSizeBytes *
+            endpoint->activeChannelCount),
+        controlContext->sampleSize * endpoint->activeChannelCount);
     SIZE_T viewSize = ROUND_UP(actualSize, SAR_BUFFER_CELL_SIZE);
 
     ExAcquireFastMutex(&controlContext->mutex);
 
     if (!controlContext->bufferSection) {
-        SAR_LOG("Buffer isn't allocated");
+        SAR_ERROR("Buffer isn't allocated");
         ExReleaseFastMutex(&controlContext->mutex);
         SarReleaseEndpointAndContext(endpoint);
         return STATUS_INSUFFICIENT_RESOURCES;
@@ -66,6 +73,7 @@ NTSTATUS SarKsPinRtGetBufferCore(
         (ULONG)(viewSize / SAR_BUFFER_CELL_SIZE), 0);
 
     if (cellIndex == 0xFFFFFFFF) {
+        SAR_ERROR("Cell index full 0xFFFFFFFF");
         ExReleaseFastMutex(&controlContext->mutex);
         SarReleaseEndpointAndContext(endpoint);
         return STATUS_INSUFFICIENT_RESOURCES;
@@ -80,7 +88,7 @@ NTSTATUS SarKsPinRtGetBufferCore(
     LARGE_INTEGER sectionOffset;
 
     sectionOffset.QuadPart = cellIndex * SAR_BUFFER_CELL_SIZE;
-    SAR_LOG("Mapping %08X %016llX %lu %lu", viewSize, sectionOffset.QuadPart,
+    SAR_DEBUG("Mapping %08lX %016llX %lu %lu", (ULONG)viewSize, sectionOffset.QuadPart,
         actualSize, requestedBufferSize);
     status = ZwMapViewOfSection(
         endpoint->owner->bufferSection, ZwCurrentProcess(),
@@ -88,7 +96,7 @@ NTSTATUS SarKsPinRtGetBufferCore(
         0, PAGE_READWRITE);
 
     if (!NT_SUCCESS(status)) {
-        SAR_LOG("Section mapping failed %08X", status);
+        SAR_ERROR("Section mapping failed %08X", status);
         SarReleaseEndpointAndContext(endpoint);
         return status;
     }
@@ -99,6 +107,7 @@ NTSTATUS SarKsPinRtGetBufferCore(
     status = SarReadEndpointRegisters(&regs, endpoint);
 
     if (!NT_SUCCESS(status)) {
+        SAR_ERROR("Read endpoint registers failed %08X", status);
         SarReleaseEndpointAndContext(endpoint);
         return status;
     }
@@ -109,7 +118,7 @@ NTSTATUS SarKsPinRtGetBufferCore(
     status = SarWriteEndpointRegisters(&regs, endpoint);
 
     if (!NT_SUCCESS(status)) {
-        SAR_LOG("Couldn't write endpoint registers: %08X %p %p", status,
+        SAR_ERROR("Couldn't write endpoint registers: %08X %p %p", status,
             processContext->process, PsGetCurrentProcess());
         SarReleaseEndpointAndContext(endpoint);
         return status; // TODO: goto err_out
@@ -147,33 +156,13 @@ NTSTATUS SarKsPinRtGetBufferWithNotification(
 NTSTATUS SarKsPinRtGetClockRegister(
     PIRP irp, PKSIDENTIFIER request, PVOID data)
 {
+    UNREFERENCED_PARAMETER(irp);
     UNREFERENCED_PARAMETER(request);
+    UNREFERENCED_PARAMETER(data);
 
-    NTSTATUS status;
-    PKSRTAUDIO_HWREGISTER reg = (PKSRTAUDIO_HWREGISTER)data;
-    SarEndpoint *endpoint = SarGetEndpointFromIrp(irp, TRUE);
-    SarEndpointProcessContext *context;
-
-    if (!endpoint) {
-        return STATUS_UNSUCCESSFUL;
-    }
-
-    status = SarGetOrCreateEndpointProcessContext(
-        endpoint, PsGetCurrentProcess(), &context);
-
-    if (!NT_SUCCESS(status)) {
-        SarReleaseEndpointAndContext(endpoint);
-        return status;
-    }
-
-    reg->Register =
-        &context->registerFileUVA[endpoint->index].clockRegister;
-    reg->Width = 32;
-    reg->Accuracy = 0;
-    reg->Numerator = endpoint->owner->sampleRate;
-    reg->Denominator = endpoint->owner->frameSize / endpoint->owner->sampleSize;
-    SarReleaseEndpointAndContext(endpoint);
-    return STATUS_SUCCESS;
+    // The clock register should be a continuously updated register at a fixed frequency.
+    // We don't have anything like this to map as a register, report it as not implemented.
+    return STATUS_NOT_IMPLEMENTED;
 }
 
 NTSTATUS SarKsPinRtGetHwLatency(
@@ -185,6 +174,7 @@ NTSTATUS SarKsPinRtGetHwLatency(
     SarEndpoint *endpoint = SarGetEndpointFromIrp(irp, TRUE);
 
     if (!endpoint) {
+        SAR_ERROR("Get endpoint failed");
         return STATUS_UNSUCCESSFUL;
     }
 
@@ -213,6 +203,7 @@ NTSTATUS SarKsPinRtGetPositionRegister(
     SarEndpointProcessContext *context;
 
     if (!endpoint) {
+        SAR_ERROR("Get endpoint failed");
         return STATUS_UNSUCCESSFUL;
     }
 
@@ -227,7 +218,7 @@ NTSTATUS SarKsPinRtGetPositionRegister(
     reg->Register =
         &context->registerFileUVA[endpoint->index].positionRegister;
     reg->Width = 32;
-    reg->Accuracy = 1;
+    reg->Accuracy = endpoint->owner->periodSizeBytes * endpoint->activeChannelCount;
     reg->Numerator = 0;
     reg->Denominator = 0;
     SarReleaseEndpointAndContext(endpoint);
@@ -264,12 +255,14 @@ NTSTATUS SarKsPinRtRegisterNotificationEvent(
         (PKSRTAUDIO_NOTIFICATION_EVENT_PROPERTY)request;
 
     if (!endpoint) {
+        SAR_ERROR("Get endpoint failed");
         return STATUS_UNSUCCESSFUL;
     }
 
     status = SarReadEndpointRegisters(&regs, endpoint);
 
     if (!NT_SUCCESS(status)) {
+        SAR_ERROR("Read endpoint registers failed %08X", status);
         SarReleaseEndpointAndContext(endpoint);
         return status;
     }

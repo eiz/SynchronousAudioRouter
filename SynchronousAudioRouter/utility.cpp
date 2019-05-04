@@ -16,6 +16,14 @@
 
 #include "sar.h"
 
+DRIVER_CANCEL SarCancelHandleQueueIrp;
+RTL_GENERIC_COMPARE_ROUTINE SarCompareTableEntry;
+RTL_GENERIC_ALLOCATE_ROUTINE SarAllocateTableEntry;
+RTL_GENERIC_FREE_ROUTINE SarFreeTableEntry;
+RTL_AVL_COMPARE_ROUTINE SarCompareStringTableEntry;
+RTL_AVL_ALLOCATE_ROUTINE SarAllocateStringTableEntry;
+RTL_AVL_FREE_ROUTINE SarFreeStringTableEntry;
+
 SarDriverExtension *SarGetDriverExtension(PDRIVER_OBJECT driverObject)
 {
     return (SarDriverExtension *)IoGetDriverObjectExtension(
@@ -65,13 +73,16 @@ SarEndpoint *SarGetEndpointFromIrp(PIRP irp, BOOLEAN retain)
 
         PLIST_ENTRY entry = controlContext->endpointList.Flink;
 
+        SAR_TRACE("Searching for factory %p", factory);
+
         while (entry != &controlContext->endpointList) {
             SarEndpoint *endpoint =
                 CONTAINING_RECORD(entry, SarEndpoint, listEntry);
 
             entry = entry->Flink;
 
-            if (endpoint->filterFactory == factory) {
+            SAR_TRACE(" Endpoint %p, topology %p", endpoint->filterFactory, endpoint->topologyFilterFactory);
+            if (endpoint->filterFactory == factory || endpoint->topologyFilterFactory == factory) {
                 found = endpoint;
 
                 if (retain) {
@@ -158,10 +169,10 @@ NTSTATUS SarWriteEndpointRegisters(
         ProbeForWrite(dest,
             sizeof(SarEndpointRegisters), TYPE_ALIGNMENT(ULONG));
         dest->positionRegister = regs->positionRegister;
-        dest->clockRegister = regs->clockRegister;
         dest->bufferOffset = regs->bufferOffset;
         dest->bufferSize = regs->bufferSize;
         dest->notificationCount = regs->notificationCount;
+        dest->activeChannelCount = regs->activeChannelCount;
         MemoryBarrier();
         InterlockedExchange((LONG *)&dest->generation, (ULONG)regs->generation);
     } __except(EXCEPTION_EXECUTE_HANDLER) {
@@ -186,9 +197,11 @@ NTSTATUS SarReadUserBuffer(PVOID dest, PIRP irp, ULONG size)
     }
 
     __try {
-        ProbeForRead(
-            irpStack->Parameters.DeviceIoControl.Type3InputBuffer, size,
-            TYPE_ALIGNMENT(ULONG));
+        if (irp->RequestorMode != KernelMode) {
+            ProbeForRead(
+                irpStack->Parameters.DeviceIoControl.Type3InputBuffer, size,
+                TYPE_ALIGNMENT(ULONG));
+        }
         RtlCopyMemory(
             dest, irpStack->Parameters.DeviceIoControl.Type3InputBuffer, size);
         return STATUS_SUCCESS;
@@ -286,6 +299,8 @@ void SarCancelAllHandleQueueIrps(SarHandleQueue *handleQueue)
         ZwClose(pendingIrp->kernelProcessHandle);
         ExFreePoolWithTag(pendingIrp, SAR_TAG);
 
+        SAR_INFO("Cancelling IRP %p", irp);
+
         irp->IoStatus.Information = 0;
         irp->IoStatus.Status = STATUS_CANCELLED;
         IoSetCancelRoutine(irp, nullptr);
@@ -307,6 +322,7 @@ void SarCancelHandleQueueIrp(PDEVICE_OBJECT deviceObject, PIRP irp)
     KIRQL irql;
 
     if (!controlContext) {
+        SAR_WARNING("Received Cancel IRP without control context");
         return;
     }
 
@@ -386,6 +402,8 @@ NTSTATUS SarPostHandleQueue(
         status = SarTransferQueuedHandle(
             queuedIrp->irp, queuedIrp->kernelProcessHandle,
             0, kernelProcessHandle, userHandle, associatedData);
+
+        SAR_DEBUG("complete handle queue");
 
         queuedIrp->irp->IoStatus.Status = status;
         queuedIrp->irp->IoStatus.Information = sizeof(SarHandleQueueResponse);

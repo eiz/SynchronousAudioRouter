@@ -24,10 +24,11 @@ namespace Sar {
 
 struct BufferConfig
 {
-    int frameSampleCount;
+    int periodFrameSize;
     int sampleRate;
     int sampleSize;
-    std::vector<std::vector<void *>> asioBuffers;
+
+    std::array<std::vector<std::vector<void *>>, 2> asioBuffers;
 };
 
 struct SarClient: public std::enable_shared_from_this<SarClient>
@@ -108,12 +109,12 @@ private:
     void demux(
         void *muxBufferFirst, size_t firstSize,
         void *muxBufferSecond, size_t secondSize,
-        void **targetBuffers, int ntargets,
+        void **targetBuffers, int ntargets, int nsources,
         size_t targetSize, int sampleSize);
     void mux(
         void *muxBufferFirst, size_t firstSize,
         void *muxBufferSecond, size_t secondSize,
-        void **targetBuffers, int ntargets,
+        void **targetBuffers, int ntargets, int nsources,
         size_t targetSize, int sampleSize);
 
     DriverConfig _driverConfig;
@@ -130,6 +131,7 @@ private:
     CComObject<NotificationClient> *_mmNotificationClient = nullptr;
     bool _mmNotificationClientRegistered = false;
     std::atomic<bool> _updateSampleRateOnTick = false;
+    std::mutex _registersLock;
 };
 
 } // namespace Sar

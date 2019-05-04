@@ -42,9 +42,21 @@
     <ClCompile Include="wavert.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="SarTopologyFilterDescriptor.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="SarWaveFilterDescriptor.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="sar.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="SarTopologyFilterDescriptor.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="SarWaveFilterDescriptor.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

@@ -16,192 +16,7 @@
 
 #include "sar.h"
 
-const KSPIN_DISPATCH gPinDispatch = {
-    SarKsPinCreate, // Create
-    SarKsPinClose, // Close
-    SarKsPinProcess, // Process
-    SarKsPinReset, // Reset
-    SarKsPinSetDataFormat, // SetDataFormat
-    SarKsPinSetDeviceState, // SetDeviceState
-    SarKsPinConnect, // Connect
-    SarKsPinDisconnect, // Disconnect
-    nullptr, // Clock
-    nullptr, // Allocator
-};
-
-#define DEFINE_KSPROPERTY_GETTER(id, handler, intype, outtype) \
-    DEFINE_KSPROPERTY_ITEM((id), (handler), sizeof(intype), sizeof(outtype), \
-    nullptr, nullptr, 0, nullptr, nullptr, 0)
-
-DEFINE_KSPROPERTY_TABLE(gPinRtAudioProperties) {
-    DEFINE_KSPROPERTY_GETTER(
-        KSPROPERTY_RTAUDIO_BUFFER, SarKsPinRtGetBuffer,
-        KSRTAUDIO_BUFFER_PROPERTY, KSRTAUDIO_BUFFER),
-    DEFINE_KSPROPERTY_GETTER(
-        KSPROPERTY_RTAUDIO_BUFFER_WITH_NOTIFICATION,
-        SarKsPinRtGetBufferWithNotification,
-        KSRTAUDIO_BUFFER_PROPERTY, KSRTAUDIO_BUFFER),
-    DEFINE_KSPROPERTY_GETTER(
-        KSPROPERTY_RTAUDIO_CLOCKREGISTER, SarKsPinRtGetClockRegister,
-        KSRTAUDIO_HWREGISTER_PROPERTY, KSRTAUDIO_HWREGISTER),
-    DEFINE_KSPROPERTY_GETTER(
-        KSPROPERTY_RTAUDIO_HWLATENCY, SarKsPinRtGetHwLatency,
-        KSPROPERTY, KSRTAUDIO_HWLATENCY),
-    DEFINE_KSPROPERTY_GETTER(
-        KSPROPERTY_RTAUDIO_PACKETCOUNT, SarKsPinRtGetPacketCount,
-        KSPROPERTY, ULONG),
-    DEFINE_KSPROPERTY_GETTER(
-        KSPROPERTY_RTAUDIO_POSITIONREGISTER, SarKsPinRtGetPositionRegister,
-        KSRTAUDIO_HWREGISTER_PROPERTY, KSRTAUDIO_HWREGISTER),
-    DEFINE_KSPROPERTY_GETTER(
-        KSPROPERTY_RTAUDIO_PRESENTATION_POSITION,
-        SarKsPinRtGetPresentationPosition,
-        KSPROPERTY, KSAUDIO_PRESENTATION_POSITION),
-    DEFINE_KSPROPERTY_GETTER(
-        KSPROPERTY_RTAUDIO_QUERY_NOTIFICATION_SUPPORT,
-        SarKsPinRtQueryNotificationSupport, KSPROPERTY, BOOL),
-    DEFINE_KSPROPERTY_ITEM(
-        KSPROPERTY_RTAUDIO_REGISTER_NOTIFICATION_EVENT,
-        SarKsPinRtRegisterNotificationEvent,
-        sizeof(KSRTAUDIO_NOTIFICATION_EVENT_PROPERTY), 0,
-        SarKsPinRtRegisterNotificationEvent,
-        nullptr, 0, nullptr, nullptr, 0),
-    DEFINE_KSPROPERTY_ITEM(
-        KSPROPERTY_RTAUDIO_UNREGISTER_NOTIFICATION_EVENT,
-        SarKsPinRtUnregisterNotificationEvent,
-        sizeof(KSRTAUDIO_NOTIFICATION_EVENT_PROPERTY), 0,
-        SarKsPinRtUnregisterNotificationEvent,
-        nullptr, 0, nullptr, nullptr, 0),
-};
-
-DEFINE_KSPROPERTY_SET_TABLE(gPinPropertySets) {
-    DEFINE_KSPROPERTY_SET(
-        &KSPROPSETID_RtAudio,
-        SIZEOF_ARRAY(gPinRtAudioProperties),
-        gPinRtAudioProperties,
-        0,
-        nullptr)
-};
-
-DEFINE_KSAUTOMATION_TABLE(gPinAutomation) {
-    DEFINE_KSAUTOMATION_PROPERTIES(gPinPropertySets),
-    DEFINE_KSAUTOMATION_METHODS_NULL,
-    DEFINE_KSAUTOMATION_EVENTS_NULL
-};
-
-const KSPIN_INTERFACE gPinInterfaces[] = {
-    {
-        STATICGUIDOF(KSINTERFACESETID_Standard),
-        KSINTERFACE_STANDARD_LOOPED_STREAMING
-    }
-};
-
-const KSPIN_DESCRIPTOR_EX gPinDescriptorTemplate = {
-    &gPinDispatch, // Dispatch
-    nullptr, // AutomationTable
-    {}, // PinDescriptor
-    KSPIN_FLAG_DO_NOT_INITIATE_PROCESSING |
-    KSPIN_FLAG_FRAMES_NOT_REQUIRED_FOR_PROCESSING |
-    KSPIN_FLAG_PROCESS_IF_ANY_IN_RUN_STATE |
-    KSPIN_FLAG_FIXED_FORMAT |
-    KSPIN_FLAG_DO_NOT_USE_STANDARD_TRANSPORT,
-    1, // InstancesPossible
-    0, // InstancesNecessary
-    nullptr, // AllocatorFraming
-    SarKsPinIntersectHandler, // IntersectHandler
-};
-
-const GUID gCategoriesTableCapture[] = {
-    STATICGUIDOF(KSCATEGORY_CAPTURE),
-    STATICGUIDOF(KSCATEGORY_AUDIO),
-    STATICGUIDOF(KSCATEGORY_REALTIME),
-};
-
-const GUID gCategoriesTableRender[] = {
-    STATICGUIDOF(KSCATEGORY_RENDER),
-    STATICGUIDOF(KSCATEGORY_AUDIO),
-    STATICGUIDOF(KSCATEGORY_REALTIME),
-};
-
-const KSTOPOLOGY_CONNECTION gFilterConnectionsRendering[] = {
-    { KSFILTER_NODE, 0, 0, 1 },
-    { 0, 0, KSFILTER_NODE, 1 }
-};
-
-const KSTOPOLOGY_CONNECTION gFilterConnectionsCapture[] = {
-    { KSFILTER_NODE, 1, 0, 1 },
-    { 0, 0, KSFILTER_NODE, 0 }
-};
-
-KSFILTER_DISPATCH gFilterDispatch = {
-    SarKsFilterCreate, // Create
-    SarKsFilterClose, // Close
-    nullptr, // Process
-    nullptr, // Reset
-};
-
-DEFINE_KSPROPERTY_TABLE(gFilterPinProperties) {
-    DEFINE_KSPROPERTY_ITEM(
-        KSPROPERTY_PIN_GLOBALCINSTANCES,
-        SarKsPinGetGlobalInstancesCount,
-        sizeof(KSP_PIN), sizeof(KSPIN_CINSTANCES),
-        nullptr, nullptr, 0, nullptr, nullptr, 0),
-    DEFINE_KSPROPERTY_ITEM(
-        KSPROPERTY_PIN_PROPOSEDATAFORMAT,
-        SarKsPinGetDefaultDataFormat,
-        sizeof(KSP_PIN), 0,
-        SarKsPinProposeDataFormat, nullptr, 0, nullptr, nullptr, 0),
-    DEFINE_KSPROPERTY_ITEM(
-        KSPROPERTY_PIN_NAME,
-        SarKsPinGetName,
-        sizeof(KSP_PIN), 0,
-        SarKsPinGetName, nullptr, 0, nullptr, nullptr, 0)
-};
-
-DEFINE_KSPROPERTY_SET_TABLE(gFilterPropertySets) {
-    DEFINE_KSPROPERTY_SET(
-        &KSPROPSETID_Pin,
-        SIZEOF_ARRAY(gFilterPinProperties),
-        gFilterPinProperties,
-        0,
-        nullptr)
-};
-
-DEFINE_KSEVENT_TABLE(gFilterEvents) {
-    DEFINE_KSEVENT_ITEM(
-        KSEVENT_PINCAPS_FORMATCHANGE,
-        sizeof(KSEVENTDATA), 0,
-        nullptr, nullptr, nullptr)
-};
-
-DEFINE_KSEVENT_SET_TABLE(gFilterEventSets) {
-    DEFINE_KSEVENT_SET(
-        &KSEVENTSETID_PinCapsChange,
-        SIZEOF_ARRAY(gFilterEvents),
-        gFilterEvents)
-};
-
-DEFINE_KSAUTOMATION_TABLE(gFilterAutomation) {
-    DEFINE_KSAUTOMATION_PROPERTIES(gFilterPropertySets),
-    DEFINE_KSAUTOMATION_METHODS_NULL,
-    DEFINE_KSAUTOMATION_EVENTS(gFilterEventSets),
-};
-
-static KSFILTER_DESCRIPTOR gFilterDescriptorTemplate = {
-    &gFilterDispatch, // Dispatch
-    &gFilterAutomation, // AutomationTable
-    KSFILTER_DESCRIPTOR_VERSION, // Version
-    0, // Flags
-    nullptr, // ReferenceGuid
-    0, // PinDescriptorsCount
-    0, // PinDescriptorSize
-    nullptr,
-    DEFINE_KSFILTER_CATEGORIES_NULL,
-    DEFINE_KSFILTER_NODE_DESCRIPTORS_NULL,
-    2, // ConnectionsCount
-    nullptr, // Connections
-    nullptr, // ComponentId
-};
+IO_WORKITEM_ROUTINE SarProcessPendingEndpoints;
 
 NTSTATUS SarSetBufferLayout(
     SarControlContext *controlContext,
@@ -216,14 +31,17 @@ NTSTATUS SarSetBufferLayout(
     SIZE_T viewSize = 0;
     PVOID baseAddress = nullptr;
     GUID sectionGuid = {};
+    PULONG bufferMap = nullptr;
+    DWORD bufferSize = 0;
 
-    if (request->bufferSize > SAR_MAX_BUFFER_SIZE ||
+    if (request->bufferSize == 0 ||
+        request->bufferSize > SAR_MAX_BUFFER_SIZE ||
         request->sampleSize < SAR_MIN_SAMPLE_SIZE ||
         request->sampleSize > SAR_MAX_SAMPLE_SIZE ||
         request->sampleRate < SAR_MIN_SAMPLE_RATE ||
         request->sampleRate > SAR_MAX_SAMPLE_RATE ||
-        request->frameSize > request->bufferSize ||
-        request->frameSize == 0) {
+        request->periodSizeBytes > request->bufferSize ||
+        request->periodSizeBytes == 0) {
         return STATUS_INVALID_PARAMETER;
     }
 
@@ -231,35 +49,24 @@ NTSTATUS SarSetBufferLayout(
         return status;
     }
 
-    ExAcquireFastMutex(&controlContext->mutex);
-
-    if (controlContext->bufferSize) {
-        ExReleaseFastMutex(&controlContext->mutex);
-        return STATUS_INVALID_STATE_TRANSITION;
-    }
-
-    controlContext->bufferSize = ROUND_TO_PAGES(request->bufferSize);
-    controlContext->frameSize = request->frameSize;
-    controlContext->sampleSize = request->sampleSize;
-    controlContext->sampleRate = request->sampleRate;
-    controlContext->minimumFrameCount = request->minimumFrameCount;
-    ExReleaseFastMutex(&controlContext->mutex);
+    bufferSize = ROUND_TO_PAGES(request->bufferSize);
 
     RtlUnicodeStringPrintf(
         &sectionName,
         L"\\BaseNamedObjects\\SynchronousAudioRouter_" GUID_FORMAT,
-        controlContext, GUID_VALUES(sectionGuid));
+        GUID_VALUES(sectionGuid));
     InitializeObjectAttributes(
         &sectionAttributes, &sectionName, OBJ_KERNEL_HANDLE, nullptr, nullptr);
-    sectionSize.QuadPart = controlContext->bufferSize + SAR_BUFFER_CELL_SIZE;
+    sectionSize.QuadPart = bufferSize + SAR_BUFFER_CELL_SIZE;
 
-    DWORD bufferMapSize = SarBufferMapSize(controlContext);
-    // TODO: don't leak this
-    PULONG bufferMap = (PULONG)ExAllocatePoolWithTag(
+    DWORD bufferMapSize = SarBufferMapSize(bufferSize);
+
+    bufferMap = (PULONG)ExAllocatePoolWithTag(
         NonPagedPool, bufferMapSize, SAR_TAG);
 
     if (!bufferMap) {
-        return STATUS_INSUFFICIENT_RESOURCES;
+        status = STATUS_INSUFFICIENT_RESOURCES;
+        goto err_out;
     }
 
     RtlZeroMemory(bufferMap, bufferMapSize);
@@ -268,7 +75,7 @@ NTSTATUS SarSetBufferLayout(
         &sectionAttributes, &sectionSize, PAGE_READWRITE, SEC_COMMIT, nullptr);
 
     if (!NT_SUCCESS(status)) {
-        SAR_LOG("Failed to allocate buffer section %08X", status);
+        SAR_ERROR("Failed to allocate buffer section %08X", status);
         goto err_out;
     }
 
@@ -277,29 +84,55 @@ NTSTATUS SarSetBufferLayout(
         &viewSize, ViewUnmap, 0, PAGE_READWRITE);
 
     if (!NT_SUCCESS(status)) {
-        SAR_LOG("Couldn't map view of section");
+        SAR_ERROR("Couldn't map view of section");
+        goto err_out;
+    }
+    
+    ExAcquireFastMutex(&controlContext->mutex);
+
+    if (controlContext->bufferSize) {
+        ExReleaseFastMutex(&controlContext->mutex);
+        status = STATUS_INVALID_STATE_TRANSITION;
         goto err_out;
     }
 
-    response->actualSize = sectionSize.LowPart;
-    response->virtualAddress = baseAddress;
-    response->registerBase = sectionSize.LowPart - SAR_BUFFER_CELL_SIZE;
-    ExAcquireFastMutex(&controlContext->mutex);
+    controlContext->bufferSize = bufferSize;
+    controlContext->periodSizeBytes = request->periodSizeBytes;
+    controlContext->sampleSize = request->sampleSize;
+    controlContext->sampleRate = request->sampleRate;
+    controlContext->minimumFrameCount = request->minimumFrameCount;
+    
     RtlInitializeBitMap(&controlContext->bufferMap,
-        bufferMap, SarBufferMapEntryCount(controlContext));
+        bufferMap, SarBufferMapEntryCount(bufferSize));
+
+    controlContext->bufferMapStorage = bufferMap;
+    bufferMap = nullptr;
+
+    controlContext->sectionViewBaseAddress = baseAddress;
+    baseAddress = nullptr;
+
     controlContext->bufferSection = section;
     ExReleaseFastMutex(&controlContext->mutex);
+
+    response->actualSize = sectionSize.LowPart;
+    response->virtualAddress = controlContext->sectionViewBaseAddress;
+    response->registerBase = sectionSize.LowPart - SAR_BUFFER_CELL_SIZE;
+
     return STATUS_SUCCESS;
 
 err_out:
+    if (baseAddress) {
+        ZwUnmapViewOfSection(ZwCurrentProcess(), baseAddress);
+    }
+
     if (section) {
         ZwClose(section);
     }
 
-    ExAcquireFastMutex(&controlContext->mutex);
-    controlContext->bufferSize =
-        controlContext->sampleSize = controlContext->sampleRate = 0;
-    ExReleaseFastMutex(&controlContext->mutex);
+    if (bufferMap) {
+        ExFreePoolWithTag(bufferMap, SAR_TAG);
+    }
+
     return status;
 }
 
@@ -313,7 +146,7 @@ NTSTATUS SarSetDeviceInterfaceProperties(
     HANDLE epSubKey = nullptr, zeroSubKey = nullptr;
     UNICODE_STRING clsidValue, clsidData = {}, aliasLink = {};
     UNICODE_STRING epSubKeyStr, zeroSubKeyStr, supportsEventModeValue;
-    UNICODE_STRING associationValue, guidEmpty;
+    UNICODE_STRING associationValue, deviceDesc, guidEmpty;
     UNICODE_STRING sarIdValue, friendlyNameValue;
     OBJECT_ATTRIBUTES oa;
     DWORD one = 1;
@@ -327,6 +160,8 @@ NTSTATUS SarSetDeviceInterfaceProperties(
     RtlUnicodeStringInit(
         &associationValue, L"{1DA5D803-D492-4EDD-8C23-E0C0FFEE7F0E},2");
     RtlUnicodeStringInit(
+        &deviceDesc, L"{a45c254e-df1c-4efd-8020-67d146a850e0},2");
+    RtlUnicodeStringInit(
         &sarIdValue, L"{F4B15B6F-8C3F-48B6-A115-42FDE19EF05B},0");
     RtlUnicodeStringInit(
         &guidEmpty, L"{00000000-0000-0000-0000-000000000000}");
@@ -335,7 +170,7 @@ NTSTATUS SarSetDeviceInterfaceProperties(
         symbolicLinkName, aliasInterfaceClassGuid, &aliasLink);
 
     if (!NT_SUCCESS(status)) {
-        SAR_LOG("Couldn't get device alias: %08X", status);
+        SAR_ERROR("Couldn't get device alias: %08X", status);
         goto out;
     }
 
@@ -343,14 +178,14 @@ NTSTATUS SarSetDeviceInterfaceProperties(
         &aliasLink, KEY_ALL_ACCESS, &deviceInterfaceKey);
 
     if (!NT_SUCCESS(status)) {
-        SAR_LOG("Couldn't open registry key: %08X", status);
+        SAR_ERROR("Couldn't open registry key: %08X", status);
         goto out;
     }
 
     status = RtlStringFromGUID(CLSID_Proxy, &clsidData);
 
     if (!NT_SUCCESS(status)) {
-        SAR_LOG("Couldn't convert GUID to string: %08X", status);
+        SAR_ERROR("Couldn't convert GUID to string: %08X", status);
         goto out;
     }
 
@@ -360,7 +195,7 @@ NTSTATUS SarSetDeviceInterfaceProperties(
         endpoint->deviceName.Length + sizeof(UNICODE_NULL));
 
     if (!NT_SUCCESS(status)) {
-        SAR_LOG("Couldn't set friendly name: %08X", status);
+        SAR_ERROR("Couldn't set friendly name: %08X", status);
         goto out;
     }
 
@@ -369,7 +204,7 @@ NTSTATUS SarSetDeviceInterfaceProperties(
         clsidData.Length + sizeof(UNICODE_NULL));
 
     if (!NT_SUCCESS(status)) {
-        SAR_LOG("Couldn't set CLSID: %08X", status);
+        SAR_ERROR("Couldn't set CLSID: %08X", status);
         goto out;
     }
 
@@ -379,7 +214,7 @@ NTSTATUS SarSetDeviceInterfaceProperties(
         &epSubKey, KEY_ALL_ACCESS, &oa, 0, nullptr, 0, nullptr);
 
     if (!NT_SUCCESS(status)) {
-        SAR_LOG("Couldn't open EP subkey");
+        SAR_ERROR("Couldn't open EP subkey");
         goto out;
     }
 
@@ -389,7 +224,7 @@ NTSTATUS SarSetDeviceInterfaceProperties(
         &zeroSubKey, KEY_ALL_ACCESS, &oa, 0, nullptr, 0, nullptr);
 
     if (!NT_SUCCESS(status)) {
-        SAR_LOG("Couldn't open EP\\0 subkey");
+        SAR_ERROR("Couldn't open EP\\0 subkey");
         goto out;
     }
 
@@ -397,7 +232,7 @@ NTSTATUS SarSetDeviceInterfaceProperties(
         zeroSubKey, &supportsEventModeValue, 0, REG_DWORD, &one, sizeof(DWORD));
 
     if (!NT_SUCCESS(status)) {
-        SAR_LOG("Couldn't set registry value for evented mode support");
+        SAR_ERROR("Couldn't set registry value for evented mode support");
         goto out;
     }
 
@@ -406,7 +241,16 @@ NTSTATUS SarSetDeviceInterfaceProperties(
         guidEmpty.Length + sizeof(UNICODE_NULL));
 
     if (!NT_SUCCESS(status)) {
-        SAR_LOG("Couldn't set kscategory association for endpoint");
+        SAR_ERROR("Couldn't set kscategory association for endpoint");
+    }
+
+    // Required to make windows 10 uses our endpoint name instead of a generic name based on the category
+    status = ZwSetValueKey(
+        zeroSubKey, &deviceDesc, 0, REG_SZ, endpoint->deviceName.Buffer,
+        endpoint->deviceName.Length + sizeof(UNICODE_NULL));
+
+    if (!NT_SUCCESS(status)) {
+        SAR_ERROR("Couldn't set device description for endpoint");
     }
 
     status = ZwSetValueKey(
@@ -414,7 +258,7 @@ NTSTATUS SarSetDeviceInterfaceProperties(
         endpoint->deviceId.Length + sizeof(UNICODE_NULL));
 
     if (!NT_SUCCESS(status)) {
-        SAR_LOG("Couldn't set sar endpoint id for endpoint");
+        SAR_ERROR("Couldn't set sar endpoint id for endpoint");
     }
 
 out:
@@ -455,8 +299,10 @@ retry:
     while (entry != &controlContext->pendingEndpointList) {
         SarEndpoint *endpoint =
             CONTAINING_RECORD(entry, SarEndpoint, listEntry);
-        PUNICODE_STRING symlink =
-            KsFilterFactoryGetSymbolicLink(endpoint->filterFactory);
+
+        // Call KsFilterFactoryGetSymbolicLink require IRQL at PASSIVE_LEVEL (so after mutex release)
+        PUNICODE_STRING symlink;
+        PUNICODE_STRING topologySymlink;
         PLIST_ENTRY current = entry;
         PIRP pendingIrp = endpoint->pendingIrp;
 
@@ -464,6 +310,11 @@ retry:
         RemoveEntryList(current);
         ExReleaseFastMutex(&controlContext->mutex);
 
+        symlink =
+            KsFilterFactoryGetSymbolicLink(endpoint->filterFactory);
+        topologySymlink =
+            KsFilterFactoryGetSymbolicLink(endpoint->topologyFilterFactory);
+        
         status = SarSetDeviceInterfaceProperties(
             endpoint, symlink, &KSCATEGORY_AUDIO);
 
@@ -486,11 +337,38 @@ retry:
             goto out;
         }
 
+        status = SarSetDeviceInterfaceProperties(
+            endpoint, topologySymlink, &KSCATEGORY_AUDIO);
+
+        if (!NT_SUCCESS(status)) {
+            goto out;
+        }
+
+        status = SarSetDeviceInterfaceProperties(
+            endpoint, topologySymlink, &KSCATEGORY_TOPOLOGY);
+
+        if (!NT_SUCCESS(status)) {
+            goto out;
+        }
+
+        RtlCopyUnicodeString(&endpoint->filterDescriptor.physicalConnectionSymlink,
+            symlink);
+        RtlCopyUnicodeString(&endpoint->topologyDescriptor.physicalConnectionSymlink,
+            topologySymlink);
+
         status = KsFilterFactorySetDeviceClassesState(
             endpoint->filterFactory, TRUE);
 
         if (!NT_SUCCESS(status)) {
-            SAR_LOG("Couldn't enable KS filter factory");
+            SAR_ERROR("Couldn't enable KS wave filter factory");
+            goto out;
+        }
+
+        status = KsFilterFactorySetDeviceClassesState(
+            endpoint->topologyFilterFactory, TRUE);
+
+        if (!NT_SUCCESS(status)) {
+            SAR_ERROR("Couldn't enable KS topology filter factory");
             goto out;
         }
 
@@ -539,6 +417,12 @@ NTSTATUS SarCreateEndpoint(
         return STATUS_INVALID_PARAMETER;
     }
 
+    // Endpoints assume buffer parameters are not 0 (else division by 0 could occur)
+    if (!controlContext->bufferSize) {
+        SAR_ERROR("Creating endpoints require setting buffer beforehand");
+        return STATUS_INVALID_STATE_TRANSITION;
+    }
+
     if (!NT_SUCCESS(status)) {
         return status;
     }
@@ -557,126 +441,13 @@ NTSTATUS SarCreateEndpoint(
     InitializeListHead(&endpoint->activeProcessList);
     endpoint->pendingIrp = irp;
     endpoint->channelCount = request->channelCount;
+    endpoint->channelMask = KSAUDIO_SPEAKER_DIRECTOUT;
     endpoint->type = request->type;
     endpoint->index = request->index;
     endpoint->owner = controlContext;
 
-    endpoint->filterDesc = (PKSFILTER_DESCRIPTOR)
-        ExAllocatePoolWithTag(
-            NonPagedPool, sizeof(KSFILTER_DESCRIPTOR), SAR_TAG);
-
-    if (!endpoint->filterDesc) {
-        goto err_out;
-    }
-
-    endpoint->pinDesc = (PKSPIN_DESCRIPTOR_EX)
-        ExAllocatePoolWithTag(
-            NonPagedPool, sizeof(KSPIN_DESCRIPTOR_EX) * 2, SAR_TAG);
-
-    if (!endpoint->pinDesc) {
-        goto err_out;
-    }
-
-    endpoint->dataRange = (PKSDATARANGE_AUDIO)
-        ExAllocatePoolWithTag(NonPagedPool, sizeof(KSDATARANGE_AUDIO), SAR_TAG);
-
-    if (!endpoint->dataRange) {
-        goto err_out;
-    }
-
-    endpoint->analogDataRange = (PKSDATARANGE_AUDIO)
-        ExAllocatePoolWithTag(NonPagedPool, sizeof(KSDATARANGE_AUDIO), SAR_TAG);
-
-    if (!endpoint->analogDataRange) {
-        goto err_out;
-    }
-
-    endpoint->nodeDesc = (PKSNODE_DESCRIPTOR)
-        ExAllocatePoolWithTag(NonPagedPool, sizeof(KSNODE_DESCRIPTOR), SAR_TAG);
-
-    if (!endpoint->nodeDesc) {
-        goto err_out;
-    }
-
-    *endpoint->filterDesc = gFilterDescriptorTemplate;
-    endpoint->pinDesc[0] = gPinDescriptorTemplate;
-    endpoint->pinDesc[1] = gPinDescriptorTemplate;
-    endpoint->filterDesc->CategoriesCount = 3;
-    endpoint->filterDesc->Categories =
-        request->type == SAR_ENDPOINT_TYPE_RECORDING ?
-        gCategoriesTableCapture : gCategoriesTableRender;
-    endpoint->filterDesc->PinDescriptors = endpoint->pinDesc;
-    endpoint->filterDesc->PinDescriptorsCount = 2;
-    endpoint->filterDesc->PinDescriptorSize = sizeof(KSPIN_DESCRIPTOR_EX);
-    endpoint->filterDesc->NodeDescriptors = endpoint->nodeDesc;
-    endpoint->filterDesc->NodeDescriptorSize = sizeof(KSNODE_DESCRIPTOR);
-    endpoint->filterDesc->NodeDescriptorsCount = 1;
-    endpoint->filterDesc->Connections =
-        request->type == SAR_ENDPOINT_TYPE_RECORDING ?
-        gFilterConnectionsCapture : gFilterConnectionsRendering;
-
-    PKSPIN_DESCRIPTOR pinDesc = &endpoint->pinDesc[0].PinDescriptor;
-
-    endpoint->pinDesc[0].AutomationTable = &gPinAutomation;
-    pinDesc->DataRangesCount = 1;
-    pinDesc->DataRanges = (PKSDATARANGE *)&endpoint->dataRange;
-    pinDesc->Communication = KSPIN_COMMUNICATION_BOTH;
-    pinDesc->DataFlow =
-        request->type == SAR_ENDPOINT_TYPE_RECORDING ?
-        KSPIN_DATAFLOW_OUT : KSPIN_DATAFLOW_IN;
-    pinDesc->Category = &KSCATEGORY_AUDIO;
-    pinDesc->InterfacesCount = 1;
-    pinDesc->Interfaces = gPinInterfaces;
-
-    if (request->type == SAR_ENDPOINT_TYPE_PLAYBACK) {
-        endpoint->pinDesc[0].Flags |= KSPIN_FLAG_RENDERER;
-    }
-
-    pinDesc = &endpoint->pinDesc[1].PinDescriptor;
-    endpoint->pinDesc[1].IntersectHandler = nullptr;
-    endpoint->pinDesc[1].Dispatch = nullptr;
-    pinDesc->DataRangesCount = 1;
-    pinDesc->DataRanges = (PKSDATARANGE *)&endpoint->analogDataRange;
-    pinDesc->Communication = KSPIN_COMMUNICATION_NONE;
-    pinDesc->Category = &KSNODETYPE_LINE_CONNECTOR;
-    pinDesc->DataFlow =
-        request->type == SAR_ENDPOINT_TYPE_RECORDING ?
-        KSPIN_DATAFLOW_IN : KSPIN_DATAFLOW_OUT;
-
-    endpoint->nodeDesc->AutomationTable = nullptr;
-    endpoint->nodeDesc->Type =
-        request->type == SAR_ENDPOINT_TYPE_RECORDING ?
-        &KSNODETYPE_ADC : &KSNODETYPE_DAC;
-    endpoint->nodeDesc->Name = nullptr;
-
-    endpoint->dataRange->DataRange.FormatSize = sizeof(KSDATARANGE_AUDIO);
-    endpoint->dataRange->DataRange.Flags = 0;
-    endpoint->dataRange->DataRange.SampleSize = 0;
-    endpoint->dataRange->DataRange.Reserved = 0;
-    endpoint->dataRange->DataRange.MajorFormat = KSDATAFORMAT_TYPE_AUDIO;
-    endpoint->dataRange->DataRange.SubFormat = KSDATAFORMAT_SUBTYPE_PCM;
-    endpoint->dataRange->DataRange.Specifier =
-        KSDATAFORMAT_SPECIFIER_WAVEFORMATEX;
-    endpoint->dataRange->MaximumBitsPerSample = controlContext->sampleSize * 8;
-    endpoint->dataRange->MinimumBitsPerSample = controlContext->sampleSize * 8;
-    endpoint->dataRange->MaximumSampleFrequency = controlContext->sampleRate;
-    endpoint->dataRange->MinimumSampleFrequency = controlContext->sampleRate;
-    endpoint->dataRange->MaximumChannels = request->channelCount;
-
-    endpoint->analogDataRange->DataRange.FormatSize = sizeof(KSDATARANGE_AUDIO);
-    endpoint->analogDataRange->DataRange.Flags = 0;
-    endpoint->analogDataRange->DataRange.SampleSize = 0;
-    endpoint->analogDataRange->DataRange.Reserved = 0;
-    endpoint->analogDataRange->DataRange.MajorFormat = KSDATAFORMAT_TYPE_AUDIO;
-    endpoint->analogDataRange->DataRange.SubFormat =
-        KSDATAFORMAT_SUBTYPE_ANALOG;
-    endpoint->analogDataRange->DataRange.Specifier =
-        KSDATAFORMAT_SPECIFIER_NONE;
-    endpoint->analogDataRange->MaximumBitsPerSample = 0;
-    endpoint->analogDataRange->MinimumBitsPerSample = 0;
-    endpoint->analogDataRange->MaximumSampleFrequency = 0;
-    endpoint->analogDataRange->MinimumSampleFrequency = 0;
-    endpoint->analogDataRange->MaximumChannels = 0;
+    endpoint->filterDescriptor.initWaveFilter(controlContext, request);
+    endpoint->topologyDescriptor.initTopologyFilter(request);
 
     request->name[MAX_ENDPOINT_NAME_LENGTH] = '\0';
     request->id[MAX_ENDPOINT_NAME_LENGTH] = '\0';
@@ -713,7 +484,7 @@ NTSTATUS SarCreateEndpoint(
         DECLARE_UNICODE_STRING_SIZE(deviceIdBuffer, 256);
 
         RtlUnicodeStringPrintf(&deviceIdBuffer,
-            L"%ws_%d_%d_%d", request->id, request->channelCount,
+            L"%ws_%u_%u_%u", request->id, request->channelCount,
             controlContext->sampleRate, controlContext->sampleSize);
         status = SarStringDuplicate(
             &endpoint->deviceIdMangled, &deviceIdBuffer);
@@ -729,17 +500,41 @@ NTSTATUS SarCreateEndpoint(
             goto err_out;
         }
     }
+    {
+        DECLARE_UNICODE_STRING_SIZE(topologyFilterRefIdBuffer, 256);
+
+        RtlUnicodeStringPrintf(&topologyFilterRefIdBuffer,
+            L"%wZ_topology", &endpoint->deviceIdMangled);
+        status = SarStringDuplicate(
+            &endpoint->topologyFilterRefId, &topologyFilterRefIdBuffer);
+    }
+
+    if (!NT_SUCCESS(status)) {
+        goto err_out;
+    }
 
     KsAcquireDevice(ksDevice);
     status = KsCreateFilterFactory(
-        device, endpoint->filterDesc, endpoint->deviceIdMangled.Buffer,
+        device, &endpoint->filterDescriptor.filterDesc, endpoint->deviceIdMangled.Buffer,
         nullptr, KSCREATE_ITEM_FREEONSTOP,
         nullptr, nullptr, &endpoint->filterFactory);
+    status = KsCreateFilterFactory(
+        device, &endpoint->topologyDescriptor.filterDesc, endpoint->topologyFilterRefId.Buffer,
+        nullptr, KSCREATE_ITEM_FREEONSTOP,
+        nullptr, nullptr, &endpoint->topologyFilterFactory);
+
+    KsFilterFactoryUpdateCacheData(endpoint->filterFactory, NULL);
+    KsFilterFactoryUpdateCacheData(endpoint->topologyFilterFactory, NULL);
     KsReleaseDevice(ksDevice);
 
     if (!NT_SUCCESS(status)) {
         goto err_out;
     }
+
+    // Only call IoMarkIrpPending when there is no error and we WILL return STATUS_PENDING
+    // but before any chance for the IRP to be completed (in SarProcessPendingEndpoints)
+    // So before queuing the endpoint to the pendingEndpointList list
+    IoMarkIrpPending(irp);
 
     ExAcquireFastMutex(&controlContext->mutex);
 
@@ -755,6 +550,10 @@ NTSTATUS SarCreateEndpoint(
     }
 
     ExReleaseFastMutex(&controlContext->mutex);
+
+
+    SAR_DEBUG("Created endpoint %p with context %p", endpoint, controlContext);
+
     return STATUS_PENDING;
 
 err_out:
@@ -772,33 +571,24 @@ err_out:
 
 VOID SarDeleteEndpoint(SarEndpoint *endpoint)
 {
+    SAR_DEBUG("Deleting endpoint %p", endpoint);
+
+    if (endpoint->topologyFilterFactory) {
+        PKSDEVICE ksDevice = KsFilterFactoryGetDevice(endpoint->topologyFilterFactory);
+
+        KsAcquireDevice(ksDevice);
+        SAR_TRACE("Removing in device: %p factory %p", ksDevice, endpoint->topologyFilterFactory);
+        KsDeleteFilterFactory(endpoint->topologyFilterFactory);
+        KsReleaseDevice(ksDevice);
+    }
 
     if (endpoint->filterFactory) {
         PKSDEVICE ksDevice = KsFilterFactoryGetDevice(endpoint->filterFactory);
 
         KsAcquireDevice(ksDevice);
+        SAR_TRACE("Removing in device: %p factory %p", ksDevice, endpoint->filterFactory);
         KsDeleteFilterFactory(endpoint->filterFactory);
         KsReleaseDevice(ksDevice);
-    }
-
-    if (endpoint->dataRange) {
-        ExFreePoolWithTag(endpoint->dataRange, SAR_TAG);
-    }
-
-    if (endpoint->analogDataRange) {
-        ExFreePoolWithTag(endpoint->analogDataRange, SAR_TAG);
-    }
-
-    if (endpoint->nodeDesc) {
-        ExFreePoolWithTag(endpoint->nodeDesc, SAR_TAG);
-    }
-
-    if (endpoint->pinDesc) {
-        ExFreePoolWithTag(endpoint->pinDesc, SAR_TAG);
-    }
-
-    if (endpoint->filterDesc) {
-        ExFreePoolWithTag(endpoint->filterDesc, SAR_TAG);
     }
 
     if (endpoint->deviceName.Buffer) {
@@ -813,21 +603,33 @@ VOID SarDeleteEndpoint(SarEndpoint *endpoint)
         SarStringFree(&endpoint->deviceIdMangled);
     }
 
+    if (endpoint->topologyFilterRefId.Buffer) {
+        SarStringFree(&endpoint->topologyFilterRefId);
+    }
+
     ExFreePoolWithTag(endpoint, SAR_TAG);
 }
 
 VOID SarOrphanEndpoint(SarEndpoint *endpoint)
 {
+    SAR_TRACE("Orphaning endpoint %p", endpoint);
     ExAcquireFastMutex(&endpoint->mutex);
     endpoint->orphan = TRUE;
     ExReleaseFastMutex(&endpoint->mutex);
+    KsFilterFactorySetDeviceClassesState(endpoint->topologyFilterFactory, FALSE);
     KsFilterFactorySetDeviceClassesState(endpoint->filterFactory, FALSE);
-    SarReleaseEndpoint(endpoint);
+    if (SarReleaseEndpoint(endpoint) == FALSE) {
+        SAR_TRACE("Endpoint orphaned but not deleted: %p, refs: %d", endpoint, endpoint->refs);
+    }
 }
 
-NTSTATUS SarSendFormatChangeEvent(SarDriverExtension *extension)
+NTSTATUS SarSendFormatChangeEvent(PDEVICE_OBJECT deviceObject, SarDriverExtension *extension)
 {
     PVOID restartKey = nullptr;
+    PKSDEVICE ksDevice = KsGetDeviceForDeviceObject(deviceObject);
+
+    // Always acquire ksDevice before extension->mutex, else deadlocks can occurs with a concurrent SarKsFilterCreate for example
+    KsAcquireDevice(ksDevice);
 
     KeEnterCriticalRegion();
     ExAcquireFastMutexUnsafe(&extension->mutex);
@@ -848,7 +650,6 @@ NTSTATUS SarSendFormatChangeEvent(SarDriverExtension *extension)
                 CONTAINING_RECORD(entry, SarEndpoint, listEntry);
 
             entry = entry->Flink;
-            KsAcquireDevice(extension->ksDevice);
 
             for (PKSFILTER filter =
                     KsFilterFactoryGetFirstChildFilter(endpoint->filterFactory);
@@ -861,8 +662,6 @@ NTSTATUS SarSendFormatChangeEvent(SarDriverExtension *extension)
                     0, nullptr,
                     nullptr, nullptr);
             }
-
-            KsReleaseDevice(extension->ksDevice);
         }
 
         ExReleaseFastMutexUnsafe(&controlContext->mutex);
@@ -870,5 +669,8 @@ NTSTATUS SarSendFormatChangeEvent(SarDriverExtension *extension)
 
     ExReleaseFastMutexUnsafe(&extension->mutex);
     KeLeaveCriticalRegion();
+
+    KsReleaseDevice(ksDevice);
+
     return STATUS_SUCCESS;
 }

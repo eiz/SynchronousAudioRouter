@@ -24,14 +24,15 @@ namespace Sar {
 #endif
 
 std::string TCHARToUTF8(const TCHAR *ptr);
-std::string ConfigurationPath(const std::string& name);
-std::string LoggingPath();
+std::wstring ConfigurationPath(const std::wstring& name);
+std::wstring LoggingPath();
 std::wstring UTF8ToWide(const std::string& str);
+std::string TCHARToLocal(const TCHAR *ptr);
 
 struct RunningApplication
 {
-    std::string name;
-    std::string path;
+    std::wstring name;
+    std::wstring path;
 };
 
 std::vector<RunningApplication> RunningApplications();

@@ -36,6 +36,13 @@ void SarClient::tick(long bufferIndex)
     ATLASSERT(bufferIndex == 0 || bufferIndex == 1);
     bool hasUpdatedNotificationHandles = false;
 
+    // tick might be called from a different thread than the main thread.
+    // guard against concurrent tick and close which cause the _sharedBuffer
+    // to be invalidated. Accessing its stale value will cause a crash in that case.
+    std::lock_guard<std::mutex> registersLockGuard(_registersLock);
+    if (!_registers)
+        return;
+
     if (_updateSampleRateOnTick.exchange(false)) {
         DWORD dummy;
 
@@ -47,7 +54,7 @@ void SarClient::tick(long bufferIndex)
     // read isActive, generation and buffer offset/size/position
     //   if offset/size invalid, skip endpoint (fill asio buffers with 0)
     // if playback device:
-    //   consume frameSampleCount * channelCount samples, demux to asio frames
+    //   consume periodFrameSize * channelCount samples, demux to asio frames
     // if recording device:
     //   mux from asio frames
     // read isActive, generation
@@ -55,24 +62,17 @@ void SarClient::tick(long bufferIndex)
     // else increment position register
     for (size_t i = 0; i < _driverConfig.endpoints.size(); ++i) {
         auto& endpoint = _driverConfig.endpoints[i];
-        auto& asioBuffers = _bufferConfig.asioBuffers[i];
+        auto& asioBuffers = _bufferConfig.asioBuffers[bufferIndex][i];
         auto asioBufferSize = (DWORD)(
-            _bufferConfig.frameSampleCount * _bufferConfig.sampleSize);
+            _bufferConfig.periodFrameSize * _bufferConfig.sampleSize);
+        auto activeChannelCount = _registers[i].activeChannelCount;
         auto generation = _registers[i].generation;
         auto endpointBufferOffset = _registers[i].bufferOffset;
         auto endpointBufferSize = _registers[i].bufferSize;
         auto positionRegister = _registers[i].positionRegister;
-        auto ntargets = (int)(asioBuffers.size() / 2);
-        auto frameSize = asioBufferSize * ntargets;
+        auto ntargets = (int)asioBuffers.size();
+        auto frameChunkSize = asioBufferSize * activeChannelCount;
         auto notificationCount = _registers[i].notificationCount;
-        void **targetBuffers = (void **)alloca(sizeof(void *) * ntargets);
-
-        for (size_t bi = bufferIndex, ti = 0;
-             bi < asioBuffers.size();
-             bi += 2) {
-
-            targetBuffers[ti++] = asioBuffers[bi];
-        }
 
         if (!hasUpdatedNotificationHandles && notificationCount &&
             (GENERATION_NUMBER(generation) !=
@@ -82,13 +82,14 @@ void SarClient::tick(long bufferIndex)
             hasUpdatedNotificationHandles = true;
         }
 
+        // If endpoint is not active (no audio client), generate silence
         if (!GENERATION_IS_ACTIVE(generation) ||
             !endpointBufferSize ||
             positionRegister > endpointBufferSize ||
             endpointBufferOffset + endpointBufferSize > _sharedBufferSize) {
             for (int ti = 0; ti < ntargets; ++ti) {
-                if (targetBuffers[ti]) {
-                    ZeroMemory(targetBuffers[ti], asioBufferSize);
+                if (asioBuffers[ti]) {
+                    ZeroMemory(asioBuffers[ti], asioBufferSize);
                 }
             }
 
@@ -96,28 +97,25 @@ void SarClient::tick(long bufferIndex)
         }
 
         auto nextPositionRegister =
-            (positionRegister + frameSize) % endpointBufferSize;
-        auto previousPositionRegister = positionRegister > 0 ?
-            (positionRegister - frameSize) % endpointBufferSize :
-            endpointBufferSize - frameSize;
+            (positionRegister + frameChunkSize) % endpointBufferSize;
         auto position = positionRegister + endpointBufferOffset;
         void *endpointDataFirst = ((char *)_sharedBuffer) + position;
         void *endpointDataSecond =
             ((char *)_sharedBuffer) + endpointBufferOffset;
-        auto firstSize = min(frameSize, endpointBufferSize - positionRegister);
-        auto secondSize = frameSize - firstSize;
+        auto firstSize = min(frameChunkSize, endpointBufferSize - positionRegister);
+        auto secondSize = frameChunkSize - firstSize;
 
         if (endpoint.type == EndpointType::Playback) {
             demux(
                 endpointDataFirst, firstSize,
                 endpointDataSecond, secondSize,
-                targetBuffers, ntargets,
+                asioBuffers.data(), ntargets, activeChannelCount,
                 asioBufferSize, _bufferConfig.sampleSize);
         } else {
             mux(
                 endpointDataFirst, firstSize,
                 endpointDataSecond, secondSize,
-                targetBuffers, ntargets,
+                asioBuffers.data(), ntargets, activeChannelCount,
                 asioBufferSize, _bufferConfig.sampleSize);
         }
 
@@ -126,13 +124,27 @@ void SarClient::tick(long bufferIndex)
         if (!GENERATION_IS_ACTIVE(lateGeneration) ||
             (GENERATION_NUMBER(generation) !=
              GENERATION_NUMBER(lateGeneration))) {
+            // The current generation changed, the client is not the same as before and
+            // our data might be partially incomplete.
+            // Discard everything and output silence on ASIO side
 
             for (int ti = 0; ti < ntargets; ++ti) {
-                if (targetBuffers[ti]) {
-                    ZeroMemory(targetBuffers[ti], asioBufferSize);
+                if (asioBuffers[ti]) {
+                    ZeroMemory(asioBuffers[ti], asioBufferSize);
                 }
             }
         } else {
+            // Check if we need to notify client given NotificationCount from KSRTAUDIO_BUFFER_PROPERTY_WITH_NOTIFICATION
+            // If NotificationCount == 1, notify only when crossing end of ring buffer
+            // If NotificationCount == 2, notify at the mid-point and end of the ring buffer
+            // Other values are not supported.
+            // Crossing detection:
+            //  - Detecting crossing end of buffer is done when:
+            //    - The previous position was in the second part of the buffer
+            //    - The next position is in the first part of the buffer
+            //  - Detecting crossing mid-point of the buffer is done when:
+            //    - The previous position was in the first part of the buffer
+            //    - The next position is in the second part of the buffer
             if ((notificationCount >= 1 &&
                  positionRegister >= endpointBufferSize / 2 &&
                  nextPositionRegister < endpointBufferSize / 2) ||
@@ -153,13 +165,15 @@ void SarClient::tick(long bufferIndex)
                         LOG(ERROR) << "SetEvent error " << GetLastError();
                     }
                 } else {
+                    // The handle generation is old, so it is not valid anymore => reset ASIO buffers to silence
                     for (int ti = 0; ti < ntargets; ++ti) {
-                        if (targetBuffers[ti]) {
-                            ZeroMemory(targetBuffers[ti], asioBufferSize);
+                        if (asioBuffers[ti]) {
+                            ZeroMemory(asioBuffers[ti], asioBufferSize);
                         }
                     }
                 }
             } else {
+                // No notification needed, just update the position register
                 _registers[i].positionRegister = nextPositionRegister;
             }
         }
@@ -216,9 +230,15 @@ void SarClient::stop()
     }
 
     if (_device != INVALID_HANDLE_VALUE) {
+        _registersLock.lock();
         CancelIoEx(_device, nullptr);
         CloseHandle(_device);
+
         _device = INVALID_HANDLE_VALUE;
+        _registers = nullptr;
+        _sharedBuffer = nullptr;
+        _sharedBufferSize = 0;
+        _registersLock.unlock();
     }
 
     if (_completionPort) {
@@ -246,6 +266,7 @@ bool SarClient::openControlDevice()
     if (!SetupDiEnumDeviceInterfaces(devinfo, NULL,
         &GUID_DEVINTERFACE_SYNCHRONOUSAUDIOROUTER, 0, &interfaceData)) {
 
+        SetupDiDestroyDeviceInfoList(devinfo);
         return false;
     }
 
@@ -254,6 +275,7 @@ bool SarClient::openControlDevice()
         devinfo, &interfaceData, nullptr, 0, &requiredSize, nullptr);
 
     if (GetLastError() != ERROR_INSUFFICIENT_BUFFER) {
+        SetupDiDestroyDeviceInfoList(devinfo);
         return false;
     }
 
@@ -265,8 +287,11 @@ bool SarClient::openControlDevice()
         requiredSize, nullptr, nullptr)) {
 
         free(interfaceDetail);
+        SetupDiDestroyDeviceInfoList(devinfo);
         return false;
     }
+
+    SetupDiDestroyDeviceInfoList(devinfo);
 
     _device = CreateFile(interfaceDetail->DevicePath,
         GENERIC_ALL, 0, nullptr, OPEN_EXISTING,
@@ -327,8 +352,8 @@ bool SarClient::setBufferLayout()
     DWORD dummy;
 
     request.bufferSize = 1024 * 1024 * 16; // TODO: size based on endpoint config
-    request.frameSize =
-        _bufferConfig.frameSampleCount * _bufferConfig.sampleSize;
+    request.periodSizeBytes =
+        _bufferConfig.periodFrameSize * _bufferConfig.sampleSize;
     request.sampleRate = _bufferConfig.sampleRate;
     request.sampleSize = _bufferConfig.sampleSize;
 
@@ -362,13 +387,13 @@ bool SarClient::createEndpoints()
             SAR_ENDPOINT_TYPE_PLAYBACK : SAR_ENDPOINT_TYPE_RECORDING;
         request.channelCount = endpoint.channelCount;
         request.index = i++;
-        wcscpy_s(request.name, UTF8ToWide(endpoint.description).c_str());
+        wcscpy_s(request.name, endpoint.description.c_str());
         wcscpy_s(request.id, UTF8ToWide(endpoint.id).c_str());
 
         if (!DeviceIoControl(_device, SAR_CREATE_ENDPOINT,
             (LPVOID)&request, sizeof(request), nullptr, 0, &dummy, nullptr)) {
 
-            LOG(ERROR) << "Endpoint creation for " << endpoint.description
+            LOG(ERROR) << "Endpoint creation for " << TCHARToUTF8(endpoint.description.c_str())
                << " failed.";
             return false;
         }
@@ -456,13 +481,16 @@ void SarClient::processNotificationHandleUpdates(int updateCount)
 void SarClient::demux(
     void *muxBufferFirst, size_t firstSize,
     void *muxBufferSecond, size_t secondSize,
-    void **targetBuffers, int ntargets,
+    void **targetBuffers, int ntargets, int nsources,
     size_t targetSize, int sampleSize)
 {
-    size_t stride = (size_t)(sampleSize * ntargets);
+    int i;
+    size_t sourceStride = (size_t)(sampleSize * nsources);
+    if (nsources > ntargets)
+        nsources = ntargets;
 
     // TODO: gotta go fast
-    for (int i = 0; i < ntargets; ++i) {
+    for (i = 0; i < nsources; ++i) {
         auto buf = ((char *)muxBufferFirst) + sampleSize * i;
         auto remaining = firstSize;
 
@@ -471,17 +499,24 @@ void SarClient::demux(
         }
 
         for (size_t j = 0;
-             j < targetSize && remaining >= stride;
+             j < targetSize && remaining >= sourceStride;
              j += sampleSize) {
 
             memcpy((char *)(targetBuffers[i]) + j, buf, sampleSize);
-            buf += stride;
-            remaining -= stride;
+            buf += sourceStride;
+            remaining -= sourceStride;
 
             if (!remaining) {
                 buf = ((char *)muxBufferSecond) + sampleSize * i;
                 remaining = secondSize;
             }
+        }
+    }
+
+    // Silence target channels not present in source
+    for (; i < ntargets; i++) {
+        if (targetBuffers[i]) {
+            memset(targetBuffers[i], 0, targetSize);
         }
     }
 }
@@ -490,13 +525,16 @@ void SarClient::demux(
 void SarClient::mux(
     void *muxBufferFirst, size_t firstSize,
     void *muxBufferSecond, size_t secondSize,
-    void **targetBuffers, int ntargets,
+    void **targetBuffers, int ntargets, int nsources,
     size_t targetSize, int sampleSize)
 {
-    size_t stride = (size_t)(sampleSize * ntargets);
+    size_t sourceStride = (size_t)(sampleSize * nsources);
+    if (nsources > ntargets)
+        nsources = ntargets;
 
     // TODO: gotta go fast
-    for (int i = 0; i < ntargets; ++i) {
+    // Channels in target not present in source are not used
+    for (int i = 0; i < nsources; ++i) {
         auto buf = ((char *)muxBufferFirst) + sampleSize * i;
         auto remaining = firstSize;
 
@@ -505,12 +543,12 @@ void SarClient::mux(
         }
 
         for (size_t j = 0;
-             j < targetSize && remaining >= stride;
+             j < targetSize && remaining >= sourceStride;
              j += sampleSize) {
 
             memcpy(buf, (char *)(targetBuffers[i]) + j, sampleSize);
-            buf += sampleSize * ntargets;
-            remaining -= sampleSize * ntargets;
+            buf += sourceStride;
+            remaining -= sourceStride;
 
             if (!remaining) {
                 buf = ((char *)muxBufferSecond) + sampleSize * i;

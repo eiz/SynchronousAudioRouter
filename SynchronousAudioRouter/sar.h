@@ -33,6 +33,8 @@ extern "C" {
 #include <ksproxy.h>
 #define NDIS630
 #include <ndis.h>
+#include "SarWaveFilterDescriptor.h"
+#include "SarTopologyFilterDescriptor.h"
 #else
 #include <windows.h>
 #endif
@@ -91,7 +93,7 @@ typedef struct SarCreateEndpointRequest
 typedef struct SarSetBufferLayoutRequest
 {
     DWORD bufferSize;
-    DWORD frameSize;
+    DWORD periodSizeBytes;
     DWORD sampleRate;
     DWORD sampleSize;
     DWORD minimumFrameCount;
@@ -118,10 +120,11 @@ typedef struct SarEndpointRegisters
 {
     ULONG generation;
     DWORD positionRegister;
-    DWORD clockRegister;
+    DWORD reserved; //clockRegister;
     DWORD bufferOffset;
     DWORD bufferSize;
     DWORD notificationCount;
+    DWORD activeChannelCount;
 } SarEndpointRegisters;
 
 typedef struct SarNdisEnumerateResponseItem
@@ -142,10 +145,22 @@ typedef struct SarNdisEnumerateResponse
 #define SAR_TAG '1RAS'
 
 #ifdef NO_LOGGING
-#define SAR_LOG(...)
+#define SAR_INFO(fmt, ...)
+#define SAR_ERROR(fmt, ...)
+#define SAR_WARNING(fmt, ...)
+#define SAR_DEBUG(fmt, ...)
+#define SAR_TRACE(fmt, ...)
 #else
-#define SAR_LOG(fmt, ...) \
-    DbgPrintEx(DPFLTR_DEFAULT_ID, DPFLTR_INFO_LEVEL, fmt "\n", __VA_ARGS__)
+#define SAR_INFO(fmt, ...) \
+    DbgPrintEx(DPFLTR_DEFAULT_ID, DPFLTR_INFO_LEVEL, __FUNCTION__ " (SAR) " fmt "\n", __VA_ARGS__)
+#define SAR_ERROR(fmt, ...) \
+    DbgPrintEx(DPFLTR_DEFAULT_ID, DPFLTR_ERROR_LEVEL, "ERROR: " __FUNCTION__ " (SAR) " fmt "\n", __VA_ARGS__)
+#define SAR_WARNING(fmt, ...) \
+    DbgPrintEx(DPFLTR_DEFAULT_ID, DPFLTR_WARNING_LEVEL, "WARNING: " __FUNCTION__ " (SAR) " fmt "\n", __VA_ARGS__)
+#define SAR_DEBUG(fmt, ...) \
+    DbgPrintEx(DPFLTR_DEFAULT_ID, DPFLTR_TRACE_LEVEL, __FUNCTION__ " (SAR) " fmt "\n", __VA_ARGS__)
+#define SAR_TRACE(fmt, ...) \
+    DbgPrintEx(DPFLTR_DEFAULT_ID, DPFLTR_TRACE_LEVEL, __FUNCTION__ " (SAR) " fmt "\n", __VA_ARGS__)
 #endif
 
 typedef struct SarHandleQueue
@@ -191,7 +206,7 @@ typedef struct SarDriverExtension
     PKSDEVICE ksDevice;
     UNICODE_STRING sarInterfaceName;
     FAST_MUTEX mutex;
-    RTL_GENERIC_TABLE controlContextTable;
+    RTL_GENERIC_TABLE controlContextTable; // table<PFILE_OBJECT, SarControlContext*>
     // This shouldn't really be needed as long as CmUnRegisterCallback can't
     // complete while one of our callback routines is still running, but there
     // is no explicit documentation of that, so we protect the registry redirect
@@ -214,23 +229,25 @@ typedef struct SarControlContext
     BOOLEAN orphan;
     PFILE_OBJECT fileObject;
     PIO_WORKITEM workItem;
-    LIST_ENTRY endpointList;
-    LIST_ENTRY pendingEndpointList;
+    LIST_ENTRY endpointList;       // List<SarEndpoint>
+    LIST_ENTRY pendingEndpointList;  // List<SarEndpoint> Endpoints created but not configured
     HANDLE bufferSection;
+    PVOID sectionViewBaseAddress;
     SarHandleQueue handleQueue;
     RTL_BITMAP bufferMap;
+    PULONG bufferMapStorage;
     DWORD bufferSize;
-    DWORD frameSize;
+    DWORD periodSizeBytes;
     DWORD sampleRate;
     DWORD sampleSize;
     DWORD minimumFrameCount;
 } SarControlContext;
 
-#define SarBufferMapEntryCount(controlContext) \
-    ((controlContext)->bufferSize / SAR_BUFFER_CELL_SIZE)
-#define SarBufferMapSize(controlContext) (sizeof(DWORD) * ( \
-    SarBufferMapEntryCount(controlContext) / sizeof(DWORD) + \
-    (((SarBufferMapEntryCount(controlContext) % sizeof(DWORD)) != 0) ? 1 : 0)))
+#define SarBufferMapEntryCount(bufferSize) \
+    ((bufferSize) / SAR_BUFFER_CELL_SIZE)
+#define SarBufferMapSize(bufferSize) (sizeof(DWORD) * ( \
+    SarBufferMapEntryCount(bufferSize) / sizeof(DWORD) + \
+    (((SarBufferMapEntryCount(bufferSize) % sizeof(DWORD)) != 0) ? 1 : 0)))
 
 typedef struct SarEndpointProcessContext
 {
@@ -249,16 +266,17 @@ typedef struct SarEndpoint
     UNICODE_STRING deviceName;
     UNICODE_STRING deviceId;
     UNICODE_STRING deviceIdMangled;
+    UNICODE_STRING topologyFilterRefId;
     SarControlContext *owner;
     PKSFILTERFACTORY filterFactory;
-    PKSFILTER_DESCRIPTOR filterDesc;
-    PKSPIN_DESCRIPTOR_EX pinDesc;
-    PKSNODE_DESCRIPTOR nodeDesc;
-    PKSDATARANGE_AUDIO dataRange;
-    PKSDATARANGE_AUDIO analogDataRange;
+    PKSFILTERFACTORY topologyFilterFactory;
+    SarWaveFilterDescriptor filterDescriptor;
+    SarTopologyFilterDescriptor topologyDescriptor;
     DWORD type;
     DWORD index;
     DWORD channelCount;
+    ULONG channelMask;
+    DWORD activeChannelCount;
 
     FAST_MUTEX mutex;
     BOOLEAN orphan;
@@ -301,15 +319,18 @@ NTSTATUS SarCreateEndpoint(
 VOID SarOrphanEndpoint(SarEndpoint *endpoint);
 VOID SarDeleteEndpoint(SarEndpoint *endpoint);
 NTSTATUS SarSendFormatChangeEvent(
+    PDEVICE_OBJECT deviceObject,
     SarDriverExtension *extension);
 
 FORCEINLINE VOID SarRetainEndpoint(SarEndpoint *endpoint)
 {
+    SAR_TRACE("endpoint %p refs++", endpoint);
     InterlockedIncrement(&endpoint->refs);
 }
 
 FORCEINLINE BOOLEAN SarReleaseEndpoint(SarEndpoint *endpoint)
 {
+    SAR_TRACE("endpoint %p refs--", endpoint);
     if (InterlockedDecrement(&endpoint->refs) == 0) {
         SarDeleteEndpoint(endpoint);
         return TRUE;
@@ -370,6 +391,10 @@ NTSTATUS SarKsPinRtRegisterNotificationEvent(
     PIRP irp, PKSIDENTIFIER request, PVOID data);
 NTSTATUS SarKsPinRtUnregisterNotificationEvent(
     PIRP irp, PKSIDENTIFIER request, PVOID data);
+NTSTATUS SarKsNodeGetAudioChannelConfig(
+    PIRP irp, PKSIDENTIFIER request, PVOID data);
+NTSTATUS SarKsNodeSetAudioChannelConfig(
+    PIRP irp, PKSIDENTIFIER request, PVOID data);
 NTSTATUS SarGetOrCreateEndpointProcessContext(
     SarEndpoint *endpoint,
     PEPROCESS process,
@@ -377,18 +402,20 @@ NTSTATUS SarGetOrCreateEndpointProcessContext(
 NTSTATUS SarDeleteEndpointProcessContext(SarEndpointProcessContext *context);
 
 // Entry
+DRIVER_INITIALIZE DriverEntry;
 SarControlContext *SarCreateControlContext(PFILE_OBJECT fileObject);
 VOID SarDeleteControlContext(SarControlContext *controlContext);
 BOOLEAN SarOrphanControlContext(SarDriverExtension *extension, PIRP irp);
-NTSTATUS SarRegistryCallback(PVOID context, PVOID argument1, PVOID argument2);
 
 FORCEINLINE VOID SarRetainControlContext(SarControlContext *controlContext)
 {
+    SAR_TRACE("controlContext %p refs++", controlContext);
     InterlockedIncrement(&controlContext->refs);
 }
 
 FORCEINLINE BOOLEAN SarReleaseControlContext(SarControlContext *controlContext)
 {
+    SAR_TRACE("controlContext %p refs--", controlContext);
     if (InterlockedDecrement(&controlContext->refs) == 0) {
         SarDeleteControlContext(controlContext);
         return TRUE;
@@ -404,10 +431,6 @@ FORCEINLINE VOID SarReleaseEndpointAndContext(SarEndpoint *endpoint)
     SarReleaseEndpoint(endpoint);
     SarReleaseControlContext(controlContext);
 }
-
-NTSTATUS DriverEntry(
-    IN PDRIVER_OBJECT driverObject,
-    IN PUNICODE_STRING registryPath);
 
 // NDIS
 VOID SarNdisDeleteFilterModuleContext(SarNdisFilterModuleContext *context);
@@ -471,28 +494,20 @@ NTSTATUS SarTransferQueuedHandle(
     PIRP irp, HANDLE kernelTargetProcessHandle, ULONG responseIndex,
     HANDLE kernelProcessHandle, HANDLE userHandle, ULONG64 associatedData);
 void SarCancelAllHandleQueueIrps(SarHandleQueue *handleQueue);
-void SarCancelHandleQueueIrp(PDEVICE_OBJECT deviceObject, PIRP irp);
 NTSTATUS SarPostHandleQueue(
     SarHandleQueue *queue, HANDLE userHandle, ULONG64 associatedData);
 NTSTATUS SarWaitHandleQueue(SarHandleQueue *queue, PIRP irp);
 VOID SarStringFree(PUNICODE_STRING str);
 
-RTL_GENERIC_COMPARE_RESULTS NTAPI SarCompareTableEntry(
-    PRTL_GENERIC_TABLE table, PVOID lhs, PVOID rhs);
-PVOID NTAPI SarAllocateTableEntry(PRTL_GENERIC_TABLE table, CLONG byteSize);
-VOID NTAPI SarFreeTableEntry(PRTL_GENERIC_TABLE table, PVOID buffer);
 NTSTATUS SarInsertTableEntry(PRTL_GENERIC_TABLE table, PVOID key, PVOID value);
 BOOLEAN SarRemoveTableEntry(PRTL_GENERIC_TABLE table, PVOID key);
 PVOID SarGetTableEntry(PRTL_GENERIC_TABLE table, PVOID key);
 VOID SarInitializeTable(PRTL_GENERIC_TABLE table);
 
-RTL_GENERIC_COMPARE_RESULTS NTAPI SarCompareStringTableEntry(
-    PRTL_AVL_TABLE table, PVOID lhs, PVOID rhs);
 NTSTATUS SarInsertStringTableEntry(
     PRTL_AVL_TABLE table, PUNICODE_STRING key, PVOID value);
 BOOLEAN SarRemoveStringTableEntry(
     PRTL_AVL_TABLE table, PUNICODE_STRING key);
-VOID NTAPI SarFreeStringTableEntry(PRTL_AVL_TABLE table, PVOID buffer);
 PVOID SarGetStringTableEntry(PRTL_AVL_TABLE table, PCUNICODE_STRING key);
 VOID SarInitializeStringTable(PRTL_AVL_TABLE table);
 VOID SarClearStringTable(PRTL_AVL_TABLE table, VOID (*freeCb)(PVOID));

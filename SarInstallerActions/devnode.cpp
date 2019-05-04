@@ -18,6 +18,7 @@
 #include <tchar.h>
 #include <initguid.h>
 #include <devpkey.h>
+#include <newdev.h>
 
 // These values must match the INF
 #define HARDWARE_ID L"SW\\{0BCFFA5C-E754-48CF-A783-A64C0DC0BB2C}\0"
@@ -168,22 +169,15 @@ UINT __stdcall RemoveDeviceNode(MSIHANDLE hInstall)
         free(buffer);
 
         if (found) {
-            if (!SetupDiCallClassInstaller(DIF_REMOVE, deviceInfoSet, &data)) {
+            BOOL needReboot = FALSE;
+            if (!DiUninstallDevice(nullptr, deviceInfoSet, &data, 0, &needReboot)) {
                 WcaLog(LOGMSG_VERBOSE, "Remove device failed.");
             } else {
-                SP_DEVINSTALL_PARAMS installParams;
-
-                installParams.cbSize = sizeof(SP_DEVINSTALL_PARAMS);
-
-                if (SetupDiGetDeviceInstallParams(
-                    deviceInfoSet, &data, &installParams) &&
-                    (installParams.Flags & (DI_NEEDRESTART | DI_NEEDREBOOT))) {
-
+                if (needReboot) {
                     if (MsiSetMode(hInstall, MSIRUNMODE_REBOOTATEND, TRUE)) {
                         WcaLog(LOGMSG_VERBOSE, "Failed to schedule reboot.");
                     }
                 }
-
                 WcaLog(LOGMSG_VERBOSE, "Removed a device.");
             }
         }
