@@ -1,0 +1,34 @@
+version: avb{build}
+image: Visual Studio 2017
+build_script:
+- ps: |
+    if ($env:appveyor_repo_tag -eq "true") {
+      $env:GITHUB_DEPLOY_VERSION=$env:appveyor_repo_tag_name
+      Update-AppveyorBuild -Version "$env:appveyor_repo_tag_name-$env:APPVEYOR_BUILD_NUMBER"
+    } elseif ($env:APPVEYOR_PULL_REQUEST_NUMBER -ne $null) {
+      Update-AppveyorBuild -Version "pull-$env:APPVEYOR_REPO_BRANCH-$env:APPVEYOR_PULL_REQUEST_NUMBER-$env:APPVEYOR_BUILD_NUMBER"
+    } else {
+      Update-AppveyorBuild -Version "$(git describe --tags)-$env:APPVEYOR_REPO_BRANCH"
+    }
+    $env:GITHUB_DEPLOY_DESC="Commits since last tag $(git describe --tags --abbrev=0 HEAD^):`r`n - $((git log "$(git describe --tags --abbrev=0 HEAD^)..HEAD" --format="%an: %s") -join "`r`n - ")"
+    msbuild "C:\projects\synchronousaudiorouter\SynchronousAudioRouter.sln" /verbosity:minimal /logger:"C:\Program Files\AppVeyor\BuildAgent\Appveyor.MSBuildLogger.dll" /p:Platform=x86 /p:Configuration=Release
+    msbuild "C:\projects\synchronousaudiorouter\SynchronousAudioRouter.sln" /verbosity:minimal /logger:"C:\Program Files\AppVeyor\BuildAgent\Appveyor.MSBuildLogger.dll" /p:Platform=x64 /p:Configuration=Release
+    move SarInstaller\bin\x64\Release\SynchronousAudioRouter.msi SarInstaller\bin\x64\Release\SynchronousAudioRouter_x64.msi
+    move SarInstaller\bin\x86\Release\SynchronousAudioRouter.msi SarInstaller\bin\x86\Release\SynchronousAudioRouter_x86.msi
+test: off
+artifacts:
+- path: SarInstaller\bin\x64\Release\SynchronousAudioRouter_x64.msi
+  name: SynchronousAudioRouter_x64
+- path: SarInstaller\bin\x86\Release\SynchronousAudioRouter_x86.msi
+  name: SynchronousAudioRouter_x86
+deploy:
+  release: $(GITHUB_DEPLOY_VERSION)
+  description: $(GITHUB_DEPLOY_DESC)
+  provider: GitHub
+  auth_token:
+    secure: ZLpI8aoNJxwWCJ9AFsXSBz7+bSOLOR0nuHi0engVUbpKZivwtwgKR7exIpnqawgM
+  artifact: SynchronousAudioRouter_x64,SynchronousAudioRouter_x86
+  draft: true
+  prerelease: true
+  on:
+    APPVEYOR_REPO_TAG: true
