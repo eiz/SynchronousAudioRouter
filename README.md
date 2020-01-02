@@ -38,23 +38,40 @@ Discord server at [https://discord.gg/9rwFdMW](https://discord.gg/9rwFdMW).
 
 ## HOWTO
 
-Once you've installed SAR, nothing will immediately happen. To configure it,
-first start your DAW (for beta: as admin!) and open its audio configuration
-settings. Select the Synchronous Audio Router ASIO driver and open the ASIO
-configuration dialog. Under Hardware Interface, select the ASIO driver for
-your physical audio device.
+Once you've installed SAR, nothing will immediately happen.
+To configure it, either:
+* Start your DAW (for beta: as admin!) and open its audio configuration settings.
+   Select the Synchronous Audio Router ASIO driver and open the ASIO
+   configuration dialog.
+* Start `SAR Configuration` tool from Windows' start menu (0.13.99.1 or later).
+
+The SAR Configuration dialog will open.
+
+![SAR Endpoints Configuration image](https://raw.githubusercontent.com/eiz/SynchronousAudioRouter/master/SarWeb/images/sar_endpoints.png)
+
+Under Hardware Interface, select the ASIO driver for your physical audio
+device.
 
 You can add an unlimited number of Windows audio endpoints from the SAR
-configuration dialog. "Playback" endpoints will allow Windows applications
-to play sound and show up as corresponding input channels on your ASIO device,
-while "Recording" endpoints allow Windows apps to record output sound and
-correspond to ASIO output channels. Once you've added your channels, make sure
-they're enabled in your DAW -- most have a dialog or dropdown where you can
-select which channels are to be used.
+configuration dialog.
+* `Playback` endpoints allow Windows applications to play sound and show up
+   as corresponding input channels on your ASIO device.
+* `Recording` endpoints allow Windows apps to record output sound and
+   correspond to ASIO output channels.
+
+Once you've added your channels, make sure they're enabled in your DAW --
+most have a dialog or dropdown where you can select which channels are to
+be used.
+
+SAR will expose more ASIO channels than the underlaying ASIO driver, like this:
+* The first ASIO channels are the physical ones from the underlaying ASIO
+  driver.
+* Then, the remaining ASIO channels are mapped to virtual endpoints.
 
 If you receive errors initializing the SAR ASIO driver, make sure you are
-running your DAW as admin. This is a requirement of the SAR beta build and
-will be relaxed eventually.
+running your DAW as admin. This is a requirement of the SAR beta build or
+if you choose `Require Administrator privileges to access SAR` option in the
+SAR installer.
 
 Note that the endpoints created by SAR are only active while your DAW is
 running and has started ASIO. They are automatically disconnected when the
@@ -68,4 +85,10 @@ Make sure you have Windows update [KB3033929](https://technet.microsoft.com/en-u
 installed prior to installing SAR, otherwise you will receive an error about
 an unsigned driver.
 
+## Unsigned prereleased drivers note
 
+Prereleases of SAR are unsigned. That means that it is required to enable
+`testsigning` boot option to make Windows load the driver. Else the driver
+won't be loaded.
+For more information about `testsigning` option, see here:
+https://docs.microsoft.com/en-us/windows-hardware/drivers/install/the-testsigning-boot-configuration-option#enable-or-disable-use-of-test-signed-code
