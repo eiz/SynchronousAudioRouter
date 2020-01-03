@@ -1,3 +1,5 @@
+[![Build status](https://ci.appveyor.com/api/projects/status/e24tb7g9j9drkyuh/branch/master?svg=true)](https://ci.appveyor.com/project/eiz/synchronousaudiorouter/branch/master)
+
 # Synchronous Audio Router
 
 Synchronous Audio Router is a Windows audio driver which allows you to route
