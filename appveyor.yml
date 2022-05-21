@@ -22,6 +22,7 @@ artifacts:
 - path: SarInstaller\bin\x86\Release\SynchronousAudioRouter_x86.msi
   name: SynchronousAudioRouter_x86
 deploy:
+  tag: $(APPVEYOR_REPO_TAG_NAME)
   release: $(GITHUB_DEPLOY_VERSION)
   description: $(GITHUB_DEPLOY_DESC)
   provider: GitHub
