@@ -46,7 +46,6 @@ To configure it, either:
    Select the Synchronous Audio Router ASIO driver and open the ASIO
    configuration dialog.
 * Start `SAR Configuration` tool from Windows' start menu (0.13.99.1 or later).
-* Get [asioconfig](https://github.com/jprjr/asioconfig/releases) and choose `Synchronous Audio Router` (prior to 0.13.99.1).
 
 The SAR Configuration dialog will open.
 
