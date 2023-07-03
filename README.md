@@ -40,6 +40,8 @@ Discord server at [https://discord.gg/9rwFdMW](https://discord.gg/9rwFdMW).
 
 ## HOWTO
 
+See also: [the old website](https://str.rs/sar) / [manual](https://str.rs/sar/manual.html)
+
 Once you've installed SAR, nothing will immediately happen.
 To configure it, either:
 * Start your DAW (for beta: as admin!) and open its audio configuration settings.
