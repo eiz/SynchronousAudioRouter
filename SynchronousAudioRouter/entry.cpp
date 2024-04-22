@@ -53,8 +53,8 @@ SarControlContext *SarCreateControlContext(PFILE_OBJECT fileObject)
 {
     SarControlContext *controlContext;
 
-    controlContext = (SarControlContext *)ExAllocatePoolWithTag(
-        NonPagedPool, sizeof(SarControlContext), SAR_TAG);
+    controlContext = (SarControlContext *)ExAllocatePool2(
+        POOL_FLAG_NON_PAGED, sizeof(SarControlContext), SAR_TAG);
 
     if (!controlContext) {
         return nullptr;
@@ -802,7 +802,7 @@ NTSTATUS SarFilterMMDeviceQuery(
         return STATUS_SUCCESS;
     }
 
-    buffer = ExAllocatePoolWithTag(PagedPool, queryInfo->Length, SAR_TAG);
+    buffer = ExAllocatePool2(POOL_FLAG_PAGED, queryInfo->Length, SAR_TAG);
 
     if (!buffer) {
         ZwClose(wrapperKey);
@@ -855,7 +855,7 @@ NTSTATUS SarFilterMMDeviceEnum(
         return STATUS_SUCCESS;
     }
 
-    buffer = ExAllocatePoolWithTag(PagedPool, queryInfo->Length, SAR_TAG);
+    buffer = ExAllocatePool2(POOL_FLAG_PAGED, queryInfo->Length, SAR_TAG);
 
     if (!buffer) {
         ZwClose(wrapperKey);
@@ -983,8 +983,8 @@ static NTSTATUS SarAddRegistryRedirect(
     RtlUnicodeStringInit(&srcLocal, src);
     RtlUnicodeStringInit(&dstLocal, dst);
 
-    dstHeap = (PUNICODE_STRING)ExAllocatePoolWithTag(
-        NonPagedPool, sizeof(UNICODE_STRING), SAR_TAG);
+    dstHeap = (PUNICODE_STRING)ExAllocatePool2(
+        POOL_FLAG_NON_PAGED, sizeof(UNICODE_STRING), SAR_TAG);
 
     if (!dstHeap) {
         status = STATUS_INSUFFICIENT_RESOURCES;

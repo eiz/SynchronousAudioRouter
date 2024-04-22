@@ -38,25 +38,19 @@ NTSTATUS SarWaveFilterDescriptor::initWaveFilter(const SarControlContext *contro
             DEFINE_KSPROPERTY_GETTER(
                 KSPROPERTY_RTAUDIO_HWLATENCY, SarKsPinRtGetHwLatency,
                 KSPROPERTY, KSRTAUDIO_HWLATENCY),
-        #if (NTDDI_VERSION >= NTDDI_WINTHRESHOLD)
             DEFINE_KSPROPERTY_GETTER(
                 KSPROPERTY_RTAUDIO_PACKETCOUNT, SarKsPinRtGetPacketCount,
                 KSPROPERTY, ULONG),
-        #endif
             DEFINE_KSPROPERTY_GETTER(
                 KSPROPERTY_RTAUDIO_POSITIONREGISTER, SarKsPinRtGetPositionRegister,
                 KSRTAUDIO_HWREGISTER_PROPERTY, KSRTAUDIO_HWREGISTER),
-        #if (NTDDI_VERSION >= NTDDI_WINTHRESHOLD)
             DEFINE_KSPROPERTY_GETTER(
                 KSPROPERTY_RTAUDIO_PRESENTATION_POSITION,
                 SarKsPinRtGetPresentationPosition,
                 KSPROPERTY, KSAUDIO_PRESENTATION_POSITION),
-        #endif
-        #if (NTDDI_VERSION >= NTDDI_WIN7)
             DEFINE_KSPROPERTY_GETTER(
                 KSPROPERTY_RTAUDIO_QUERY_NOTIFICATION_SUPPORT,
                 SarKsPinRtQueryNotificationSupport, KSPROPERTY, BOOL),
-        #endif
             DEFINE_KSPROPERTY_ITEM(
                 KSPROPERTY_RTAUDIO_REGISTER_NOTIFICATION_EVENT,
                 SarKsPinRtRegisterNotificationEvent,
