@@ -1,9 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<?if $(var.Platform) = x64 ?>
-  <?define bitness = "(64 bit)" ?>
-<?else ?>
-  <?define bitness = "(32 bit)" ?>
-<?endif ?>
+<?define bitness = "(64 bit)" ?>
 
 <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi"
      xmlns:difx="http://schemas.microsoft.com/wix/DifxAppExtension">
@@ -26,32 +22,16 @@
     <UIRef Id="WixUI_ErrorProgressText"/>
     <UIRef Id="SarUi"/>
 
-		<Feature Id="Main" Title="Synchronous Audio Router" Level="1">
-      <?if $(var.Platform) = x64 ?>
+	<Feature Id="Main" Title="Synchronous Audio Router" Level="1">
         <ComponentRef Id="KsDriver64"/>
-      <?else ?>
-        <ComponentRef Id="KsDriver32"/>
-      <?endif ?>
-
-      <?if $(var.Platform) = x64 ?>
         <ComponentRef Id="AsioDriver64"/>
         <ComponentRef Id="AsioDriver64_32"/>
         <ComponentRef Id="SarConfigure64"/>
-      <?else ?>
-        <ComponentRef Id="AsioDriver32"/>
-        <ComponentRef Id="SarConfigure32"/>
-      <?endif ?>
+        <ComponentRef Id="ApplicationShortcut"/>
+	</Feature>
 
-      <ComponentRef Id="ApplicationShortcut"/>
-		</Feature>
-
-    <?if $(var.Platform) = x64 ?>
-      <Binary Id="SarInstallerActions"
-              SourceFile="..\x64\Release\SarInstallerActions.dll"/>
-    <?else ?>
-      <Binary Id="SarInstallerActions"
-              SourceFile="..\Release\SarInstallerActions.dll"/>
-    <?endif ?>
+    <Binary Id="SarInstallerActions"
+            SourceFile="..\x64\Release\SarInstallerActions.dll"/>
 
     <CustomAction Id="CreateDeviceNode.SetProperty"
                   Return="check"
@@ -94,7 +74,6 @@
       </Directory>
     </Directory>
 
-    <?if $(var.Platform) = x64 ?>
     <DirectoryRef Id="INSTALLDIR64">
       <Component Id="KsDriver64"
                  Guid="{48C7E358-9797-42F7-B86D-5AA1DD3E0E44}"
@@ -247,98 +226,6 @@
               KeyPath="yes"/>
       </Component>
     </DirectoryRef>
-    <?else ?>
-    <DirectoryRef Id="INSTALLDIR">
-      <Component Id="KsDriver32"
-                 Guid="{865DF004-18BD-448C-A63B-BF3B758CAE99}"
-                 Win64="no">
-        <File Id="SynchronousAudioRouter.sys"
-              Name="SynchronousAudioRouter.sys"
-              Source="..\Release\SynchronousAudioRouter.sys"
-              KeyPath="yes"/>
-        <File Id="SynchronousAudioRouter.cat"
-              Name="SynchronousAudioRouter.cat"
-              Source="..\Release\SynchronousAudioRouter\SynchronousAudioRouter.cat"
-              KeyPath="no"/>
-        <File Id="SynchronousAudioRouter.inf"
-              Name="SynchronousAudioRouter.inf"
-              Source="..\Release\SynchronousAudioRouter\SynchronousAudioRouter.inf"
-              KeyPath="no"/>
-        <difx:Driver PlugAndPlayPrompt="no"/>
-      </Component>
-
-      <Component Id="AsioDriver32"
-           Guid="{FFBEFDDB-FBC6-4CE5-9187-267DE9BB93D9}"
-           Win64="no">
-        <File Id="SarAsio.dll"
-              Name="SarAsio.dll"
-              Source="..\Release\SarAsio.dll"
-              KeyPath="yes"/>
-        <!--<File Id="SarCtl.exe" Source="..\x64\Release\SarCtl.exe" KeyPath="no"/>-->
-        <RegistryValue Root="HKCR"
-                       Key="CLSID\{0569D852-1F6A-44A7-B7B5-EFB78B66BE21}\InProcServer32"
-                       Value="[#SarAsio.dll]"
-                       Type="string"
-                       Action="write" />
-        <RegistryValue Root="HKCR"
-                       Key="CLSID\{0569D852-1F6A-44A7-B7B5-EFB78B66BE21}\InProcServer32"
-                       Name="ThreadingModel"
-                       Value="Apartment"
-                       Type="string"
-                       Action="write" />
-        <RegistryValue Root="HKCR"
-                       Key="CLSID\{9FB96668-9EDD-4574-AD77-76BD89659D5D}\InProcServer32"
-                       Value="[#SarAsio.dll]"
-                       Type="string"
-                       Action="write" />
-        <RegistryValue Root="HKCR"
-                       Key="CLSID\{9FB96668-9EDD-4574-AD77-76BD89659D5D}\InProcServer32"
-                       Name="ThreadingModel"
-                       Value="both"
-                       Type="string"
-                       Action="write" />
-        <RegistryValue Root="HKCR"
-                       Key="CLSID\{739191CC-CCBE-45D8-8D24-828D8E989E8E}\InProcServer32"
-                       Value="[#SarAsio.dll]"
-                       Type="string"
-                       Action="write" />
-        <RegistryValue Root="HKCR"
-                       Key="CLSID\{739191CC-CCBE-45D8-8D24-828D8E989E8E}\InProcServer32"
-                       Name="ThreadingModel"
-                       Value="free"
-                       Type="string"
-                       Action="write" />
-        <RegistryValue Root="HKCR"
-                       Key="CLSID\{0569D852-1F6A-44A7-B7B5-EFB78B66BE21}\ProgID"
-                       Value="SynchronousAudioRouter.1"
-                       Type="string"
-                       Action="write" />
-        <RegistryValue Root="HKCR"
-                       Key="CLSID\{0569D852-1F6A-44A7-B7B5-EFB78B66BE21}"
-                       Value="Synchronous Audio Router ASIO"
-                       Type="string"
-                       Action="write" />
-        <RegistryValue Root="HKLM" Key="SOFTWARE\ASIO\Synchronous Audio Router"
-                       Name="CLSID" Value="{0569D852-1F6A-44A7-B7B5-EFB78B66BE21}"
-                       Type="string"
-                       Action="write" />
-        <RegistryValue Root="HKLM"
-                       Key="SOFTWARE\ASIO\Synchronous Audio Router"
-                       Name="Description"
-                       Value="Synchronous Audio Router"
-                       Type="string"
-                       Action="write" />
-      </Component>
-      <Component Id="SarConfigure32"
-                 Guid="{768F46C3-E17B-41C0-88BA-BCA4C6526A78}"
-                 Win64="no">
-        <File Id="SarConfigure.exe"
-              Name="SarConfigure.exe"
-              Source="..\Release\SarConfigure.exe"
-              KeyPath="yes"/>
-      </Component>
-    </DirectoryRef>
-    <?endif ?>
     
     <DirectoryRef Id="ApplicationProgramsFolder">
       <Component Id="ApplicationShortcut" Guid="{BB519534-E09F-4424-BE20-48116DF6B8E8}">
