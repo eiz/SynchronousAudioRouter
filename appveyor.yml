@@ -5,7 +5,7 @@ build_script:
       $blockRdp = true; iex ((new-object net.webclient).DownloadString('https://raw.githubusercontent.com/appveyor/ci/master/scripts/enable-rdp.ps1'))
       Install-PackageProvider -Name NuGet -Force | Out-Null
       Install-Module -Name Microsoft.WinGet.Client -Force -Repository PSGallery | Out-Null
-      Repair-WinGetPackageManager
+      Repair-WinGetPackageManager -Force -AllUsers
       winget install --source winget --exact --id Microsoft.WindowsWDK.10.0.22621 --log $env:USERPROFILE/Desktop/wdk-install.log
       Start-Sleep -Seconds 3600
       if ($env:appveyor_repo_tag -eq "true") {
