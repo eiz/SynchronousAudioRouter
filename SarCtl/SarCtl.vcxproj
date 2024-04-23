@@ -22,7 +22,7 @@
     <ProjectGuid>{69A577D3-A856-45E6-88D5-9DDE7342A50E}</ProjectGuid>
     <Keyword>Win32Proj</Keyword>
     <RootNamespace>SarCtl</RootNamespace>
-    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+    <WindowsTargetPlatformVersion>10.0.22621.0</WindowsTargetPlatformVersion>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
