@@ -16,10 +16,10 @@ jobs:
     runs-on: windows-latest
 
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: Setup MSBuild
-        uses: microsoft/setup-msbuild@v1.1.3
+        uses: microsoft/setup-msbuild@v2
         with:
           vs-version: "[17.0,18.0)"
           msbuild-architecture: x64
@@ -29,3 +29,8 @@ jobs:
       - name: Build 64
         working-directory: ${{env.GITHUB_WORKSPACE}}
         run: msbuild SynchronousAudioRouter.sln /t:Build /p:Configuration=Release /p:Platform=x64 /m /verbosity:minimal
+      - name: Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SynchronousAudioRouter
+          path: SarInstaller/bin/x64/Release/SynchronousAudioRouter.msi
