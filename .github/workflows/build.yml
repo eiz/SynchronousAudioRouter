@@ -23,7 +23,9 @@ jobs:
         with:
           vs-version: "[17.0,18.0)"
           msbuild-architecture: x64
-
-      - name: Build C++ Project
+      - name: Build 32
+        working-directory: ${{env.GITHUB_WORKSPACE}}
+        run: msbuild SynchronousAudioRouter.sln /t:Build /p:Configuration=Release /p:Platform=x86 /m /verbosity:minimal
+      - name: Build 64
         working-directory: ${{env.GITHUB_WORKSPACE}}
         run: msbuild SynchronousAudioRouter.sln /t:Build /p:Configuration=Release /p:Platform=x64 /m /verbosity:minimal
