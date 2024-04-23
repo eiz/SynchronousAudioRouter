@@ -2,6 +2,8 @@ version: avb{build}
 image: Visual Studio 2022
 build_script:
   - ps: |
+      $WdkVsixPath = Resolve-Path "C:\Program Files (x86)\Windows Kits\10\Vsix\VS2022\*\WDK.vsix"
+      Install-VsixExtension -FilePath $WdkVsixPath -Name "WDK.vsix" -VSversion "2022" -InstallOnly
       if ($env:appveyor_repo_tag -eq "true") {
         $env:GITHUB_DEPLOY_VERSION=$env:appveyor_repo_tag_name
         Update-AppveyorBuild -Version "$env:appveyor_repo_tag_name-$env:APPVEYOR_BUILD_NUMBER"
