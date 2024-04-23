@@ -155,9 +155,6 @@
     <ClCompile Include="mmwrapper.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="network.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="initguid.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
