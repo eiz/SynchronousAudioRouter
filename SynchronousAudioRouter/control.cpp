@@ -61,8 +61,8 @@ NTSTATUS SarSetBufferLayout(
 
     DWORD bufferMapSize = SarBufferMapSize(bufferSize);
 
-    bufferMap = (PULONG)ExAllocatePoolWithTag(
-        NonPagedPool, bufferMapSize, SAR_TAG);
+    bufferMap = (PULONG)ExAllocatePool2(
+        POOL_FLAG_NON_PAGED, bufferMapSize, SAR_TAG);
 
     if (!bufferMap) {
         status = STATUS_INSUFFICIENT_RESOURCES;
@@ -429,7 +429,7 @@ NTSTATUS SarCreateEndpoint(
 
     status = STATUS_INSUFFICIENT_RESOURCES;
     endpoint = (SarEndpoint *)
-        ExAllocatePoolWithTag(NonPagedPool, sizeof(SarEndpoint), SAR_TAG);
+        ExAllocatePool2(POOL_FLAG_NON_PAGED, sizeof(SarEndpoint), SAR_TAG);
 
     if (!endpoint) {
         return STATUS_INSUFFICIENT_RESOURCES;

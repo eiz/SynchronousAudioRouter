@@ -209,15 +209,14 @@ NTSTATUS SarGetOrCreateEndpointProcessContext(
         return STATUS_SUCCESS;
     }
 
-    newContext = (SarEndpointProcessContext *)ExAllocatePoolWithTag(
-        NonPagedPool, sizeof(SarEndpointProcessContext), SAR_TAG);
+    newContext = (SarEndpointProcessContext *)ExAllocatePool2(
+        POOL_FLAG_NON_PAGED, sizeof(SarEndpointProcessContext), SAR_TAG);
 
     if (!newContext) {
         SAR_ERROR("Can't allocate new process context");
         return STATUS_INSUFFICIENT_RESOURCES;
     }
 
-    RtlZeroMemory(newContext, sizeof(SarEndpointProcessContext));
     newContext->process = process;
     status = ObOpenObjectByPointerWithTag(
         newContext->process, OBJ_KERNEL_HANDLE,

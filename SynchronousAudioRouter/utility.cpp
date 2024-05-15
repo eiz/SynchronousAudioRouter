@@ -108,8 +108,8 @@ SarEndpoint *SarGetEndpointFromIrp(PIRP irp, BOOLEAN retain)
 
 NTSTATUS SarStringDuplicate(PUNICODE_STRING str, PCUNICODE_STRING src)
 {
-    PWCH buffer = (PWCH)ExAllocatePoolWithTag(
-        NonPagedPool, src->MaximumLength, SAR_TAG);
+    PWCH buffer = (PWCH)ExAllocatePool2(
+        POOL_FLAG_NON_PAGED, src->MaximumLength, SAR_TAG);
 
     if (!buffer) {
         return STATUS_INSUFFICIENT_RESOURCES;
@@ -381,8 +381,8 @@ NTSTATUS SarPostHandleQueue(
     }
 
     if (!queuedIrp) {
-        SarHandleQueueItem *item = (SarHandleQueueItem *)ExAllocatePoolWithTag(
-            NonPagedPool, sizeof(SarHandleQueueItem), SAR_TAG);
+        SarHandleQueueItem *item = (SarHandleQueueItem *)ExAllocatePool2(
+            POOL_FLAG_NON_PAGED, sizeof(SarHandleQueueItem), SAR_TAG);
 
         if (!item) {
             KeReleaseSpinLock(&queue->lock, irql);
@@ -457,8 +457,8 @@ NTSTATUS SarWaitHandleQueue(SarHandleQueue *queue, PIRP irp)
 
     if (IsListEmpty(&toComplete)) {
         SarHandleQueueIrp *queuedIrp = (SarHandleQueueIrp *)
-            ExAllocatePoolWithTag(
-                NonPagedPool, sizeof(SarHandleQueueIrp), SAR_TAG);
+            ExAllocatePool2(
+                POOL_FLAG_NON_PAGED, sizeof(SarHandleQueueIrp), SAR_TAG);
 
         if (!queuedIrp) {
             KeReleaseSpinLock(&queue->lock, irql);
@@ -517,7 +517,7 @@ RTL_GENERIC_COMPARE_RESULTS NTAPI SarCompareTableEntry(
 PVOID NTAPI SarAllocateTableEntry(PRTL_GENERIC_TABLE table, CLONG byteSize)
 {
     UNREFERENCED_PARAMETER(table);
-    return ExAllocatePoolWithTag(NonPagedPool, byteSize, SAR_TAG);
+    return ExAllocatePool2(POOL_FLAG_NON_PAGED, byteSize, SAR_TAG);
 }
 
 VOID NTAPI SarFreeTableEntry(PRTL_GENERIC_TABLE table, PVOID buffer)
@@ -631,7 +631,7 @@ BOOLEAN SarRemoveStringTableEntry(
 PVOID NTAPI SarAllocateStringTableEntry(PRTL_AVL_TABLE table, CLONG byteSize)
 {
     UNREFERENCED_PARAMETER(table);
-    return ExAllocatePoolWithTag(NonPagedPool, byteSize, SAR_TAG);
+    return ExAllocatePool2(POOL_FLAG_NON_PAGED, byteSize, SAR_TAG);
 }
 
 VOID NTAPI SarFreeStringTableEntry(PRTL_AVL_TABLE table, PVOID buffer)

@@ -14,7 +14,7 @@ struct SarWaveFilterDescriptor
 
 
     KSPIN_DISPATCH pinDispatch;
-    KSPROPERTY_ITEM pinRtAudioProperties[8];
+    KSPROPERTY_ITEM pinRtAudioProperties[10];
     KSPROPERTY_SET pinPropertySets[1];
     KSEVENT_ITEM pinEvents[1];
     KSEVENT_SET pinEventSets[1];
