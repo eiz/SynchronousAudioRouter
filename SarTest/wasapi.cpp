@@ -316,6 +316,32 @@ private:
         }
     }
 
+    // Times a WASAPI call; one that takes over a second is logged and
+    // recorded with the time it returned, so a stall is named, not guessed.
+    template <class Call>
+    HRESULT timed(const char *name, Call call)
+    {
+        double start = nowMs();
+        HRESULT hr = call();
+        double elapsed = nowMs() - start;
+
+        if (elapsed > _stats.slowestCallMs) {
+            _stats.slowestCallMs = elapsed;
+            _stats.slowestCall = name;
+        }
+
+        if (elapsed > 1000.0) {
+            char buf[160];
+
+            sprintf_s(buf, "slow %s: %.0f ms, returned at %.3f s", name, elapsed,
+                (nowMs() - g_runOriginMs) / 1000.0);
+            recordGap(buf);
+            logf("%s: %s", _stats.name.c_str(), buf);
+        }
+
+        return hr;
+    }
+
     // Re-resolves the endpoint by ID so a retry does not reuse a device
     // object that belonged to the invalidated instance.
     void refreshDevice()
@@ -364,8 +390,9 @@ private:
     // Shared-mode, event-driven client on the mix format.
     bool initialize(ComPtr<IAudioClient> *client, UINT32 *bufferFrames, HANDLE *event)
     {
-        HRESULT hr = _device->Activate(
-            __uuidof(IAudioClient), CLSCTX_ALL, nullptr, client->putVoid());
+        HRESULT hr = timed("Activate", [&] {
+            return _device->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr, client->putVoid());
+        });
 
         if (FAILED(hr)) {
             return fail("Activate", hr);
@@ -373,7 +400,7 @@ private:
 
         WAVEFORMATEX *mix = nullptr;
 
-        hr = (*client)->GetMixFormat(&mix);
+        hr = timed("GetMixFormat", [&] { return (*client)->GetMixFormat(&mix); });
 
         if (FAILED(hr) || !mix) {
             return fail("GetMixFormat", hr);
@@ -395,29 +422,31 @@ private:
                 _stats.name.c_str(), (unsigned)mix->nChannels, _channelIds.size());
         }
 
-        hr = (*client)->Initialize(
-            AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_EVENTCALLBACK,
-            0, 0, mix, nullptr);
+        hr = timed("Initialize", [&] {
+            return (*client)->Initialize(
+                AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_EVENTCALLBACK,
+                0, 0, mix, nullptr);
+        });
         CoTaskMemFree(mix);
 
         if (FAILED(hr)) {
             return fail("Initialize", hr);
         }
 
-        hr = (*client)->GetBufferSize(bufferFrames);
+        hr = timed("GetBufferSize", [&] { return (*client)->GetBufferSize(bufferFrames); });
 
         if (FAILED(hr)) {
             return fail("GetBufferSize", hr);
         }
 
         *event = CreateEventW(nullptr, FALSE, FALSE, nullptr);
-        hr = (*client)->SetEventHandle(*event);
+        hr = timed("SetEventHandle", [&] { return (*client)->SetEventHandle(*event); });
 
         if (FAILED(hr)) {
             return fail("SetEventHandle", hr);
         }
 
-        setUnityVolume(_device, client->get());
+        timed("SetVolume", [&] { setUnityVolume(_device, client->get()); return S_OK; });
         return true;
     }
 
@@ -681,7 +710,9 @@ private:
         }
 
         ComPtr<IAudioRenderClient> render;
-        HRESULT hr = client->GetService(__uuidof(IAudioRenderClient), render.putVoid());
+        HRESULT hr = timed("GetService", [&] {
+            return client->GetService(__uuidof(IAudioRenderClient), render.putVoid());
+        });
 
         if (FAILED(hr)) {
             fail("GetService(IAudioRenderClient)", hr);
@@ -696,7 +727,7 @@ private:
             render->ReleaseBuffer(bufferFrames, 0);
         }
 
-        hr = client->Start();
+        hr = timed("Start", [&] { return client->Start(); });
 
         if (FAILED(hr)) {
             fail("Start", hr);
@@ -765,7 +796,7 @@ private:
             _stats.framesProcessed += available;
         }
 
-        client->Stop();
+        timed("Stop", [&] { return client->Stop(); });
         CloseHandle(event);
     }
 
@@ -784,7 +815,9 @@ private:
         }
 
         ComPtr<IAudioCaptureClient> capture;
-        HRESULT hr = client->GetService(__uuidof(IAudioCaptureClient), capture.putVoid());
+        HRESULT hr = timed("GetService", [&] {
+            return client->GetService(__uuidof(IAudioCaptureClient), capture.putVoid());
+        });
 
         if (FAILED(hr)) {
             fail("GetService(IAudioCaptureClient)", hr);
@@ -792,7 +825,7 @@ private:
             return;
         }
 
-        hr = client->Start();
+        hr = timed("Start", [&] { return client->Start(); });
 
         if (FAILED(hr)) {
             fail("Start", hr);
@@ -889,7 +922,7 @@ private:
             }
         }
 
-        client->Stop();
+        timed("Stop", [&] { return client->Stop(); });
         CloseHandle(event);
     }
 
@@ -1063,6 +1096,8 @@ std::string StreamStats::toJson() const
         .setInt("setupErrors", setupErrors)
         .setInt("rampRuns", rampRuns)
         .setInt("corruptRuns", corruptRuns)
+        .setDouble("slowestCallMs", slowestCallMs)
+        .setString("slowestCall", slowestCall)
         .setInt("timeouts", timeouts)
         .setBool("passed", passed)
         .setString("failure", failure);
@@ -1207,14 +1242,17 @@ WasapiResult runWasapi(const WasapiOptions& options, const FoundEndpoints& endpo
 
         if (stats.isCapture) {
             logf("%s: %lld frames, %lld valid, %lld silent (%lld at start, %lld dropout), "
-                "%lld ramp, %lld discontinuities, %lld corrupt, %d reopens, %d setup errors: %s",
+                "%lld ramp, %lld discontinuities, %lld corrupt, %d reopens, %d setup errors, "
+                "slowest call %s %.0f ms: %s",
                 stats.name.c_str(), stats.framesProcessed, stats.validFrames,
                 stats.silentFrames, stats.startupSilentFrames, stats.midStreamSilentFrames,
                 stats.transitionFrames, stats.discontinuities, stats.wrongChannelFrames,
-                stats.reopens, stats.setupErrors, stats.passed ? "PASS" : stats.failure.c_str());
+                stats.reopens, stats.setupErrors, stats.slowestCall.c_str(), stats.slowestCallMs,
+                stats.passed ? "PASS" : stats.failure.c_str());
         } else {
-            logf("%s: %lld frames rendered, %d reopens: %s", stats.name.c_str(),
-                stats.framesProcessed, stats.reopens,
+            logf("%s: %lld frames rendered, %d reopens, slowest call %s %.0f ms: %s",
+                stats.name.c_str(), stats.framesProcessed, stats.reopens,
+                stats.slowestCall.c_str(), stats.slowestCallMs,
                 stats.passed ? "PASS" : stats.failure.c_str());
         }
 

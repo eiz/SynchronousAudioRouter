@@ -61,7 +61,9 @@ results so they stay visible.
 
 Capture streams also record dropouts (silence after the signal locked in)
 and sequence jumps, timed from the start of the run, so gaps can be lined up
-across endpoints to tell a global stall from a per-endpoint one.
+across endpoints to tell a global stall from a per-endpoint one. Every stream
+also times its WASAPI calls and records any that take longer than a second
+with the time it returned, so a stall in the audio stack is named.
 
 `SarTest.exe run` does both in one process and repeats for `--iterations`,
 which is the "start the DAW, stop the DAW" cycle that creates and tears down
