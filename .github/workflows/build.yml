@@ -149,11 +149,11 @@ jobs:
         with:
           vs-version: "[17.0,18.0)"
 
-      - name: Build SarAsio
+      - name: Build user-mode projects
         shell: pwsh
         run: |
           & msbuild SynchronousAudioRouter.sln `
-              '/t:SarAsio;SarConfigure;SarCtl' `
+              '/t:SarAsio;SarConfigure;SarCtl;SarTest;SarTestClock' `
               /p:Configuration=Release `
               /p:Platform=${{ matrix.platform }} `
               /m /verbosity:minimal /nologo
@@ -165,11 +165,15 @@ jobs:
           $plat = "${{ matrix.platform }}"
           $stage = "artifacts/$plat"
           New-Item -ItemType Directory -Force -Path $stage | Out-Null
-          $dll = Get-ChildItem -Recurse -Filter 'SarAsio.dll' |
-                 Where-Object { $_.FullName -match "\\Release\\" } |
-                 Sort-Object LastWriteTime -Descending | Select-Object -First 1
-          if (-not $dll) { throw "SarAsio.dll not found - did the build succeed?" }
-          Copy-Item $dll.FullName $stage -Force
+          foreach ($name in 'SarAsio.dll', 'SarConfigure.exe', 'SarTest.exe', 'SarTestClock.dll') {
+            $file = Get-ChildItem -Recurse -Filter $name |
+                    Where-Object { $_.FullName -match "\\Release\\" } |
+                    Sort-Object LastWriteTime -Descending | Select-Object -First 1
+            if (-not $file) { throw "$name not found - did the build succeed?" }
+            Copy-Item $file.FullName $stage -Force
+          }
+          New-Item -ItemType Directory -Force -Path "$stage/test" | Out-Null
+          Copy-Item tools/test/* "$stage/test" -Force
           # Materialize the hash lines into a variable BEFORE opening the output
           # file, and skip the sums file itself - otherwise the same pipeline both
           # reads and writes SHA256SUMS.txt and Get-FileHash hits a file lock.
