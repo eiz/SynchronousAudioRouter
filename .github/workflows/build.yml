@@ -130,6 +130,11 @@ jobs:
           foreach ($ext in 'sys', 'inf', 'cat') {
             Copy-Item "$stage/SynchronousAudioRouter.$ext" $signed -Force
           }
+          # Driver symbols, for reading crash dumps from test machines.
+          $pdb = Get-ChildItem -Recurse -Filter 'SynchronousAudioRouter.pdb' |
+                 Where-Object { $_.FullName -match "\\$plat\\Release\\" } |
+                 Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          if ($pdb) { Copy-Item $pdb.FullName $signed -Force } else { Write-Warning 'SynchronousAudioRouter.pdb not found' }
           $cert = New-SelfSignedCertificate -Type CodeSigningCert -Subject 'CN=SAR CI test signing' `
             -CertStoreLocation Cert:\CurrentUser\My -HashAlgorithm SHA256 -NotAfter (Get-Date).AddYears(2)
           Export-Certificate -Cert $cert -FilePath "$signed/testsign.cer" | Out-Null
@@ -212,6 +217,13 @@ jobs:
                     Sort-Object LastWriteTime -Descending | Select-Object -First 1
             if (-not $file) { throw "$name not found - did the build succeed?" }
             Copy-Item $file.FullName $stage -Force
+          }
+          # Symbols, for reading crash dumps from test machines.
+          foreach ($name in 'SarAsio.pdb', 'SarTest.pdb', 'SarTestClock.pdb') {
+            $file = Get-ChildItem -Recurse -Filter $name |
+                    Where-Object { $_.FullName -match "\\Release\\" } |
+                    Sort-Object LastWriteTime -Descending | Select-Object -First 1
+            if ($file) { Copy-Item $file.FullName $stage -Force } else { Write-Warning "$name not found" }
           }
           New-Item -ItemType Directory -Force -Path "$stage/test" | Out-Null
           Copy-Item tools/test/* "$stage/test" -Force

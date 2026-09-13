@@ -128,6 +128,9 @@ scripts assume they may overwrite the SAR configuration.
    detection, so a lock-order bug bugchecks with the exact cycle instead of
    hanging: `verifier /flags 0x20 /driver SynchronousAudioRouter.sys`.
 5. Enable kernel memory dumps so a bugcheck leaves `MEMORY.DMP` behind.
+   The test packages carry the PDBs (`SynchronousAudioRouter.pdb` in the
+   test-signed driver package, the user-mode ones next to their binaries)
+   needed to read it.
 6. Take a checkpoint. Restore it before every run.
 
 Then, elevated:
