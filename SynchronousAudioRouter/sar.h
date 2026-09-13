@@ -227,6 +227,7 @@ typedef struct SarControlContext
 
     FAST_MUTEX mutex;
     BOOLEAN orphan;
+    BOOLEAN workItemRunning;
     PFILE_OBJECT fileObject;
     PIO_WORKITEM workItem;
     LIST_ENTRY endpointList;       // List<SarEndpoint>

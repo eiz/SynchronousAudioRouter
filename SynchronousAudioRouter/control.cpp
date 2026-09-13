@@ -391,6 +391,7 @@ out:
         goto retry;
     }
 
+    controlContext->workItemRunning = FALSE;
     ExReleaseFastMutex(&controlContext->mutex);
     SarReleaseControlContext(controlContext);
 }
@@ -413,7 +414,8 @@ NTSTATUS SarCreateEndpoint(
     }
 
     if (request->index >= SAR_MAX_ENDPOINT_COUNT ||
-        request->channelCount > SAR_MAX_CHANNEL_COUNT) {
+        request->channelCount > SAR_MAX_CHANNEL_COUNT ||
+        request->channelCount == 0) {
         return STATUS_INVALID_PARAMETER;
     }
 
@@ -518,13 +520,27 @@ NTSTATUS SarCreateEndpoint(
         device, &endpoint->filterDescriptor.filterDesc, endpoint->deviceIdMangled.Buffer,
         nullptr, KSCREATE_ITEM_FREEONSTOP,
         nullptr, nullptr, &endpoint->filterFactory);
-    status = KsCreateFilterFactory(
-        device, &endpoint->topologyDescriptor.filterDesc, endpoint->topologyFilterRefId.Buffer,
-        nullptr, KSCREATE_ITEM_FREEONSTOP,
-        nullptr, nullptr, &endpoint->topologyFilterFactory);
 
-    KsFilterFactoryUpdateCacheData(endpoint->filterFactory, NULL);
-    KsFilterFactoryUpdateCacheData(endpoint->topologyFilterFactory, NULL);
+    if (!NT_SUCCESS(status)) {
+        SAR_ERROR("Couldn't create wave filter factory: %08X", status);
+        endpoint->filterFactory = nullptr;
+    } else {
+        status = KsCreateFilterFactory(
+            device, &endpoint->topologyDescriptor.filterDesc, endpoint->topologyFilterRefId.Buffer,
+            nullptr, KSCREATE_ITEM_FREEONSTOP,
+            nullptr, nullptr, &endpoint->topologyFilterFactory);
+
+        if (!NT_SUCCESS(status)) {
+            SAR_ERROR("Couldn't create topology filter factory: %08X", status);
+            endpoint->topologyFilterFactory = nullptr;
+        }
+    }
+
+    if (NT_SUCCESS(status)) {
+        KsFilterFactoryUpdateCacheData(endpoint->filterFactory, NULL);
+        KsFilterFactoryUpdateCacheData(endpoint->topologyFilterFactory, NULL);
+    }
+
     KsReleaseDevice(ksDevice);
 
     if (!NT_SUCCESS(status)) {
@@ -538,11 +554,16 @@ NTSTATUS SarCreateEndpoint(
 
     ExAcquireFastMutex(&controlContext->mutex);
 
-    BOOLEAN runWorkItem = IsListEmpty(&controlContext->pendingEndpointList);
+    // Track the work item explicitly instead of inferring it from the list
+    // being empty: the work item pops entries one at a time with the mutex
+    // dropped, so an empty list doesn't mean the work item has finished (or
+    // even started) running.
+    BOOLEAN runWorkItem = !controlContext->workItemRunning;
 
     InsertTailList(&controlContext->pendingEndpointList, &endpoint->listEntry);
 
     if (runWorkItem) {
+        controlContext->workItemRunning = TRUE;
         SarRetainControlContext(controlContext);
         IoQueueWorkItem(
             controlContext->workItem,

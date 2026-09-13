@@ -309,7 +309,8 @@ AsioStatus SarAsioWrapper::getChannelInfo(AsioChannelInfo *info)
         info->group = 0;
         info->sampleType = (long)_sampleType;
         info->isActive = AsioBool::False; // TODO: when is this true?
-        strcpy_s(info->name, channels[index].name.c_str());
+        strncpy_s(info->name, sizeof(info->name),
+            channels[index].name.c_str(), _TRUNCATE);
         return AsioStatus::OK;
     }
 
@@ -469,6 +470,17 @@ AsioStatus SarAsioWrapper::createBuffers(
             infos[i].asioBuffers[0] = calloc(bufferFrameSize, getSampleSize(_sampleType));
         channel.asioBuffers[1] =
             infos[i].asioBuffers[1] = calloc(bufferFrameSize, getSampleSize(_sampleType));
+
+        if (!channel.asioBuffers[0] || !channel.asioBuffers[1]) {
+            LOG(ERROR) << "Couldn't allocate virtual channel buffers.";
+            free(channel.asioBuffers[0]);
+            free(channel.asioBuffers[1]);
+            channel.asioBuffers[0] = infos[i].asioBuffers[0] = nullptr;
+            channel.asioBuffers[1] = infos[i].asioBuffers[1] = nullptr;
+            disposeBuffers();
+            return AsioStatus::NoMemory;
+        }
+
         _bufferConfig
             .asioBuffers[0][channel.endpointIndex][channel.channelIndex] =
                 channel.asioBuffers[0];
@@ -574,6 +586,10 @@ bool SarAsioWrapper::initInnerDriver()
             }
 
             if (_innerDriver->init(_hwnd) != AsioBool::True) {
+                // Drop the driver so the wrapper falls back to running
+                // without an inner driver instead of calling into one
+                // that never initialized.
+                _innerDriver = nullptr;
                 return false;
             }
 
