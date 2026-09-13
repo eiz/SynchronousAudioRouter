@@ -82,6 +82,8 @@ function Invoke-Scenario {
 
     $proc = Start-Process -FilePath $sarTest -ArgumentList $argList -NoNewWindow -PassThru `
         -RedirectStandardOutput $log
+    # Without touching Handle first, ExitCode reads as null after WaitForExit.
+    $null = $proc.Handle
     $exited = $proc.WaitForExit($Timeout * 1000)
     $record = [ordered]@{ name = $Name; arguments = ($argList -join ' '); log = $log; results = $json }
 
@@ -154,6 +156,7 @@ if (-not $SkipKillTest) {
     Write-Host "==> kill-host : starting a host with $count endpoint pairs"
     $hostProc = Start-Process -FilePath $sarTest -NoNewWindow -PassThru -RedirectStandardOutput $hostLog `
         -ArgumentList (@('host', '--endpoints', $count, '--duration', 120, '--results', "`"$hostJson`"") + $common)
+    $null = $hostProc.Handle
     Start-Sleep -Seconds 5
 
     $wasapiLog = Join-Path $ResultsDir 'kill-host-wasapi.log'
@@ -161,6 +164,7 @@ if (-not $SkipKillTest) {
     $wasapiProc = Start-Process -FilePath $sarTest -NoNewWindow -PassThru -RedirectStandardOutput $wasapiLog `
         -ArgumentList @('wasapi', '--endpoints', $count, '--channels', $Channels, '--duration', 15,
             '--expect-invalidation', '--results', "`"$wasapiJson`"")
+    $null = $wasapiProc.Handle
     Start-Sleep -Seconds 5
 
     Write-Host "==> kill-host : killing the host mid-stream"
