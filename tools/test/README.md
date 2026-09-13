@@ -94,10 +94,11 @@ scripts assume they may overwrite the SAR configuration.
 1. Windows 10 or 11 x64. On Server, `Invoke-SarTest.ps1` enables the audio
    services itself.
 2. Enable test signing and reboot: `bcdedit /set testsigning on`.
-3. Test-sign the CI package's `.sys` and `.cat` with a self-signed
-   certificate, and pass that certificate's `.cer` as `-CertPath` so the
-   script installs it into the Root and TrustedPublisher stores. Without it
-   the non-interactive driver install is refused.
+3. Use the `sar-driver-x64-testsigned` CI artifact. It is signed with a
+   throwaway certificate generated for that build and ships it as
+   `testsign.cer`; pass that file as `-CertPath` so the script installs it
+   into the Root and TrustedPublisher stores. Without it the non-interactive
+   driver install is refused.
 4. Optionally enable Driver Verifier for the driver, including deadlock
    detection, so a lock-order bug bugchecks with the exact cycle instead of
    hanging: `verifier /flags 0x20 /driver SynchronousAudioRouter.sys`.
