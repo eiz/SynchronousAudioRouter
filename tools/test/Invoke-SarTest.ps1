@@ -38,6 +38,15 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+# Any terminating error ends up in the log with its location, and the
+# script exits non-zero instead of letting the exception escape the caller's
+# output redirection.
+trap {
+    Write-Host "FATAL: $_"
+    Write-Host $_.ScriptStackTrace
+    exit 1
+}
+
 $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
 $principal = New-Object Security.Principal.WindowsPrincipal $identity
 if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
@@ -108,8 +117,10 @@ foreach ($service in 'AudioEndpointBuilder', 'Audiosrv') {
 if (-not $SkipInstall) {
     if ($CertPath) {
         Write-Host "==> Trusting $CertPath"
-        Import-Certificate -FilePath $CertPath -CertStoreLocation Cert:\LocalMachine\Root | Out-Null
-        Import-Certificate -FilePath $CertPath -CertStoreLocation Cert:\LocalMachine\TrustedPublisher | Out-Null
+        foreach ($store in 'Root', 'TrustedPublisher') {
+            $out = & certutil.exe -addstore -f $store $CertPath 2>&1
+            if ($LASTEXITCODE -ne 0) { throw "certutil -addstore $store failed: $($out -join ' ')" }
+        }
     }
 
     $install = Invoke-Scenario 'install' @('install', '--inf', "`"$inf`"", '--clock', "`"$clock`"",
