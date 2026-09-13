@@ -59,6 +59,10 @@ struct StreamStats
     // Setup calls that failed and were retried (e.g. a mix format that went
     // stale because the endpoint was reconfigured in between).
     int setupErrors = 0;
+    // The slowest WASAPI call the stream made, to name stalls in the audio
+    // stack; calls over a second are also recorded in gapSamples.
+    double slowestCallMs = 0.0;
+    std::string slowestCall;
     // The first undecodable frames, with their raw sample values.
     std::vector<std::string> badFrameSamples;
     // The first dropouts and sequence jumps, timed from the start of the run.
