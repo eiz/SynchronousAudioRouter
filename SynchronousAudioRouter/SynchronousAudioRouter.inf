@@ -9,6 +9,7 @@ ClassGuid={4d36e96c-e325-11ce-bfc1-08002be10318}
 Provider=%Provider%
 DriverVer=0.1
 CatalogFile=SynchronousAudioRouter.cat
+PnpLockdown=1
 
 [ControlFlags]
 ExcludeFromSelect=*

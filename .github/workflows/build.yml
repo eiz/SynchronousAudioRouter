@@ -1,36 +1,187 @@
-name: Build SynchronousAudioRouter
+name: build-and-package
+
+# Verifiable WDK build pipeline.
+#
+# Produces, for every push/PR, an UNSIGNED but submission-ready driver package
+# (.sys/.inf/.cat + a .cab) together with SHA-256 hashes and - on master/tags -
+# a cryptographic build-provenance attestation linking each binary to its exact
+# source commit. That provenance + reproducibility is what OSSign / Microsoft
+# attestation signing require before they will sign the driver. See BUILDING.md.
+
 on:
   workflow_dispatch:
   push:
     branches: [master]
+    tags: ["v*"]
   pull_request:
     branches: [master]
+
 permissions:
   contents: read
-  pull-requests: read
-concurrency:
-  group: "${{ github.workflow }} @ ${{ github.event.pull_request.head.label || github.head_ref || github.ref }}"
-  cancel-in-progress: true
-jobs:
-  build:
-    runs-on: windows-latest
 
+concurrency:
+  group: "${{ github.workflow }}-${{ github.event.pull_request.head.label || github.head_ref || github.ref }}"
+  cancel-in-progress: true
+
+env:
+  # Keep in lockstep with <WindowsTargetPlatformVersion> in the driver .vcxproj
+  # and with the defaults in tools/Install-WdkBuildEnv.ps1.
+  SDK_VERSION: "10.0.22621.0"
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Kernel driver: needs the WDK + its VS extension installed on the runner.
+  # ARM64 is intentionally omitted for now: the INF has no [Standard.NTARM64]
+  # model yet, so Inf2Cat cannot package it. Add that section first (see
+  # BUILDING.md) before enabling an ARM64 matrix entry.
+  # ---------------------------------------------------------------------------
+  driver:
+    name: driver (${{ matrix.platform }})
+    runs-on: windows-2022
+    permissions:
+      contents: read
+      id-token: write      # required by attest-build-provenance
+      attestations: write
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [x64]
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # tags needed for version stamping
 
-      - name: Setup MSBuild
+      - name: Add MSBuild to PATH
         uses: microsoft/setup-msbuild@v2
         with:
           vs-version: "[17.0,18.0)"
           msbuild-architecture: x64
-      - name: Build 32
-        working-directory: ${{env.GITHUB_WORKSPACE}}
-        run: msbuild SynchronousAudioRouter.sln /t:Build /p:Configuration=Release /p:Platform=x86 /m /verbosity:minimal
-      - name: Build 64
-        working-directory: ${{env.GITHUB_WORKSPACE}}
-        run: msbuild SynchronousAudioRouter.sln /t:Build /p:Configuration=Release /p:Platform=x64 /m /verbosity:minimal
-      - name: Artifact
+
+      - name: Install WDK build environment
+        shell: pwsh
+        run: ./tools/Install-WdkBuildEnv.ps1 -SdkVersion "${{ env.SDK_VERSION }}"
+
+      - name: Compute version
+        id: ver
+        shell: pwsh
+        run: |
+          $desc = (& git describe --tags --always --dirty 2>$null)
+          if (-not $desc) { $desc = "0.0.0-$(& git rev-parse --short HEAD)" }
+          $tag = (& git describe --tags --abbrev=0 2>$null)
+          if ($tag -match '(\d+)\.(\d+)\.(\d+)') {
+            $numeric = "$($Matches[1]).$($Matches[2]).$($Matches[3]).$env:GITHUB_RUN_NUMBER"
+          } else {
+            $numeric = "0.0.0.$env:GITHUB_RUN_NUMBER"
+          }
+          "describe=$desc"   | Out-File $env:GITHUB_OUTPUT -Append
+          "numeric=$numeric" | Out-File $env:GITHUB_OUTPUT -Append
+          Write-Host "version: $desc  (DriverVer numeric: $numeric)"
+
+      - name: Build driver
+        shell: pwsh
+        run: |
+          # Pin to whatever 10.0.22621.x SDK the runner actually has installed,
+          # so the build doesn't fail if the image carries a different revision
+          # than the .0 hard-coded in the .vcxproj.
+          $inc = 'C:\Program Files (x86)\Windows Kits\10\Include'
+          # Pick the highest SDK version that ALSO ships the WDK kernel headers
+          # (km\ntifs.h). The image's plain SDK and its matching WDK can live under
+          # different version folders, so requiring km\ntifs.h guarantees both the
+          # headers and the matching kernel import libs are present for $sdk.
+          $sdk = (Get-ChildItem $inc -Directory |
+                  Where-Object { Test-Path (Join-Path $_.FullName 'km\ntifs.h') } |
+                  Sort-Object { [version]$_.Name } -Descending |
+                  Select-Object -First 1).Name
+          if (-not $sdk) { throw "No SDK carrying WDK kernel headers (km\ntifs.h) under $inc" }
+          Write-Host "Using Windows SDK+WDK: $sdk"
+
+          # SignMode=Off: leave the binary unsigned for attestation/OSSign to sign.
+          # SpectreMitigation=false: keep iteration-1 green without the Spectre libs;
+          #   flip to Spectre + install the libs for production security (BUILDING.md).
+          & msbuild SynchronousAudioRouter.sln `
+              /t:SynchronousAudioRouter `
+              /p:Configuration=Release `
+              /p:Platform=${{ matrix.platform }} `
+              /p:WindowsTargetPlatformVersion=$sdk `
+              /p:SignMode=Off `
+              /p:SpectreMitigation=false `
+              /m /verbosity:minimal /nologo
+          if ($LASTEXITCODE -ne 0) { throw "msbuild failed (exit $LASTEXITCODE)" }
+
+      - name: Package + hash
+        shell: pwsh
+        run: |
+          ./tools/Package-SarDriver.ps1 `
+            -Platform ${{ matrix.platform }} `
+            -Configuration Release `
+            -DriverVersion ${{ steps.ver.outputs.numeric }} `
+            -Describe "${{ steps.ver.outputs.describe }}"
+
+      - name: Attest build provenance
+        if: github.event_name == 'push'   # OIDC token isn't writable on fork PRs
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: artifacts/${{ matrix.platform }}/SynchronousAudioRouter.sys
+
+      - name: Upload driver package
         uses: actions/upload-artifact@v4
         with:
-          name: SynchronousAudioRouter
-          path: SarInstaller/bin/x64/Release/SynchronousAudioRouter.msi
+          name: sar-driver-${{ matrix.platform }}
+          path: artifacts/${{ matrix.platform }}/
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------------
+  # User-mode ASIO plugin: plain MSVC, no WDK. 32-bit (Win32) is still built
+  # because 32-bit DAWs need a 32-bit ASIO DLL.
+  # ---------------------------------------------------------------------------
+  usermode:
+    name: usermode (${{ matrix.platform }})
+    runs-on: windows-2022
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [x64, x86]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Add MSBuild to PATH
+        uses: microsoft/setup-msbuild@v2
+        with:
+          vs-version: "[17.0,18.0)"
+
+      - name: Build SarAsio
+        shell: pwsh
+        run: |
+          & msbuild SynchronousAudioRouter.sln `
+              /t:SarAsio `
+              /p:Configuration=Release `
+              /p:Platform=${{ matrix.platform }} `
+              /m /verbosity:minimal /nologo
+          if ($LASTEXITCODE -ne 0) { throw "msbuild failed (exit $LASTEXITCODE)" }
+
+      - name: Collect + hash
+        shell: pwsh
+        run: |
+          $plat = "${{ matrix.platform }}"
+          $stage = "artifacts/$plat"
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          $dll = Get-ChildItem -Recurse -Filter 'SarAsio.dll' |
+                 Where-Object { $_.FullName -match "\\Release\\" } |
+                 Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          if (-not $dll) { throw "SarAsio.dll not found - did the build succeed?" }
+          Copy-Item $dll.FullName $stage -Force
+          # Materialize the hash lines into a variable BEFORE opening the output
+          # file, and skip the sums file itself - otherwise the same pipeline both
+          # reads and writes SHA256SUMS.txt and Get-FileHash hits a file lock.
+          $lines = Get-ChildItem $stage -File |
+                   Where-Object { $_.Name -ne 'SHA256SUMS.txt' } |
+                   Get-FileHash -Algorithm SHA256 |
+                   ForEach-Object { '{0}  {1}' -f $_.Hash, (Split-Path $_.Path -Leaf) }
+          $lines | Out-File "$stage/SHA256SUMS.txt" -Encoding ascii
+
+      - name: Upload SarAsio
+        uses: actions/upload-artifact@v4
+        with:
+          name: sar-asio-${{ matrix.platform }}
+          path: artifacts/${{ matrix.platform }}/
+          if-no-files-found: error
