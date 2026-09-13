@@ -53,6 +53,7 @@ int usage()
         "                --registered (use the COM-registered SarAsio instead of a path)\n"
         "                --wait S --wait-gone S --restart-delay MS --rate HZ\n"
         "                --min-valid RATIO --max-discontinuities N\n"
+        "                --settle S --setup-attempts N --max-transition FRAMES\n"
         "\n"
         "Exit codes: 0 pass, 1 setup or usage error, 2 test failure.\n");
     return 1;
@@ -99,6 +100,9 @@ WasapiOptions wasapiOptions(const Args& args, const EndpointLayout& layout)
     options.expectInvalidation = args.has(L"expect-invalidation");
     options.minValidRatio = args.getDouble(L"min-valid", 0.9);
     options.maxDiscontinuities = args.getInt(L"max-discontinuities", -1);
+    options.settleSeconds = args.getDouble(L"settle", 2.0);
+    options.setupAttempts = args.getInt(L"setup-attempts", 4);
+    options.maxTransitionFrames = args.getInt(L"max-transition", 4800);
     return options;
 }
 

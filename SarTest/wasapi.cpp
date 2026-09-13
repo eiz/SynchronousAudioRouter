@@ -199,10 +199,19 @@ void setUnityVolume(IMMDevice *device, IAudioClient *client)
 class Stream
 {
 public:
-    Stream(const EndpointLayout& layout, int pair, IMMDevice *device, bool isCapture)
-        : _device(device), _isCapture(isCapture)
+    Stream(const EndpointLayout& layout, int pair, IMMDevice *device, bool isCapture,
+           int setupAttempts)
+        : _device(device), _isCapture(isCapture), _setupAttempts(setupAttempts)
     {
         _device->AddRef();
+
+        LPWSTR id = nullptr;
+
+        if (SUCCEEDED(_device->GetId(&id)) && id) {
+            _deviceId = id;
+            CoTaskMemFree(id);
+        }
+
         _stats.isCapture = isCapture;
         _stats.name = narrow(isCapture ? layout.recordingName(pair) : layout.playbackName(pair));
 
@@ -246,10 +255,28 @@ private:
     {
         HRESULT hr = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
 
-        if (_isCapture) {
-            captureLoop();
-        } else {
-            renderLoop();
+        for (int attempt = 1; ; ++attempt) {
+            _setupInvalidated = false;
+
+            if (_isCapture) {
+                captureLoop();
+            } else {
+                renderLoop();
+            }
+
+            if (!_setupInvalidated || attempt >= _setupAttempts ||
+                WaitForSingleObject(_stopEvent, 500) == WAIT_OBJECT_0) {
+                break;
+            }
+
+            _stats.setupRetries++;
+            logf("%s: retrying stream setup (attempt %d of %d)",
+                _stats.name.c_str(), attempt + 1, _setupAttempts);
+            refreshDevice();
+        }
+
+        if (_setupInvalidated) {
+            _stats.deviceInvalidated = true;
         }
 
         if (SUCCEEDED(hr)) {
@@ -257,9 +284,29 @@ private:
         }
     }
 
+    // Re-resolves the endpoint by ID so a retry does not reuse a device
+    // object that belonged to the invalidated instance.
+    void refreshDevice()
+    {
+        ComPtr<IMMDeviceEnumerator> enumerator;
+        IMMDevice *fresh = nullptr;
+
+        if (_deviceId.empty() || !createEnumerator(&enumerator)) {
+            return;
+        }
+
+        if (SUCCEEDED(enumerator->GetDevice(_deviceId.c_str(), &fresh)) && fresh) {
+            _device->Release();
+            _device = fresh;
+        }
+    }
+
     bool fail(const char *stage, HRESULT hr)
     {
-        if (hr == AUDCLNT_E_DEVICE_INVALIDATED) {
+        if (hr == AUDCLNT_E_DEVICE_INVALIDATED && !_stats.started) {
+            _setupInvalidated = true;
+            logf("%s: device invalidated during %s (setup)", _stats.name.c_str(), stage);
+        } else if (hr == AUDCLNT_E_DEVICE_INVALIDATED) {
             _stats.deviceInvalidated = true;
             logf("%s: device invalidated during %s", _stats.name.c_str(), stage);
         } else {
@@ -356,6 +403,7 @@ private:
         for (UINT32 f = 0; f < frames; ++f) {
             bool allZero = true, channelsOk = true, sequenceConsistent = true;
             uint32_t sequence = 0;
+            int32_t values[32] = {};
 
             for (int c = 0; c < expectedChannels; ++c) {
                 size_t index = (size_t)f * (size_t)channels + (size_t)c;
@@ -365,6 +413,10 @@ private:
                     k = decodeFloat(((const float *)data)[index]);
                 } else {
                     k = ((const int32_t *)data)[index] >> 8;
+                }
+
+                if (c < 32) {
+                    values[c] = k;
                 }
 
                 if (k != 0) {
@@ -393,7 +445,29 @@ private:
             }
 
             if (!channelsOk || !sequenceConsistent) {
-                _stats.wrongChannelFrames++;
+                bool transition = _stats.validFrames == 0;
+
+                if (transition) {
+                    _stats.transitionFrames++;
+                } else {
+                    _stats.wrongChannelFrames++;
+                }
+
+                if (_stats.badFrameSamples.size() < 12) {
+                    char buf[512];
+                    int len = sprintf_s(buf, "%s frame %lld (after %lld valid):",
+                        transition ? "transition" : "corrupt",
+                        _stats.framesProcessed + (long long)f, _stats.validFrames);
+
+                    for (int c = 0; c < expectedChannels && c < 32 && len > 0 && len < 480; ++c) {
+                        len += sprintf_s(buf + len, sizeof(buf) - (size_t)len,
+                            " %08X/%02X", (unsigned int)values[c], (unsigned int)_channelIds[(size_t)c]);
+                    }
+
+                    _stats.badFrameSamples.push_back(buf);
+                    logf("%s: %s", _stats.name.c_str(), buf);
+                }
+
                 continue;
             }
 
@@ -636,6 +710,9 @@ private:
     uint32_t _sequence = 0;
     uint32_t _lastSequence = 0;
     bool _haveLastSequence = false;
+    std::wstring _deviceId;
+    int _setupAttempts = 1;
+    bool _setupInvalidated = false;
     HANDLE _stopEvent = nullptr;
     std::thread _thread;
 };
@@ -776,9 +853,19 @@ std::string StreamStats::toJson() const
         .setInt("discontinuities", discontinuities)
         .setInt("engineDiscontinuities", engineDiscontinuities)
         .setInt("wrongChannelFrames", wrongChannelFrames)
+        .setInt("transitionFrames", transitionFrames)
+        .setInt("setupRetries", setupRetries)
         .setInt("timeouts", timeouts)
         .setBool("passed", passed)
         .setString("failure", failure);
+
+    std::vector<std::string> bad;
+
+    for (const auto& sample : badFrameSamples) {
+        bad.push_back(jsonString(sample));
+    }
+
+    o.setRaw("badFrames", jsonArray(bad));
     return o.str();
 }
 
@@ -834,7 +921,12 @@ static void evaluate(StreamStats *s, const WasapiOptions& options)
         }
 
         if (s->wrongChannelFrames > 0) {
-            s->failure = "frames with the wrong channel id";
+            s->failure = "corrupt frames after the signal locked in";
+            return;
+        }
+
+        if (s->transitionFrames > options.maxTransitionFrames) {
+            s->failure = "start-up transition too long";
             return;
         }
 
@@ -861,8 +953,15 @@ WasapiResult runWasapi(const WasapiOptions& options, const FoundEndpoints& endpo
     const EndpointLayout& layout = options.layout;
 
     for (int pair = 0; pair < layout.pairs; ++pair) {
-        streams.emplace_back(new Stream(layout, pair, endpoints.render[(size_t)pair], false));
-        streams.emplace_back(new Stream(layout, pair, endpoints.capture[(size_t)pair], true));
+        streams.emplace_back(new Stream(
+            layout, pair, endpoints.render[(size_t)pair], false, options.setupAttempts));
+        streams.emplace_back(new Stream(
+            layout, pair, endpoints.capture[(size_t)pair], true, options.setupAttempts));
+    }
+
+    if (options.settleSeconds > 0) {
+        logf("Letting the endpoints settle for %.1f s", options.settleSeconds);
+        Sleep((DWORD)(options.settleSeconds * 1000.0));
     }
 
     for (auto& stream : streams) {
@@ -893,14 +992,15 @@ WasapiResult runWasapi(const WasapiOptions& options, const FoundEndpoints& endpo
 
         if (stats.isCapture) {
             logf("%s: %lld frames, %lld valid, %lld silent (%lld at start), "
-                "%lld discontinuities, %lld wrong channel: %s",
+                "%lld transition, %lld discontinuities, %lld corrupt, %d setup retries: %s",
                 stats.name.c_str(), stats.framesProcessed, stats.validFrames,
-                stats.silentFrames, stats.startupSilentFrames,
-                stats.discontinuities, stats.wrongChannelFrames,
+                stats.silentFrames, stats.startupSilentFrames, stats.transitionFrames,
+                stats.discontinuities, stats.wrongChannelFrames, stats.setupRetries,
                 stats.passed ? "PASS" : stats.failure.c_str());
         } else {
-            logf("%s: %lld frames rendered: %s", stats.name.c_str(),
-                stats.framesProcessed, stats.passed ? "PASS" : stats.failure.c_str());
+            logf("%s: %lld frames rendered, %d setup retries: %s", stats.name.c_str(),
+                stats.framesProcessed, stats.setupRetries,
+                stats.passed ? "PASS" : stats.failure.c_str());
         }
 
         result.passed = result.passed && stats.passed;

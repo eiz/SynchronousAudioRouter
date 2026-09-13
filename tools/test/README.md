@@ -32,10 +32,21 @@ endpoint back to its recording twin, channel for channel.
 Render streams emit a signal where each sample encodes its channel id and a
 per-frame sequence number, chosen so it survives the engine's float/int32
 conversions exactly. Capture streams decode it and count valid frames,
-silence, sequence discontinuities and frames carrying the wrong channel id.
-A capture stream passes when it received the signal, never saw a wrong
-channel, and at least 90% of the frames after the initial silence were
-contiguous (`--min-valid`, `--max-discontinuities` tune this).
+silence and sequence discontinuities. Frames that do not decode are split in
+two: before the first valid frame they are the start of the signal
+(typically the engine ramping a new stream's volume in) and count as
+transition frames; after it they are corruption. A capture stream passes
+when it received the signal, saw no corrupt frames, had a transition shorter
+than 100 ms (`--max-transition`), and at least 90% of the frames after the
+initial silence were valid (`--min-valid`; `--max-discontinuities`
+optionally bounds sequence gaps). The first undecodable frames are recorded
+in the results with their raw sample values and expected channel ids.
+
+Endpoints can be reconfigured right after they appear, which invalidates
+streams opened in that window. Streams therefore start `--settle` seconds (2
+by default) after every endpoint is active, and stream setup is retried up to
+`--setup-attempts` times when it is invalidated anyway; retries are counted
+in the results so they stay visible.
 
 `SarTest.exe run` does both in one process and repeats for `--iterations`,
 which is the "start the DAW, stop the DAW" cycle that creates and tears down

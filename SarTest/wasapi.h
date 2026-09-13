@@ -39,8 +39,15 @@ struct StreamStats
     long long validFrames = 0;
     long long discontinuities = 0;
     long long engineDiscontinuities = 0;
+    // Undecodable frames after the first valid one: corruption.
     long long wrongChannelFrames = 0;
+    // Undecodable frames before the first valid one: the start of the
+    // signal, typically the engine ramping a new stream's volume in.
+    long long transitionFrames = 0;
     long long timeouts = 0;
+    int setupRetries = 0;
+    // The first undecodable frames, with their raw sample values.
+    std::vector<std::string> badFrameSamples;
     bool passed = false;
     std::string failure;
 
@@ -72,6 +79,12 @@ struct WasapiOptions
     bool expectInvalidation = false;
     double minValidRatio = 0.9;
     long long maxDiscontinuities = -1;   // -1: report only
+    // Endpoints can be reconfigured right after they appear, invalidating
+    // streams opened in that window: wait before streaming, and retry
+    // stream setup when it is invalidated anyway.
+    double settleSeconds = 2.0;
+    int setupAttempts = 4;
+    long long maxTransitionFrames = 4800;
 };
 
 struct WasapiResult
