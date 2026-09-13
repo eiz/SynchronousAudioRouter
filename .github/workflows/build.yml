@@ -153,7 +153,7 @@ jobs:
         shell: pwsh
         run: |
           & msbuild SynchronousAudioRouter.sln `
-              /t:SarAsio `
+              '/t:SarAsio;SarConfigure;SarCtl' `
               /p:Configuration=Release `
               /p:Platform=${{ matrix.platform }} `
               /m /verbosity:minimal /nologo
