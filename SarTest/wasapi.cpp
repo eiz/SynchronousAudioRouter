@@ -25,6 +25,7 @@
 
 #include <algorithm>
 #include <memory>
+#include <mutex>
 #include <thread>
 
 namespace SarTest {
@@ -1087,5 +1088,306 @@ WasapiResult runWasapi(const WasapiOptions& options, const FoundEndpoints& endpo
 
     return result;
 }
+
+// ---------------------------------------------------------------------------
+// Start-up race: stream openers.
+
+static const char *const kIdlePhase = "idle";
+
+struct RaceOpeners::Worker
+{
+    RaceOpeners *owner = nullptr;
+    int index = 0;
+    std::atomic<const char *> phase{ kIdlePhase };
+    std::atomic<double> phaseStartMs{ 0.0 };
+    std::atomic<bool> hangReported{ false };
+    std::mutex lock;
+    RaceStats stats;
+};
+
+std::string RaceStats::toJson() const
+{
+    std::vector<std::string> errorItems;
+
+    for (const auto& error : errors) {
+        JsonObject item;
+
+        item.setString("call", error.first).setInt("count", error.second);
+        errorItems.push_back(item.str());
+    }
+
+    JsonObject o;
+
+    o.setInt("attempts", attempts)
+        .setInt("opened", opened)
+        .setInt("noEndpoint", noEndpoint)
+        .setInt("hangsReported", hangsReported)
+        .setDouble("maxCallMs", maxCallMs)
+        .setString("maxCall", maxCallName)
+        .setRaw("errors", jsonArray(errorItems));
+    return o.str();
+}
+
+RaceOpeners::RaceOpeners(
+    const EndpointLayout& layout, int threads, int holdMs, int hangTimeoutSeconds)
+    : _layout(layout), _holdMs(holdMs), _hangTimeoutMs(hangTimeoutSeconds * 1000)
+{
+    for (int i = 0; i < threads; ++i) {
+        _workers.emplace_back(new Worker());
+        _workers.back()->owner = this;
+        _workers.back()->index = i;
+    }
+}
+
+RaceOpeners::~RaceOpeners()
+{
+    stop();
+
+    // A thread stuck inside a WASAPI call still references its worker.
+    if (!_clean) {
+        for (auto& worker : _workers) {
+            worker.release();
+        }
+    }
+}
+
+void RaceOpeners::start()
+{
+    if (!_threads.empty()) {
+        return;
+    }
+
+    _stop = false;
+    _watchdogStop = false;
+    _stopped = false;
+    _clean = true;
+
+    for (auto& worker : _workers) {
+        HANDLE thread = CreateThread(
+            nullptr, 0, &RaceOpeners::threadMain, worker.get(), 0, nullptr);
+
+        if (thread) {
+            _threads.push_back(thread);
+        }
+    }
+
+    _watchdog = CreateThread(nullptr, 0, &RaceOpeners::watchdogMain, this, 0, nullptr);
+}
+
+bool RaceOpeners::stop()
+{
+    if (_stopped) {
+        return _clean;
+    }
+
+    _stopped = true;
+    _stop = true;
+
+    if (!_threads.empty()) {
+        DWORD wait = WaitForMultipleObjects(
+            (DWORD)_threads.size(), _threads.data(), TRUE, (DWORD)_hangTimeoutMs + 5000);
+
+        _clean = wait != WAIT_TIMEOUT && wait != WAIT_FAILED;
+
+        if (!_clean) {
+            logf("Stream openers did not finish within %d s", _hangTimeoutMs / 1000 + 5);
+        }
+    }
+
+    _watchdogStop = true;
+
+    if (_watchdog) {
+        WaitForSingleObject(_watchdog, 5000);
+        CloseHandle(_watchdog);
+        _watchdog = nullptr;
+    }
+
+    if (_clean) {
+        for (HANDLE thread : _threads) {
+            CloseHandle(thread);
+        }
+
+        _threads.clear();
+    }
+
+    return _clean;
+}
+
+RaceStats RaceOpeners::stats()
+{
+    RaceStats total;
+
+    for (auto& worker : _workers) {
+        std::lock_guard<std::mutex> guard(worker->lock);
+        const RaceStats& s = worker->stats;
+
+        total.attempts += s.attempts;
+        total.opened += s.opened;
+        total.noEndpoint += s.noEndpoint;
+        total.hangsReported += s.hangsReported;
+
+        if (s.maxCallMs > total.maxCallMs) {
+            total.maxCallMs = s.maxCallMs;
+            total.maxCallName = s.maxCallName;
+        }
+
+        for (const auto& error : s.errors) {
+            total.errors[error.first] += error.second;
+        }
+    }
+
+    return total;
+}
+
+DWORD WINAPI RaceOpeners::threadMain(LPVOID param)
+{
+    Worker *worker = (Worker *)param;
+
+    worker->owner->work(worker);
+    return 0;
+}
+
+DWORD WINAPI RaceOpeners::watchdogMain(LPVOID param)
+{
+    ((RaceOpeners *)param)->watch();
+    return 0;
+}
+
+void RaceOpeners::watch()
+{
+    while (!_watchdogStop) {
+        Sleep(250);
+
+        double now = nowMs();
+
+        for (auto& worker : _workers) {
+            const char *phase = worker->phase.load();
+
+            if (phase == kIdlePhase) {
+                continue;
+            }
+
+            double elapsed = now - worker->phaseStartMs.load();
+
+            if (elapsed > (double)_hangTimeoutMs && !worker->hangReported.exchange(true)) {
+                logf("HANG: stream opener %d stuck in %s for %.0f ms", worker->index, phase, elapsed);
+
+                std::lock_guard<std::mutex> guard(worker->lock);
+                worker->stats.hangsReported++;
+            }
+        }
+    }
+}
+
+void RaceOpeners::work(Worker *worker)
+{
+    HRESULT co = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+    ComPtr<IMMDeviceEnumerator> enumerator;
+    std::vector<std::wstring> names;
+    unsigned int cursor = (unsigned int)worker->index;
+    unsigned int rng = 0x9E3779B9u * (unsigned int)(worker->index + 1);
+
+    // Even indices are playback (render) endpoints, odd ones recording (capture).
+    for (int pair = 0; pair < _layout.pairs; ++pair) {
+        names.push_back(_layout.playbackName(pair));
+        names.push_back(_layout.recordingName(pair));
+    }
+
+    auto enter = [worker](const char *phase) {
+        worker->phaseStartMs = nowMs();
+        worker->phase = phase;
+    };
+
+    auto leave = [worker](const char *call, HRESULT hr) {
+        double elapsed = nowMs() - worker->phaseStartMs.load();
+
+        worker->phase = kIdlePhase;
+
+        std::lock_guard<std::mutex> guard(worker->lock);
+
+        if (elapsed > worker->stats.maxCallMs) {
+            worker->stats.maxCallMs = elapsed;
+            worker->stats.maxCallName = call;
+        }
+
+        if (FAILED(hr)) {
+            worker->stats.errors[std::string(call) + " " + hresultText(hr)]++;
+        }
+    };
+
+    if (createEnumerator(&enumerator)) {
+        while (!_stop) {
+            size_t which = cursor++ % names.size();
+            EDataFlow flow = (which % 2 == 0) ? eRender : eCapture;
+            ComPtr<IMMDevice> device;
+
+            {
+                std::lock_guard<std::mutex> guard(worker->lock);
+                worker->stats.attempts++;
+            }
+
+            enter("EnumAudioEndpoints");
+            bool found = findActiveEndpoint(enumerator.get(), flow, names[which], device.put());
+            leave("EnumAudioEndpoints", S_OK);
+
+            if (!found) {
+                std::lock_guard<std::mutex> guard(worker->lock);
+                worker->stats.noEndpoint++;
+                Sleep(5);
+                continue;
+            }
+
+            ComPtr<IAudioClient> client;
+
+            enter("Activate");
+            HRESULT hr = device->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr, client.putVoid());
+            leave("Activate", hr);
+
+            if (SUCCEEDED(hr)) {
+                WAVEFORMATEX *mix = nullptr;
+
+                enter("GetMixFormat");
+                hr = client->GetMixFormat(&mix);
+                leave("GetMixFormat", hr);
+
+                if (SUCCEEDED(hr) && mix) {
+                    enter("Initialize");
+                    hr = client->Initialize(AUDCLNT_SHAREMODE_SHARED, 0, 200000, 0, mix, nullptr);
+                    leave("Initialize", hr);
+                    CoTaskMemFree(mix);
+
+                    if (SUCCEEDED(hr)) {
+                        enter("Start");
+                        hr = client->Start();
+                        leave("Start", hr);
+
+                        if (SUCCEEDED(hr)) {
+                            rng = rng * 1664525u + 1013904223u;
+                            Sleep(_holdMs > 0 ? (DWORD)(rng % (unsigned int)(2 * _holdMs)) : 0);
+
+                            enter("Stop");
+                            hr = client->Stop();
+                            leave("Stop", hr);
+
+                            std::lock_guard<std::mutex> guard(worker->lock);
+                            worker->stats.opened++;
+                        }
+                    }
+                }
+            }
+
+            enter("Release");
+            client.reset();
+            device.reset();
+            leave("Release", S_OK);
+            Sleep(2);
+        }
+    }
+
+    if (SUCCEEDED(co)) {
+        CoUninitialize();
+    }
+}
+
 
 } // namespace SarTest

@@ -33,7 +33,10 @@ param(
     # Per-scenario wall clock limit before it is declared hung.
     [int]$TimeoutSeconds = 600,
     [switch]$SkipInstall,
-    [switch]$SkipKillTest
+    [switch]$SkipKillTest,
+    # Any of matrix, race, kill. Installation always runs.
+    [string[]]$Scenarios = @('matrix', 'race', 'kill'),
+    [int]$RaceCycles = 10
 )
 
 $ErrorActionPreference = 'Stop'
@@ -142,12 +145,24 @@ if (-not $SkipInstall) {
 
 $common = @('--sarasio', "`"$sarAsio`"", '--channels', $Channels)
 
-foreach ($count in $EndpointCounts) {
-    $summary.scenarios += Invoke-Scenario "run-${count}x${Channels}" (
-        @('run', '--endpoints', $count, '--iterations', $Iterations, '--duration', $Duration) + $common)
+if ($Scenarios -contains 'matrix') {
+    foreach ($count in $EndpointCounts) {
+        $summary.scenarios += Invoke-Scenario "run-${count}x${Channels}" (
+            @('run', '--endpoints', $count, '--iterations', $Iterations, '--duration', $Duration) + $common)
+    }
 }
 
-if (-not $SkipKillTest) {
+if ($Scenarios -contains 'race') {
+    # Start and stop the host over and over while other threads keep opening
+    # streams on its endpoints: the start-up race reported against
+    # many-endpoint setups.
+    $count = $EndpointCounts[-1]
+    $summary.scenarios += Invoke-Scenario "race-${count}x${Channels}" (
+        @('race', '--endpoints', $count, '--cycles', $RaceCycles, '--up', 3, '--down', 200,
+          '--openers', 4) + $common)
+}
+
+if (-not $SkipKillTest -and $Scenarios -contains 'kill') {
     # Kill the ASIO host while WASAPI clients are streaming, then check that a
     # fresh host can still create endpoints afterwards.
     $count = $EndpointCounts[-1]

@@ -62,6 +62,17 @@ returned after N ms` when a driver call exceeds `--phase-timeout` (30 s), so
 a kernel-side deadlock shows up in the log even though the process cannot
 recover from it.
 
+`SarTest.exe race` is the start-up race. It starts and stops the host
+`--cycles` times (10 by default; 3 s up, 200 ms down) while `--openers`
+threads (4) keep finding the layout's endpoints and opening, starting,
+holding for up to twice `--hold` ms (250) and closing shared-mode streams on
+them, which is what applications that use a SAR endpoint as their default
+device do while a DAW starts. Every WASAPI call and every host call is
+watched; one that does not return within `--phase-timeout` is reported as
+`HANG`. The scenario fails if any call hung, the host failed to start or
+stop, or no stream was ever opened. `Invoke-SarTest.ps1 -Scenarios` selects
+any of `matrix`, `race` and `kill`.
+
 ## Commands
 
 ```
@@ -71,6 +82,7 @@ SarTest config [--endpoints N] [--channels C] [--out <path>]
 SarTest host [--iterations K] [--duration S]
 SarTest wasapi [--duration S] [--wait S] [--expect-invalidation]
 SarTest run [--iterations K] [--duration S]
+SarTest race [--cycles K] [--up S] [--down MS] [--openers T] [--hold MS]
 ```
 
 `install` creates the SAR software device node if needed, installs the
@@ -119,7 +131,7 @@ Then, elevated:
 ```
 
 The script runs `run` for 1, 4, 8 and 16 endpoint pairs with three
-start/stop iterations each, then a scenario that kills the host while WASAPI
+start/stop iterations each, `race` on the largest layout, then a scenario that kills the host while WASAPI
 clients are streaming and checks that a new host can still create endpoints
 afterwards. Results land in `sartest-results\`: one `.log` and `.json` per
 scenario, `summary.json`, and the SarAsio logs. Exit code 2 means a scenario

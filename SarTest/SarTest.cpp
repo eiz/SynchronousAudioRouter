@@ -45,6 +45,9 @@ int usage()
         "      verify the loopback.\n"
         "  SarTest run [--iterations K] [--duration S]\n"
         "      host and wasapi in one process, with end-to-end verification.\n"
+        "  SarTest race [--cycles K] [--up S] [--down MS] [--openers T] [--hold MS]\n"
+        "      Start and stop the host repeatedly while threads keep opening and\n"
+        "      closing streams on its endpoints; report any call that hangs.\n"
         "\n"
         "Layout options: --endpoints N (playback/recording pairs, default 2)\n"
         "                --channels C (per endpoint, default 2) --prefix <name>\n"
@@ -290,6 +293,104 @@ int cmdWasapi(const Args& args)
     return rc;
 }
 
+int cmdRace(const Args& args)
+{
+    EndpointLayout layout = EndpointLayout::fromArgs(args);
+    int cycles = args.getInt(L"cycles", 10);
+    double up = args.getDouble(L"up", 3.0);
+    int down = args.getInt(L"down", 200);
+    int threads = args.getInt(L"openers", 4);
+    int hold = args.getInt(L"hold", 250);
+    int hangTimeout = args.getInt(L"phase-timeout", 30);
+
+    if (threads < 1) {
+        threads = 1;
+    }
+
+    if (threads > 32) {
+        threads = 32;
+    }
+
+    if (!prepareConfig(args, layout)) {
+        return 1;
+    }
+
+    AsioHost host(hostOptions(args, layout));
+    RaceOpeners openers(layout, threads, hold, hangTimeout);
+    std::vector<std::string> cycleJson;
+    int rc = 0;
+
+    if (!host.load() || !host.open()) {
+        rc = 1;
+    }
+
+    if (rc == 0) {
+        logf("Starting %d stream openers on %d endpoint pairs", threads, layout.pairs);
+        openers.start();
+    }
+
+    for (int i = 0; rc == 0 && i < cycles; ++i) {
+        JsonObject cycle;
+
+        logf("--- race cycle %d of %d ---", i + 1, cycles);
+        cycle.setInt("cycle", i + 1);
+
+        if (!host.start()) {
+            rc = 2;
+            cycle.setString("failure", "start");
+            cycleJson.push_back(cycle.str());
+            break;
+        }
+
+        cycle.setDouble("startMs", host.stats().lastStartMs);
+        Sleep((DWORD)(up * 1000.0));
+
+        if (!host.stop()) {
+            rc = 2;
+            cycle.setString("failure", "stop");
+        }
+
+        cycle.setDouble("stopMs", host.stats().lastStopMs);
+        cycleJson.push_back(cycle.str());
+        Sleep((DWORD)down);
+    }
+
+    bool clean = openers.stop();
+    RaceStats race = openers.stats();
+
+    logf("Openers: %lld attempts, %lld streams opened, %lld without an active endpoint, "
+        "slowest call %s (%.0f ms)", race.attempts, race.opened, race.noEndpoint,
+        race.maxCallName.c_str(), race.maxCallMs);
+
+    for (const auto& error : race.errors) {
+        logf("  %s: %lld", error.first.c_str(), error.second);
+    }
+
+    if (!clean || race.hangsReported > 0 || host.stats().hangsReported > 0) {
+        rc = 2;
+        logf("A WASAPI or ASIO call hung");
+    } else if (rc == 0 && race.opened == 0) {
+        rc = 2;
+        logf("No stream was ever opened; the openers never raced the host");
+    }
+
+    // Results first: closing the host can hang if the driver is wedged.
+    JsonObject result;
+
+    result.setString("command", "race")
+        .setBool("passed", rc == 0)
+        .setInt("exitCode", rc)
+        .setInt("endpointPairs", layout.pairs)
+        .setInt("channels", layout.channels)
+        .setRaw("host", host.toJson())
+        .setRaw("openers", race.toJson())
+        .setRaw("cycles", jsonArray(cycleJson));
+    writeResults(args, result.str());
+    logf("%s", rc == 0 ? "PASSED" : "FAILED");
+    host.close();
+    return rc;
+}
+
 int cmdRun(const Args& args)
 {
     EndpointLayout layout = EndpointLayout::fromArgs(args);
@@ -410,6 +511,8 @@ int wmain(int argc, wchar_t **argv)
         rc = cmdWasapi(args);
     } else if (args.command == L"run") {
         rc = cmdRun(args);
+    } else if (args.command == L"race") {
+        rc = cmdRace(args);
     } else {
         rc = usage();
     }

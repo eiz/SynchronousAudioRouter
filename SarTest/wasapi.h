@@ -21,6 +21,9 @@
 
 #include <mmdeviceapi.h>
 
+#include <atomic>
+#include <memory>
+
 namespace SarTest {
 
 struct StreamStats
@@ -105,6 +108,56 @@ struct WasapiResult
 // Streams the test signal into every playback endpoint and verifies it on
 // every recording endpoint for the configured duration.
 WasapiResult runWasapi(const WasapiOptions& options, const FoundEndpoints& endpoints);
+
+struct RaceStats
+{
+    long long attempts = 0;
+    long long opened = 0;
+    long long noEndpoint = 0;
+    long long hangsReported = 0;
+    double maxCallMs = 0.0;
+    std::string maxCallName;
+    std::map<std::string, long long> errors;   // "<call> <HRESULT>" -> count
+
+    std::string toJson() const;
+};
+
+// Threads that keep finding the layout's endpoints and opening, starting,
+// holding and closing shared-mode streams on them while the ASIO host starts
+// and stops underneath, the way applications that use a SAR endpoint as their
+// default device behave while a DAW starts. A watchdog reports any WASAPI
+// call that does not return within the timeout as a hang.
+class RaceOpeners
+{
+public:
+    RaceOpeners(const EndpointLayout& layout, int threads, int holdMs, int hangTimeoutSeconds);
+    ~RaceOpeners();
+    RaceOpeners(const RaceOpeners&) = delete;
+    RaceOpeners& operator=(const RaceOpeners&) = delete;
+
+    void start();
+    // Stops the threads; false when one did not finish within the timeout.
+    bool stop();
+    RaceStats stats();
+
+private:
+    struct Worker;
+    static DWORD WINAPI threadMain(LPVOID param);
+    static DWORD WINAPI watchdogMain(LPVOID param);
+    void work(Worker *worker);
+    void watch();
+
+    EndpointLayout _layout;
+    int _holdMs;
+    int _hangTimeoutMs;
+    std::vector<std::unique_ptr<Worker>> _workers;
+    std::vector<HANDLE> _threads;
+    HANDLE _watchdog = nullptr;
+    std::atomic<bool> _stop{ false };
+    std::atomic<bool> _watchdogStop{ false };
+    bool _stopped = false;
+    bool _clean = true;
+};
 
 } // namespace SarTest
 #endif // _SAR_TEST_WASAPI_H
