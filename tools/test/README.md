@@ -33,20 +33,27 @@ Render streams emit a signal where each sample encodes its channel id and a
 per-frame sequence number, chosen so it survives the engine's float/int32
 conversions exactly. Capture streams decode it and count valid frames,
 silence and sequence discontinuities. Frames that do not decode are split in
-two: before the first valid frame they are the start of the signal
-(typically the engine ramping a new stream's volume in) and count as
-transition frames; after it they are corruption. A capture stream passes
+two. Before the signal locks in (its first valid frame, and again after a
+reopen) they are the engine ramping a new stream's volume in, the correct
+samples scaled up from near zero, and count as transition frames; once it
+has locked in they are corruption. A capture stream passes
 when it received the signal, saw no corrupt frames, had a transition shorter
 than 100 ms (`--max-transition`), and at least 90% of the frames after the
 initial silence were valid (`--min-valid`; `--max-discontinuities`
 optionally bounds sequence gaps). The first undecodable frames are recorded
 in the results with their raw sample values and expected channel ids.
 
-Endpoints can be reconfigured right after they appear, which invalidates
-streams opened in that window. Streams therefore start `--settle` seconds (2
-by default) after every endpoint is active, and stream setup is retried up to
-`--setup-attempts` times when it is invalidated anyway; retries are counted
-in the results so they stay visible.
+SarAsio broadcasts a format change whenever one of its endpoints becomes
+active, so streams that are open around the time the ASIO host starts get
+invalidated (`AUDCLNT_E_DEVICE_INVALIDATED`). Streams therefore start
+`--settle` seconds (2 by default) after every endpoint is active, and an
+invalidated stream is reopened, as a well-behaved client would, up to
+`--max-reopens` times (3). Invalidations and reopens are counted in the
+results so they stay visible.
+
+Capture streams also record dropouts (silence after the signal locked in)
+and sequence jumps, timed from the start of the run, so gaps can be lined up
+across endpoints to tell a global stall from a per-endpoint one.
 
 `SarTest.exe run` does both in one process and repeats for `--iterations`,
 which is the "start the DAW, stop the DAW" cycle that creates and tears down

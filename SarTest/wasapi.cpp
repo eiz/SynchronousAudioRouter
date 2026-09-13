@@ -61,6 +61,9 @@ private:
 
 enum class SampleKind { Float32, Int32, Unsupported };
 
+// Common time origin for every stream of a run, so gaps line up.
+double g_runOriginMs = 0.0;
+
 SampleKind classifyFormat(const WAVEFORMATEX *format, std::string *description)
 {
     WORD tag = format->wFormatTag;
@@ -200,8 +203,8 @@ class Stream
 {
 public:
     Stream(const EndpointLayout& layout, int pair, IMMDevice *device, bool isCapture,
-           int setupAttempts)
-        : _device(device), _isCapture(isCapture), _setupAttempts(setupAttempts)
+           int maxReopens)
+        : _device(device), _isCapture(isCapture), _maxReopens(maxReopens)
     {
         _device->AddRef();
 
@@ -255,8 +258,10 @@ private:
     {
         HRESULT hr = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
 
-        for (int attempt = 1; ; ++attempt) {
-            _setupInvalidated = false;
+        bool gaveUp = false;
+
+        for (;;) {
+            _invalidated = false;
 
             if (_isCapture) {
                 captureLoop();
@@ -264,18 +269,40 @@ private:
                 renderLoop();
             }
 
-            if (!_setupInvalidated || attempt >= _setupAttempts ||
-                WaitForSingleObject(_stopEvent, 500) == WAIT_OBJECT_0) {
+            // Stopped normally, or failed for a reason reopening won't fix.
+            if (!_invalidated) {
                 break;
             }
 
-            _stats.setupRetries++;
-            logf("%s: retrying stream setup (attempt %d of %d)",
-                _stats.name.c_str(), attempt + 1, _setupAttempts);
+            // The run is over anyway.
+            if (WaitForSingleObject(_stopEvent, 0) == WAIT_OBJECT_0) {
+                break;
+            }
+
+            if (_stats.reopens >= _maxReopens) {
+                gaveUp = true;
+                break;
+            }
+
+            if (WaitForSingleObject(_stopEvent, 500) == WAIT_OBJECT_0) {
+                break;
+            }
+
+            _stats.reopens++;
+            logf("%s: reopening the stream (%d of %d)",
+                _stats.name.c_str(), _stats.reopens, _maxReopens);
+            flushSilentRun(" (then invalidated)");
+
+            // A reopened stream ramps in again and its sequence resumes from
+            // wherever the render side is by then.
+            _lockedIn = false;
+            _haveLastSequence = false;
             refreshDevice();
         }
 
-        if (_setupInvalidated) {
+        flushSilentRun(" (until the end)");
+
+        if (gaveUp) {
             _stats.deviceInvalidated = true;
         }
 
@@ -303,11 +330,9 @@ private:
 
     bool fail(const char *stage, HRESULT hr)
     {
-        if (hr == AUDCLNT_E_DEVICE_INVALIDATED && !_stats.started) {
-            _setupInvalidated = true;
-            logf("%s: device invalidated during %s (setup)", _stats.name.c_str(), stage);
-        } else if (hr == AUDCLNT_E_DEVICE_INVALIDATED) {
-            _stats.deviceInvalidated = true;
+        if (hr == AUDCLNT_E_DEVICE_INVALIDATED) {
+            _invalidated = true;
+            _stats.invalidations++;
             logf("%s: device invalidated during %s", _stats.name.c_str(), stage);
         } else {
             _stats.lastError = hr;
@@ -338,6 +363,7 @@ private:
 
         _kind = classifyFormat(mix, &_stats.format);
         _stats.channels = mix->nChannels;
+        _rate = mix->nSamplesPerSec ? (double)mix->nSamplesPerSec : 48000.0;
 
         if (_kind == SampleKind::Unsupported) {
             CoTaskMemFree(mix);
@@ -395,8 +421,28 @@ private:
         }
     }
 
+    void recordGap(const char *text)
+    {
+        if (_stats.gapSamples.size() < 16) {
+            _stats.gapSamples.push_back(text);
+        }
+    }
+
+    void flushSilentRun(const char *suffix)
+    {
+        if (_silentRun > 0) {
+            char buf[192];
+
+            sprintf_s(buf, "dropout of %lld frames (%.1f ms) at %.3f s%s",
+                _silentRun, _silentRun * 1000.0 / _rate, _silentRunStartMs / 1000.0, suffix);
+            recordGap(buf);
+            _silentRun = 0;
+        }
+    }
+
     void decode(const BYTE *data, UINT32 frames)
     {
+        double packetMs = nowMs() - g_runOriginMs;
         int channels = _stats.channels;
         int expectedChannels = std::min(channels, (int)_channelIds.size());
 
@@ -441,11 +487,21 @@ private:
                     _stats.startupSilentFrames++;
                 }
 
+                if (_lockedIn) {
+                    _stats.midStreamSilentFrames++;
+
+                    if (_silentRun++ == 0) {
+                        _silentRunStartMs = packetMs;
+                    }
+                }
+
                 continue;
             }
 
+            flushSilentRun("");
+
             if (!channelsOk || !sequenceConsistent) {
-                bool transition = _stats.validFrames == 0;
+                bool transition = !_lockedIn;
 
                 if (transition) {
                     _stats.transitionFrames++;
@@ -472,11 +528,17 @@ private:
             }
 
             if (_haveLastSequence && sequence != ((_lastSequence + 1) & 0xFFFF)) {
+                char buf[128];
+
                 _stats.discontinuities++;
+                sprintf_s(buf, "sequence jump of %u frames at %.3f s",
+                    (unsigned int)((sequence - _lastSequence - 1) & 0xFFFF), packetMs / 1000.0);
+                recordGap(buf);
             }
 
             _lastSequence = sequence;
             _haveLastSequence = true;
+            _lockedIn = true;
             _stats.validFrames++;
         }
     }
@@ -710,9 +772,13 @@ private:
     uint32_t _sequence = 0;
     uint32_t _lastSequence = 0;
     bool _haveLastSequence = false;
+    bool _lockedIn = false;
+    long long _silentRun = 0;
+    double _silentRunStartMs = 0.0;
+    double _rate = 48000.0;
     std::wstring _deviceId;
-    int _setupAttempts = 1;
-    bool _setupInvalidated = false;
+    int _maxReopens = 0;
+    bool _invalidated = false;
     HANDLE _stopEvent = nullptr;
     std::thread _thread;
 };
@@ -854,7 +920,9 @@ std::string StreamStats::toJson() const
         .setInt("engineDiscontinuities", engineDiscontinuities)
         .setInt("wrongChannelFrames", wrongChannelFrames)
         .setInt("transitionFrames", transitionFrames)
-        .setInt("setupRetries", setupRetries)
+        .setInt("midStreamSilentFrames", midStreamSilentFrames)
+        .setInt("invalidations", invalidations)
+        .setInt("reopens", reopens)
         .setInt("timeouts", timeouts)
         .setBool("passed", passed)
         .setString("failure", failure);
@@ -866,6 +934,14 @@ std::string StreamStats::toJson() const
     }
 
     o.setRaw("badFrames", jsonArray(bad));
+
+    std::vector<std::string> gaps;
+
+    for (const auto& gap : gapSamples) {
+        gaps.push_back(jsonString(gap));
+    }
+
+    o.setRaw("gaps", jsonArray(gaps));
     return o.str();
 }
 
@@ -903,7 +979,7 @@ static void evaluate(StreamStats *s, const WasapiOptions& options)
     }
 
     if (s->deviceInvalidated && !options.expectInvalidation) {
-        s->failure = "device invalidated";
+        s->failure = "device invalidated and not recovered";
         return;
     }
 
@@ -954,15 +1030,17 @@ WasapiResult runWasapi(const WasapiOptions& options, const FoundEndpoints& endpo
 
     for (int pair = 0; pair < layout.pairs; ++pair) {
         streams.emplace_back(new Stream(
-            layout, pair, endpoints.render[(size_t)pair], false, options.setupAttempts));
+            layout, pair, endpoints.render[(size_t)pair], false, options.maxReopens));
         streams.emplace_back(new Stream(
-            layout, pair, endpoints.capture[(size_t)pair], true, options.setupAttempts));
+            layout, pair, endpoints.capture[(size_t)pair], true, options.maxReopens));
     }
 
     if (options.settleSeconds > 0) {
         logf("Letting the endpoints settle for %.1f s", options.settleSeconds);
         Sleep((DWORD)(options.settleSeconds * 1000.0));
     }
+
+    g_runOriginMs = nowMs();
 
     for (auto& stream : streams) {
         stream->begin();
@@ -991,15 +1069,15 @@ WasapiResult runWasapi(const WasapiOptions& options, const FoundEndpoints& endpo
         evaluate(&stats, options);
 
         if (stats.isCapture) {
-            logf("%s: %lld frames, %lld valid, %lld silent (%lld at start), "
-                "%lld transition, %lld discontinuities, %lld corrupt, %d setup retries: %s",
+            logf("%s: %lld frames, %lld valid, %lld silent (%lld at start, %lld dropout), "
+                "%lld transition, %lld discontinuities, %lld corrupt, %d reopens: %s",
                 stats.name.c_str(), stats.framesProcessed, stats.validFrames,
-                stats.silentFrames, stats.startupSilentFrames, stats.transitionFrames,
-                stats.discontinuities, stats.wrongChannelFrames, stats.setupRetries,
-                stats.passed ? "PASS" : stats.failure.c_str());
+                stats.silentFrames, stats.startupSilentFrames, stats.midStreamSilentFrames,
+                stats.transitionFrames, stats.discontinuities, stats.wrongChannelFrames,
+                stats.reopens, stats.passed ? "PASS" : stats.failure.c_str());
         } else {
-            logf("%s: %lld frames rendered, %d setup retries: %s", stats.name.c_str(),
-                stats.framesProcessed, stats.setupRetries,
+            logf("%s: %lld frames rendered, %d reopens: %s", stats.name.c_str(),
+                stats.framesProcessed, stats.reopens,
                 stats.passed ? "PASS" : stats.failure.c_str());
         }
 
