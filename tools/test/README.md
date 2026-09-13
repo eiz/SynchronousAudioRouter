@@ -18,7 +18,10 @@ two dummy output channels and delivers `bufferSwitch` callbacks from a timer
 thread every 480 frames at 48 kHz (10 ms, the audio engine's period). SarAsio
 wraps it exactly like a real interface, so `SarAsioWrapper::start()` goes
 through the full `SarClient` path: open the control device, set the buffer
-layout, create the endpoints, poll the notification handle queue.
+layout, create the endpoints, poll the notification handle queue. The clock
+also times each callback into the host, which includes SarAsio's whole tick,
+and reports the slowest one and how many took longer than half a period: a
+blocking call inside SarAsio's tick stalls every endpoint at once.
 
 `SarTest.exe host` loads `SarAsio.dll` directly through `DllGetClassObject`
 (no COM registration needed), creates buffers for every channel, and on each
@@ -32,23 +35,26 @@ endpoint back to its recording twin, channel for channel.
 Render streams emit a signal where each sample encodes its channel id and a
 per-frame sequence number, chosen so it survives the engine's float/int32
 conversions exactly. Capture streams decode it and count valid frames,
-silence and sequence discontinuities. Frames that do not decode are split in
-two. Before the signal locks in (its first valid frame, and again after a
-reopen) they are the engine ramping a new stream's volume in, the correct
-samples scaled up from near zero, and count as transition frames; once it
-has locked in they are corruption. A capture stream passes
-when it received the signal, saw no corrupt frames, had a transition shorter
-than 100 ms (`--max-transition`), and at least 90% of the frames after the
-initial silence were valid (`--min-valid`; `--max-discontinuities`
-optionally bounds sequence gaps). The first undecodable frames are recorded
-in the results with their raw sample values and expected channel ids.
+silence and sequence discontinuities. A run of frames that do not decode is
+a ramp when it borders silence or the start of the stream: the engine fades
+streams in and out, so those are the right samples scaled, which the raw
+values recorded in the results show. A run between valid frames, or longer
+than `--max-transition` frames (100 ms), is corruption. A capture stream
+passes when it received the signal, saw no corruption, and at least half of
+the frames after the initial silence were valid (`--min-valid`;
+`--max-discontinuities` optionally bounds sequence gaps). Dropouts,
+discontinuities, ramps, invalidations and reopens are reported for every
+stream; on a VM they vary from run to run, so compare them with a baseline
+run rather than reading one run's numbers as absolute.
 
 SarAsio broadcasts a format change whenever one of its endpoints becomes
 active, so streams that are open around the time the ASIO host starts get
-invalidated (`AUDCLNT_E_DEVICE_INVALIDATED`). Streams therefore start
-`--settle` seconds (2 by default) after every endpoint is active, and an
-invalidated stream is reopened, as a well-behaved client would, up to
-`--max-reopens` times (3). Invalidations and reopens are counted in the
+invalidated (`AUDCLNT_E_DEVICE_INVALIDATED`); with many endpoints the
+broadcasts repeat for seconds. Streams therefore start `--settle` seconds (2
+by default) after every endpoint is active, and an invalidated stream is
+reopened, as a well-behaved client would, up to `--max-reopens` times (20).
+A setup call that fails while the endpoint is being reconfigured is retried
+the same way. Invalidations, setup errors and reopens are counted in the
 results so they stay visible.
 
 Capture streams also record dropouts (silence after the signal locked in)

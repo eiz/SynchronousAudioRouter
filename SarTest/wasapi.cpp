@@ -204,8 +204,9 @@ class Stream
 {
 public:
     Stream(const EndpointLayout& layout, int pair, IMMDevice *device, bool isCapture,
-           int maxReopens)
-        : _device(device), _isCapture(isCapture), _maxReopens(maxReopens)
+           int maxReopens, long long maxTransitionFrames)
+        : _device(device), _isCapture(isCapture), _maxReopens(maxReopens),
+          _maxTransitionFrames(maxTransitionFrames)
     {
         _device->AddRef();
 
@@ -263,6 +264,7 @@ private:
 
         for (;;) {
             _invalidated = false;
+            _attemptStarted = false;
 
             if (_isCapture) {
                 captureLoop();
@@ -292,6 +294,7 @@ private:
             _stats.reopens++;
             logf("%s: reopening the stream (%d of %d)",
                 _stats.name.c_str(), _stats.reopens, _maxReopens);
+            endBadRun(true);
             flushSilentRun(" (then invalidated)");
 
             // A reopened stream ramps in again and its sequence resumes from
@@ -301,6 +304,7 @@ private:
             refreshDevice();
         }
 
+        endBadRun(true);
         flushSilentRun(" (until the end)");
 
         if (gaveUp) {
@@ -332,9 +336,22 @@ private:
     bool fail(const char *stage, HRESULT hr)
     {
         if (hr == AUDCLNT_E_DEVICE_INVALIDATED) {
+            char buf[128];
+
             _invalidated = true;
             _stats.invalidations++;
+            sprintf_s(buf, "invalidated during %s at %.3f s", stage, (nowMs() - g_runOriginMs) / 1000.0);
+            recordGap(buf);
             logf("%s: device invalidated during %s", _stats.name.c_str(), stage);
+        } else if (!_attemptStarted) {
+            // A setup call can fail while the endpoint is being reconfigured
+            // (the mix format goes stale, for one); retry it like an
+            // invalidation. The error sticks only if the retries run out.
+            _invalidated = true;
+            _stats.setupErrors++;
+            _stats.lastError = hr;
+            _stats.errorStage = stage;
+            logf("%s: %s failed during setup: %s", _stats.name.c_str(), stage, hresultText(hr).c_str());
         } else {
             _stats.lastError = hr;
             _stats.errorStage = stage;
@@ -441,6 +458,57 @@ private:
         }
     }
 
+    // Classifies a finished run of frames that did not decode. The engine
+    // fades a stream in and out, so a run that borders silence or the start
+    // of the stream is the right samples scaled: a ramp. A run between valid
+    // frames, or longer than any ramp, is corruption.
+    void endBadRun(bool bordersGap)
+    {
+        if (_badRun == 0) {
+            return;
+        }
+
+        bool ramp = bordersGap && _badRun <= _maxTransitionFrames;
+        char head[128];
+
+        if (ramp) {
+            _stats.transitionFrames += _badRun;
+            _stats.rampRuns++;
+        } else {
+            _stats.wrongChannelFrames += _badRun;
+            _stats.corruptRuns++;
+        }
+
+        sprintf_s(head, "%s run of %lld frames at %.3f s", ramp ? "ramp" : "corrupt",
+            _badRun, _badRunStartMs / 1000.0);
+
+        if (!ramp) {
+            logf("%s: %s", _stats.name.c_str(), head);
+        }
+
+        // Keep room for corruption: ramps only get the first half of the list.
+        size_t limit = ramp ? 8 : 16;
+
+        if (_stats.badFrameSamples.size() < limit) {
+            _stats.badFrameSamples.push_back(head);
+
+            for (const auto& sample : _badRunSamples) {
+                if (_stats.badFrameSamples.size() >= limit) {
+                    break;
+                }
+
+                _stats.badFrameSamples.push_back("  " + sample);
+
+                if (!ramp) {
+                    logf("%s:   %s", _stats.name.c_str(), sample.c_str());
+                }
+            }
+        }
+
+        _badRun = 0;
+        _badRunSamples.clear();
+    }
+
     void decode(const BYTE *data, UINT32 frames)
     {
         double packetMs = nowMs() - g_runOriginMs;
@@ -482,6 +550,9 @@ private:
             }
 
             if (allZero) {
+                // Silence right after undecodable frames: the engine faded out.
+                endBadRun(true);
+                _prevSilent = true;
                 _stats.silentFrames++;
 
                 if (_stats.validFrames == 0) {
@@ -502,18 +573,17 @@ private:
             flushSilentRun("");
 
             if (!channelsOk || !sequenceConsistent) {
-                bool transition = !_lockedIn;
-
-                if (transition) {
-                    _stats.transitionFrames++;
-                } else {
-                    _stats.wrongChannelFrames++;
+                if (_badRun == 0) {
+                    _badRunBordersGap = !_lockedIn || _prevSilent;
+                    _badRunStartMs = packetMs;
                 }
 
-                if (_stats.badFrameSamples.size() < 12) {
+                _badRun++;
+                _prevSilent = false;
+
+                if (_badRunSamples.size() < 3) {
                     char buf[512];
-                    int len = sprintf_s(buf, "%s frame %lld (after %lld valid):",
-                        transition ? "transition" : "corrupt",
+                    int len = sprintf_s(buf, "frame %lld (after %lld valid):",
                         _stats.framesProcessed + (long long)f, _stats.validFrames);
 
                     for (int c = 0; c < expectedChannels && c < 32 && len > 0 && len < 480; ++c) {
@@ -521,12 +591,16 @@ private:
                             " %08X/%02X", (unsigned int)values[c], (unsigned int)_channelIds[(size_t)c]);
                     }
 
-                    _stats.badFrameSamples.push_back(buf);
-                    logf("%s: %s", _stats.name.c_str(), buf);
+                    _badRunSamples.push_back(buf);
                 }
 
                 continue;
             }
+
+            // A valid frame ends a run that started after silence (fade in)
+            // as a ramp, and one that started after valid frames as corruption.
+            endBadRun(_badRunBordersGap);
+            _prevSilent = false;
 
             if (_haveLastSequence && sequence != ((_lastSequence + 1) & 0xFFFF)) {
                 char buf[128];
@@ -583,6 +657,9 @@ private:
         }
 
         _stats.started = true;
+        _attemptStarted = true;
+        _stats.lastError = S_OK;
+        _stats.errorStage.clear();
         logf("%s: rendering %s, buffer %u frames", _stats.name.c_str(),
             _stats.format.c_str(), (unsigned)bufferFrames);
 
@@ -676,6 +753,9 @@ private:
         }
 
         _stats.started = true;
+        _attemptStarted = true;
+        _stats.lastError = S_OK;
+        _stats.errorStage.clear();
         logf("%s: capturing %s, buffer %u frames", _stats.name.c_str(),
             _stats.format.c_str(), (unsigned)bufferFrames);
 
@@ -779,7 +859,14 @@ private:
     double _rate = 48000.0;
     std::wstring _deviceId;
     int _maxReopens = 0;
+    long long _maxTransitionFrames = 4800;
     bool _invalidated = false;
+    bool _attemptStarted = false;
+    bool _prevSilent = false;
+    long long _badRun = 0;
+    bool _badRunBordersGap = false;
+    double _badRunStartMs = 0.0;
+    std::vector<std::string> _badRunSamples;
     HANDLE _stopEvent = nullptr;
     std::thread _thread;
 };
@@ -924,6 +1011,9 @@ std::string StreamStats::toJson() const
         .setInt("midStreamSilentFrames", midStreamSilentFrames)
         .setInt("invalidations", invalidations)
         .setInt("reopens", reopens)
+        .setInt("setupErrors", setupErrors)
+        .setInt("rampRuns", rampRuns)
+        .setInt("corruptRuns", corruptRuns)
         .setInt("timeouts", timeouts)
         .setBool("passed", passed)
         .setString("failure", failure);
@@ -998,12 +1088,7 @@ static void evaluate(StreamStats *s, const WasapiOptions& options)
         }
 
         if (s->wrongChannelFrames > 0) {
-            s->failure = "corrupt frames after the signal locked in";
-            return;
-        }
-
-        if (s->transitionFrames > options.maxTransitionFrames) {
-            s->failure = "start-up transition too long";
+            s->failure = "corrupt frames";
             return;
         }
 
@@ -1031,9 +1116,11 @@ WasapiResult runWasapi(const WasapiOptions& options, const FoundEndpoints& endpo
 
     for (int pair = 0; pair < layout.pairs; ++pair) {
         streams.emplace_back(new Stream(
-            layout, pair, endpoints.render[(size_t)pair], false, options.maxReopens));
+            layout, pair, endpoints.render[(size_t)pair], false, options.maxReopens,
+            options.maxTransitionFrames));
         streams.emplace_back(new Stream(
-            layout, pair, endpoints.capture[(size_t)pair], true, options.maxReopens));
+            layout, pair, endpoints.capture[(size_t)pair], true, options.maxReopens,
+            options.maxTransitionFrames));
     }
 
     if (options.settleSeconds > 0) {
@@ -1071,11 +1158,11 @@ WasapiResult runWasapi(const WasapiOptions& options, const FoundEndpoints& endpo
 
         if (stats.isCapture) {
             logf("%s: %lld frames, %lld valid, %lld silent (%lld at start, %lld dropout), "
-                "%lld transition, %lld discontinuities, %lld corrupt, %d reopens: %s",
+                "%lld ramp, %lld discontinuities, %lld corrupt, %d reopens, %d setup errors: %s",
                 stats.name.c_str(), stats.framesProcessed, stats.validFrames,
                 stats.silentFrames, stats.startupSilentFrames, stats.midStreamSilentFrames,
                 stats.transitionFrames, stats.discontinuities, stats.wrongChannelFrames,
-                stats.reopens, stats.passed ? "PASS" : stats.failure.c_str());
+                stats.reopens, stats.setupErrors, stats.passed ? "PASS" : stats.failure.c_str());
         } else {
             logf("%s: %lld frames rendered, %d reopens: %s", stats.name.c_str(),
                 stats.framesProcessed, stats.reopens,

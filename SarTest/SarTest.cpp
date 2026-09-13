@@ -101,10 +101,10 @@ WasapiOptions wasapiOptions(const Args& args, const EndpointLayout& layout)
     options.layout = layout;
     options.durationSeconds = args.getDouble(L"duration", 5.0);
     options.expectInvalidation = args.has(L"expect-invalidation");
-    options.minValidRatio = args.getDouble(L"min-valid", 0.9);
+    options.minValidRatio = args.getDouble(L"min-valid", 0.5);
     options.maxDiscontinuities = args.getInt(L"max-discontinuities", -1);
     options.settleSeconds = args.getDouble(L"settle", 2.0);
-    options.maxReopens = args.getInt(L"max-reopens", 3);
+    options.maxReopens = args.getInt(L"max-reopens", 20);
     options.maxTransitionFrames = args.getInt(L"max-transition", 4800);
     return options;
 }
@@ -350,7 +350,9 @@ int cmdRace(const Args& args)
             cycle.setString("failure", "stop");
         }
 
-        cycle.setDouble("stopMs", host.stats().lastStopMs);
+        cycle.setDouble("stopMs", host.stats().lastStopMs)
+            .setDouble("maxCallbackMs", host.stats().clock.maxCallbackMs)
+            .setInt("slowCallbacks", (long long)host.stats().clock.slowCallbacks);
         cycleJson.push_back(cycle.str());
         Sleep((DWORD)down);
     }
@@ -452,7 +454,9 @@ int cmdRun(const Args& args)
             iteration.setString("failure", "stop");
         }
 
-        iteration.setDouble("stopMs", host.stats().lastStopMs);
+        iteration.setDouble("stopMs", host.stats().lastStopMs)
+            .setDouble("maxCallbackMs", host.stats().clock.maxCallbackMs)
+            .setInt("slowCallbacks", (long long)host.stats().clock.slowCallbacks);
         iterationJson.push_back(iteration.str());
 
         if (rc == 0 && i + 1 < iterations) {

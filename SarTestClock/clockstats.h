@@ -43,6 +43,11 @@ struct ClockStats
     double sampleRate;
     uint32_t bufferFrames;
     uint32_t reserved;
+    // Time spent inside the host's bufferSwitch callback, which runs on the
+    // clock thread and includes SarAsio's whole tick. A blocking call in
+    // there stalls every endpoint at once.
+    double maxCallbackMs;
+    uint64_t slowCallbacks;     // callbacks that took more than half a period
 };
 
 } // namespace SarTestClock

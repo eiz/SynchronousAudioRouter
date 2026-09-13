@@ -176,6 +176,8 @@ public:
         _ticks = 0;
         _lateTicks = 0;
         _maxLatenessMs = 0.0;
+        _maxCallbackMs = 0.0;
+        _slowCallbacks = 0;
         _running = true;
         _thread = std::thread([this] { tickThread(); });
         return AsioStatus::OK;
@@ -377,6 +379,8 @@ public:
             stats->sampleRate = _sampleRate;
             stats->bufferFrames = (uint32_t)_bufferFrames;
             stats->reserved = 0;
+            stats->maxCallbackMs = _maxCallbackMs.load();
+            stats->slowCallbacks = _slowCallbacks.load();
             return AsioStatus::OK;
         }
 
@@ -437,7 +441,20 @@ private:
             }
 
             _samplePosition += _bufferFrames;
+
+            int64_t callbackStart = fileTimeNow();
+
             _callbacks.tick(bufferIndex, AsioBool::True);
+
+            double callbackMs = (double)(fileTimeNow() - callbackStart) / 10000.0;
+
+            if (callbackMs > _maxCallbackMs.load()) {
+                _maxCallbackMs = callbackMs;
+            }
+
+            if (callbackMs > periodMs / 2.0) {
+                _slowCallbacks++;
+            }
             bufferIndex ^= 1;
             _ticks++;
         }
@@ -462,6 +479,8 @@ private:
     std::atomic<uint64_t> _ticks{ 0 };
     std::atomic<uint64_t> _lateTicks{ 0 };
     std::atomic<double> _maxLatenessMs{ 0.0 };
+    std::atomic<double> _maxCallbackMs{ 0.0 };
+    std::atomic<uint64_t> _slowCallbacks{ 0 };
 };
 
 class ClassFactory: public IClassFactory

@@ -332,10 +332,13 @@ bool AsioHost::stop()
         return false;
     }
 
-    logf("stop OK in %.1f ms (%lld ticks so far, clock late %llu of %llu)",
+    logf("stop OK in %.1f ms (%lld ticks so far, clock late %llu of %llu, "
+        "slowest callback %.1f ms, %llu slow)",
         elapsed, _stats.ticks,
         (unsigned long long)_stats.clock.lateTicks,
-        (unsigned long long)_stats.clock.ticks);
+        (unsigned long long)_stats.clock.ticks,
+        _stats.clock.maxCallbackMs,
+        (unsigned long long)_stats.clock.slowCallbacks);
     return true;
 }
 
@@ -446,7 +449,9 @@ std::string AsioHost::toJson() const
     clock.setInt("ticks", (long long)_stats.clock.ticks)
         .setInt("lateTicks", (long long)_stats.clock.lateTicks)
         .setDouble("maxLatenessMs", _stats.clock.maxLatenessMs)
-        .setDouble("periodMs", _stats.clock.periodMs);
+        .setDouble("periodMs", _stats.clock.periodMs)
+        .setDouble("maxCallbackMs", _stats.clock.maxCallbackMs)
+        .setInt("slowCallbacks", (long long)_stats.clock.slowCallbacks);
 
     JsonObject host;
 

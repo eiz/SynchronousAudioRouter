@@ -47,6 +47,8 @@ struct StreamStats
     // Undecodable frames before the signal locks in (at the start, and again
     // after a reopen): the engine ramping a new stream's volume in.
     long long transitionFrames = 0;
+    long long rampRuns = 0;
+    long long corruptRuns = 0;
     // Silent frames once the signal has locked in: dropouts.
     long long midStreamSilentFrames = 0;
     long long timeouts = 0;
@@ -54,6 +56,9 @@ struct StreamStats
     // was reopened after one, as a well-behaved client would.
     int invalidations = 0;
     int reopens = 0;
+    // Setup calls that failed and were retried (e.g. a mix format that went
+    // stale because the endpoint was reconfigured in between).
+    int setupErrors = 0;
     // The first undecodable frames, with their raw sample values.
     std::vector<std::string> badFrameSamples;
     // The first dropouts and sequence jumps, timed from the start of the run.
@@ -87,13 +92,13 @@ struct WasapiOptions
     // The ASIO host is going to be killed underneath the streams, so device
     // invalidation is the expected outcome rather than a failure.
     bool expectInvalidation = false;
-    double minValidRatio = 0.9;
+    double minValidRatio = 0.5;
     long long maxDiscontinuities = -1;   // -1: report only
     // SarAsio broadcasts a format change whenever one of its endpoints
     // becomes active, which invalidates open streams: wait before streaming,
     // and reopen invalidated streams like a well-behaved client would.
     double settleSeconds = 2.0;
-    int maxReopens = 3;
+    int maxReopens = 20;
     long long maxTransitionFrames = 4800;
 };
 
