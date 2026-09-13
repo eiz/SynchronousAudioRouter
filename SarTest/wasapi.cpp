@@ -458,29 +458,72 @@ private:
         }
     }
 
-    // Classifies a finished run of frames that did not decode. The engine
-    // fades a stream in and out, so a run that borders silence or the start
-    // of the stream is the right samples scaled: a ramp. A run between valid
-    // frames, or longer than any ramp, is corruption.
+    // True when the frame is the test signal scaled by one gain on every
+    // channel: the engine ramping a stream's volume, not corrupted data.
+    // Sample k on a channel with id i is i * 65536 + seq, so two channels
+    // give the gain from their difference and every channel must agree.
+    bool isScaledSignal(const int32_t *values, int count) const
+    {
+        if (count < 2 || _channelIds[0] == _channelIds[1]) {
+            return false;
+        }
+
+        double ida = (double)_channelIds[0], idb = (double)_channelIds[1];
+        double gain = (double)(values[1] - values[0]) / ((idb - ida) * 65536.0);
+
+        if (!(gain > 0.0 && gain < 1.0)) {
+            return false;
+        }
+
+        double seq = (double)values[0] / gain - ida * 65536.0;
+
+        if (seq < -2.0 || seq > 65537.0) {
+            return false;
+        }
+
+        for (int c = 0; c < count && c < 32; ++c) {
+            double expected = gain * ((double)_channelIds[(size_t)c] * 65536.0 + seq);
+
+            if (fabs((double)values[c] - expected) > 3.0 + fabs(expected) * 0.002) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    // Classifies a finished run of frames that did not decode. Frames that
+    // are the signal scaled by one gain are a ramp wherever they occur (a
+    // reopened stream can fade in with no silence before it). Other frames
+    // are corruption, unless the run borders silence or the start of the
+    // stream, where the gain is too small for the scaling to survive
+    // rounding. A run longer than any ramp is corruption regardless.
     void endBadRun(bool bordersGap)
     {
         if (_badRun == 0) {
             return;
         }
 
-        bool ramp = bordersGap && _badRun <= _maxTransitionFrames;
-        char head[128];
+        long long corrupt = bordersGap ? 0 : _badRunUnscaled;
+
+        if (_badRun > _maxTransitionFrames) {
+            corrupt = _badRun;
+        }
+
+        bool ramp = corrupt == 0;
+        char head[160];
+
+        _stats.transitionFrames += _badRun - corrupt;
+        _stats.wrongChannelFrames += corrupt;
 
         if (ramp) {
-            _stats.transitionFrames += _badRun;
             _stats.rampRuns++;
         } else {
-            _stats.wrongChannelFrames += _badRun;
             _stats.corruptRuns++;
         }
 
-        sprintf_s(head, "%s run of %lld frames at %.3f s", ramp ? "ramp" : "corrupt",
-            _badRun, _badRunStartMs / 1000.0);
+        sprintf_s(head, "%s run of %lld frames (%lld not a scaled signal) at %.3f s",
+            ramp ? "ramp" : "corrupt", _badRun, _badRunUnscaled, _badRunStartMs / 1000.0);
 
         if (!ramp) {
             logf("%s: %s", _stats.name.c_str(), head);
@@ -506,6 +549,7 @@ private:
         }
 
         _badRun = 0;
+        _badRunUnscaled = 0;
         _badRunSamples.clear();
     }
 
@@ -580,6 +624,10 @@ private:
 
                 _badRun++;
                 _prevSilent = false;
+
+                if (!isScaledSignal(values, expectedChannels)) {
+                    _badRunUnscaled++;
+                }
 
                 if (_badRunSamples.size() < 3) {
                     char buf[512];
@@ -864,6 +912,7 @@ private:
     bool _attemptStarted = false;
     bool _prevSilent = false;
     long long _badRun = 0;
+    long long _badRunUnscaled = 0;
     bool _badRunBordersGap = false;
     double _badRunStartMs = 0.0;
     std::vector<std::string> _badRunSamples;

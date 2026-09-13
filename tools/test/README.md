@@ -35,11 +35,13 @@ endpoint back to its recording twin, channel for channel.
 Render streams emit a signal where each sample encodes its channel id and a
 per-frame sequence number, chosen so it survives the engine's float/int32
 conversions exactly. Capture streams decode it and count valid frames,
-silence and sequence discontinuities. A run of frames that do not decode is
-a ramp when it borders silence or the start of the stream: the engine fades
-streams in and out, so those are the right samples scaled, which the raw
-values recorded in the results show. A run between valid frames, or longer
-than `--max-transition` frames (100 ms), is corruption. A capture stream
+silence and sequence discontinuities. Frames that do not decode but are the
+signal scaled by one gain on every channel are a ramp: the engine fades
+streams in and out, including a reopened stream that fades in with no
+silence before it, and the raw values recorded in the results show the
+scaling. Other undecodable frames are corruption, except right next to
+silence where the gain is too small for the scaling to survive rounding. A
+run longer than `--max-transition` frames (100 ms) is corruption regardless. A capture stream
 passes when it received the signal, saw no corruption, and at least half of
 the frames after the initial silence were valid (`--min-valid`;
 `--max-discontinuities` optionally bounds sequence gaps). Dropouts,
