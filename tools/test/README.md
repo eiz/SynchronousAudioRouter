@@ -109,7 +109,9 @@ configured and checks that it still offers a stereo input and output.
 then gives it a new ID, and checks that the new ID shows the new name; the
 results record what Windows shows for the reused ID. `long-endpoint-name`
 runs a host whose endpoint names are longer than the driver's 63-character
-limit. `app-routing` runs a loopback with application routing on and
+limit. The `format-*` scenarios (#2) run the same endpoint IDs at 48 kHz, 96 kHz,
+48 kHz again and then in mono, and fail if a stream's engine format doesn't
+match (`--expect-format`). `app-routing` runs a loopback with application routing on and
 SarAsio's COM classes registered, which turns on the driver's registry
 filter.
 

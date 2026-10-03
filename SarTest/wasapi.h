@@ -36,6 +36,7 @@ struct StreamStats
     std::string errorStage;
     std::string format;
     int channels = 0;
+    unsigned long sampleRate = 0;
     long long framesProcessed = 0;
     long long silentFrames = 0;
     long long startupSilentFrames = 0;
@@ -104,6 +105,10 @@ struct WasapiOptions
     double settleSeconds = 2.0;
     int maxReopens = 20;
     long long maxTransitionFrames = 4800;
+    // Fail streams whose engine format differs from these (0: don't check),
+    // e.g. when Windows kept an endpoint's old format after a change.
+    unsigned long expectedRate = 0;
+    int expectedChannels = 0;
 };
 
 struct WasapiResult
