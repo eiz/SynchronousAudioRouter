@@ -746,8 +746,60 @@ VOID SarUnload(PDRIVER_OBJECT driverObject)
     }
 }
 
+// The buffer of a ProcessMitigationPolicy query (what user mode's
+// GetProcessMitigationPolicy uses): the policy to read, then its flags.
+typedef struct SarProcessMitigationPolicyInformation
+{
+    ULONG policy;
+    ULONG flags;
+} SarProcessMitigationPolicyInformation;
+
+// Exported by the kernel and documented, but not declared by the headers
+// this driver includes.
+extern "C" NTSYSAPI NTSTATUS NTAPI ZwQueryInformationProcess(
+    _In_ HANDLE ProcessHandle,
+    _In_ PROCESSINFOCLASS ProcessInformationClass,
+    _Out_writes_bytes_(ProcessInformationLength) PVOID ProcessInformation,
+    _In_ ULONG ProcessInformationLength,
+    _Out_opt_ PULONG ReturnLength);
+
+#define SAR_PROCESS_MITIGATION_POLICY_CLASS ((PROCESSINFOCLASS)52)
+#define SAR_PROCESS_SIGNATURE_POLICY 8
+// PROCESS_MITIGATION_BINARY_SIGNATURE_POLICY's MicrosoftSignedOnly,
+// StoreSignedOnly and MitigationOptIn (Microsoft, Store or WHQL) flags.
+#define SAR_SIGNATURE_POLICY_RESTRICTIONS 0x7
+
+// Whether the current process may only load images signed by Microsoft (or
+// the Store, or WHQL). SarAsio.dll is none of those.
+static BOOL SarCurrentProcessRequiresMicrosoftSignedImages()
+{
+    SarProcessMitigationPolicyInformation info = {};
+
+    info.policy = SAR_PROCESS_SIGNATURE_POLICY;
+
+    NTSTATUS status = ZwQueryInformationProcess(
+        ZwCurrentProcess(), SAR_PROCESS_MITIGATION_POLICY_CLASS,
+        &info, sizeof(info), nullptr);
+
+    if (!NT_SUCCESS(status)) {
+        return FALSE;
+    }
+
+    return (info.flags & SAR_SIGNATURE_POLICY_RESTRICTIONS) != 0;
+}
+
 BOOL SarFilterMatchesCurrentProcess(SarDriverExtension *extension)
 {
+    // Pointing a process that may only load Microsoft-signed images at
+    // SarAsio.dll makes Code Integrity refuse the load, so the audio classes
+    // can't be created there at all: Chromium's sandboxed audio service
+    // (Chrome, Edge, Discord) does this and then plays nothing. Leave such a
+    // process with the system's classes; it loses application routing but
+    // keeps its audio.
+    if (SarCurrentProcessRequiresMicrosoftSignedImages()) {
+        return FALSE;
+    }
+
     PTOKEN_USER tokenUser = nullptr;
     NTSTATUS status = SarCopyProcessUser(PsGetCurrentProcess(), &tokenUser);
 
