@@ -236,9 +236,25 @@ void EndpointsPropertySheetPage::onAddEndpoint()
 {
     _epDialogConfig = EndpointConfig();
 
+    // Windows keeps what it knows about an endpoint (the name it shows, the
+    // user's settings) under its ID, so an ID must never be handed to a
+    // different endpoint: a deleted endpoint's ID given to a new one made
+    // Windows keep showing the deleted endpoint's name.
+    GUID guid;
+
+    if (SUCCEEDED(CoCreateGuid(&guid))) {
+        char id[40];
+
+        sprintf_s(id, "ep_%08lx%04hx%04hx%02x%02x%02x%02x%02x%02x%02x%02x",
+            guid.Data1, guid.Data2, guid.Data3,
+            guid.Data4[0], guid.Data4[1], guid.Data4[2], guid.Data4[3],
+            guid.Data4[4], guid.Data4[5], guid.Data4[6], guid.Data4[7]);
+        _epDialogConfig.id = id;
+    }
+
     int counter = 1;
 
-    do {
+    while (_epDialogConfig.id.empty()) {
         std::ostringstream os;
 
         os << "ep_" << counter;
@@ -248,7 +264,7 @@ void EndpointsPropertySheetPage::onAddEndpoint()
         } else {
             counter++;
         }
-    } while (_epDialogConfig.id.empty());
+    }
 
     auto result = DialogBoxParam(
         gDllModule,
