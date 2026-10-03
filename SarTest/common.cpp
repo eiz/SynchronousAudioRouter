@@ -216,6 +216,7 @@ EndpointLayout EndpointLayout::fromArgs(const Args& args)
     layout.pairs = args.getInt(L"endpoints", 2);
     layout.channels = args.getInt(L"channels", 2);
     layout.prefix = args.get(L"prefix", L"SarTest");
+    layout.idPrefix = args.get(L"id-prefix", L"");
 
     if (layout.pairs < 1) {
         layout.pairs = 1;

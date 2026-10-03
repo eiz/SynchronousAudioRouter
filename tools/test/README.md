@@ -90,7 +90,9 @@ clock never had a second instance alive. It needs an interactive desktop.
 configured and checks that it still offers a stereo input and output.
 `SarTest.exe endpoint-names` (#15, #66) renames an endpoint keeping its ID,
 then gives it a new ID, and checks that the new ID shows the new name; the
-results record what Windows shows for the reused ID.
+results record what Windows shows for the reused ID. `long-endpoint-name`
+runs a host whose endpoint names are longer than the driver's 63-character
+limit.
 `Invoke-SarTest.ps1 -Scenarios` selects any of `issues`, `matrix`, `race`
 and `kill`.
 

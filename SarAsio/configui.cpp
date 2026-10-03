@@ -18,6 +18,7 @@
 #include "configui.h"
 #include "dllmain.h"
 #include "utility.h"
+#include "sar.h"
 
 using namespace Sar;
 
@@ -390,6 +391,8 @@ void EndpointsPropertySheetPage::initEpDialogControls()
     _epDialogType = GetDlgItem(_epDialog, 1103);
     _epDialogChannelCount = GetDlgItem(_epDialog, 1105);
 
+    Edit_LimitText(_epDialogName, MAX_ENDPOINT_NAME_LENGTH);
+
     ComboBox_AddString(_epDialogType, L"Playback");
     ComboBox_AddString(_epDialogType, L"Recording");
     ComboBox_SetCurSel(_epDialogType,
@@ -402,7 +405,7 @@ void EndpointsPropertySheetPage::initEpDialogControls()
     Edit_SetText(_epDialogChannelCount, wos.str().c_str());
 }
 
-void EndpointsPropertySheetPage::updateEpDialogConfig()
+bool EndpointsPropertySheetPage::updateEpDialogConfig()
 {
     auto len = Edit_GetTextLength(_epDialogName);
     auto buf = new WCHAR[len + 1];
@@ -415,12 +418,28 @@ void EndpointsPropertySheetPage::updateEpDialogConfig()
     buf = new WCHAR[len + 1];
     Edit_GetText(_epDialogChannelCount, buf, len + 1);
 
-    auto countStr = TCHARToUTF8(buf);
+    WCHAR *end = nullptr;
+    long count = wcstol(buf, &end, 10);
+    bool valid = end != buf && *end == L'\0' &&
+        count >= 1 && count <= SAR_MAX_CHANNEL_COUNT;
 
     delete[] buf;
-    _epDialogConfig.channelCount = max(1, std::stoi(countStr));
+
+    if (!valid) {
+        // std::stoi threw on these and took the host down with it.
+        std::wostringstream message;
+
+        message << L"The channel count must be a number from 1 to "
+            << SAR_MAX_CHANNEL_COUNT << L".";
+        MessageBox(_epDialog, message.str().c_str(), TEXT("Error"),
+            MB_OK | MB_ICONERROR);
+        return false;
+    }
+
+    _epDialogConfig.channelCount = (int)count;
     _epDialogConfig.type = ComboBox_GetCurSel(_epDialogType) == 1 ?
         EndpointType::Recording : EndpointType::Playback;
+    return true;
 }
 
 INT_PTR EndpointsPropertySheetPage::epDialogProc(
@@ -435,7 +454,9 @@ INT_PTR EndpointsPropertySheetPage::epDialogProc(
         case WM_COMMAND:
             switch (LOWORD(wparam)) {
                 case IDOK:
-                    updateEpDialogConfig();
+                    if (!updateEpDialogConfig()) {
+                        break;
+                    }
 
                     // fall-through
                 case IDCANCEL:

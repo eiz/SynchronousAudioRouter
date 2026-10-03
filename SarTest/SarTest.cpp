@@ -65,6 +65,7 @@ int usage()
         "\n"
         "Layout options: --endpoints N (playback/recording pairs, default 2)\n"
         "                --channels C (per endpoint, default 2) --prefix <name>\n"
+        "                --id-prefix <id> (endpoint IDs; default: the name prefix)\n"
         "Other options:  --results <file.json> --phase-timeout S --no-sarasio-log\n"
         "                --keep-config (host/run: do not rewrite default.json)\n"
         "                --registered (use the COM-registered SarAsio instead of a path)\n"

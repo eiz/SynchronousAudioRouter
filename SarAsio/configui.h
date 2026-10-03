@@ -100,7 +100,7 @@ private:
     HWND _removeButton;
 
     void initEpDialogControls();
-    void updateEpDialogConfig();
+    bool updateEpDialogConfig();
     INT_PTR epDialogProc(
         HWND hwnd, UINT msg, WPARAM wparam, LPARAM lparam);
     static INT_PTR CALLBACK epDialogProcStub(
