@@ -718,7 +718,6 @@ NTSTATUS SarIrpDeviceControl(PDEVICE_OBJECT deviceObject, PIRP irp)
 VOID SarUnload(PDRIVER_OBJECT driverObject)
 {
     SAR_INFO("SAR is unloading");
-    KIRQL irql;
     SarDriverExtension *extension =
         (SarDriverExtension *)IoGetDriverObjectExtension(
             driverObject, DriverEntry);
@@ -731,12 +730,15 @@ VOID SarUnload(PDRIVER_OBJECT driverObject)
         CmUnRegisterCallback(extension->filterCookie);
     }
 
-    irql = ExAcquireSpinLockExclusive(&extension->registryRedirectLock);
+    KeEnterCriticalRegion();
+    ExAcquireResourceExclusiveLite(&extension->registryRedirectLock, TRUE);
     SarClearStringTable(
         &extension->registryRedirectTableWow64, SarDeleteRegistryRedirect);
     SarClearStringTable(
         &extension->registryRedirectTable, SarDeleteRegistryRedirect);
-    ExReleaseSpinLockExclusive(&extension->registryRedirectLock, irql);
+    ExReleaseResourceLite(&extension->registryRedirectLock);
+    KeLeaveCriticalRegion();
+    ExDeleteResourceLite(&extension->registryRedirectLock);
 
     if (extension->filterUser) {
         // Allocated by SeQueryInformationToken
@@ -768,9 +770,6 @@ BOOL SarFilterMatchesPath(
 {
     PRTL_AVL_TABLE table = &extension->registryRedirectTable;
     PVOID entry = nullptr;
-    KIRQL irql;
-    UNICODE_STRING nonpagedPath;
-    NTSTATUS status = STATUS_SUCCESS;
 
     if (!path) {
         return FALSE;
@@ -782,24 +781,20 @@ BOOL SarFilterMatchesPath(
     }
 #endif
 
-    // TODO: we get a path that's in paged memory from the configuration manager
-    // so we can't access it with IRQL raised to dispatch level by the spinlock.
-    // Probably better to just use an ERESOURCE or something here instead.
-    status = SarStringDuplicate(&nonpagedPath, path);
-
-    if (!NT_SUCCESS(status)) {
-        return FALSE;
-    }
-
-    irql = ExAcquireSpinLockShared(&extension->registryRedirectLock);
-    entry = SarGetStringTableEntry(table, &nonpagedPath);
+    // Stay at PASSIVE_LEVEL: the path from the configuration manager is in
+    // paged memory and the table's string comparison is pageable code. Under
+    // a spin lock this bugchecked (IRQL_NOT_LESS_OR_EQUAL) whenever that code
+    // was paged out.
+    KeEnterCriticalRegion();
+    ExAcquireResourceSharedLite(&extension->registryRedirectLock, TRUE);
+    entry = SarGetStringTableEntry(table, path);
 
     if (entry) {
         *redirectPath = *(PCUNICODE_STRING)entry;
     }
 
-    ExReleaseSpinLockShared(&extension->registryRedirectLock, irql);
-    SarStringFree(&nonpagedPath);
+    ExReleaseResourceLite(&extension->registryRedirectLock);
+    KeLeaveCriticalRegion();
     return entry != nullptr;
 }
 
@@ -1129,6 +1124,7 @@ extern "C" NTSTATUS DriverEntry(
 
     RtlZeroMemory(extension, sizeof(SarDriverExtension));
     ExInitializeFastMutex(&extension->mutex);
+    ExInitializeResourceLite(&extension->registryRedirectLock);
     SarInitializeTable(&extension->controlContextTable);
     SarInitializeStringTable(&extension->registryRedirectTableWow64);
     SarInitializeStringTable(&extension->registryRedirectTable);

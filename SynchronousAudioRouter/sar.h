@@ -210,11 +210,12 @@ typedef struct SarDriverExtension
     // This shouldn't really be needed as long as CmUnRegisterCallback can't
     // complete while one of our callback routines is still running, but there
     // is no explicit documentation of that, so we protect the registry redirect
-    // tables with a reader writer spinlock "just in case." Note that
+    // tables with a reader writer lock "just in case." Note that
     // RTL_AVL_TABLE is used here instead of RTL_GENERIC_TABLE to avoid
-    // splaying which would be unsafe with a read-only lock. All related
-    // structures must be in nonpaged memory.
-    EX_SPIN_LOCK registryRedirectLock;
+    // splaying which would be unsafe with a read-only lock. It is a resource,
+    // not a spin lock: lookups compare strings with RtlCompareUnicodeString,
+    // which is pageable, and the registry callback runs at PASSIVE_LEVEL.
+    ERESOURCE registryRedirectLock;
     RTL_AVL_TABLE registryRedirectTableWow64;
     RTL_AVL_TABLE registryRedirectTable;
     LARGE_INTEGER filterCookie;
