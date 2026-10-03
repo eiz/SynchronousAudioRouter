@@ -746,8 +746,63 @@ VOID SarUnload(PDRIVER_OBJECT driverObject)
     }
 }
 
+// The buffer of a ProcessMitigationPolicy query: the policy to read, then
+// that policy's flags. It is what user mode's GetProcessMitigationPolicy
+// passes down. ntddk.h declares the information class, the policies and each
+// policy's flags, but not this wrapper around them.
+typedef struct SarProcessSignaturePolicyInformation
+{
+    PROCESS_MITIGATION_POLICY policy;
+    PROCESS_MITIGATION_BINARY_SIGNATURE_POLICY signature;
+} SarProcessSignaturePolicyInformation;
+
+// The kernel rejects a buffer of any other size, and a failed query is
+// treated as "not restricted".
+C_ASSERT(sizeof(SarProcessSignaturePolicyInformation) == 8);
+
+// Exported by the kernel and documented, but not declared by the headers
+// this driver includes.
+extern "C" NTSYSAPI NTSTATUS NTAPI ZwQueryInformationProcess(
+    _In_ HANDLE ProcessHandle,
+    _In_ PROCESSINFOCLASS ProcessInformationClass,
+    _Out_writes_bytes_(ProcessInformationLength) PVOID ProcessInformation,
+    _In_ ULONG ProcessInformationLength,
+    _Out_opt_ PULONG ReturnLength);
+
+// Whether the current process may only load images signed by Microsoft (or
+// the Store, or WHQL: MitigationOptIn allows all three). SarAsio.dll is none
+// of those.
+static BOOL SarCurrentProcessRequiresMicrosoftSignedImages()
+{
+    SarProcessSignaturePolicyInformation info = {};
+
+    info.policy = ProcessSignaturePolicy;
+
+    NTSTATUS status = ZwQueryInformationProcess(
+        ZwCurrentProcess(), ProcessMitigationPolicy,
+        &info, sizeof(info), nullptr);
+
+    if (!NT_SUCCESS(status)) {
+        return FALSE;
+    }
+
+    return info.signature.MicrosoftSignedOnly ||
+        info.signature.StoreSignedOnly ||
+        info.signature.MitigationOptIn;
+}
+
 BOOL SarFilterMatchesCurrentProcess(SarDriverExtension *extension)
 {
+    // Pointing a process that may only load Microsoft-signed images at
+    // SarAsio.dll makes Code Integrity refuse the load, so the audio classes
+    // can't be created there at all: Chromium's sandboxed audio service
+    // (Chrome, Edge, Discord) does this and then plays nothing. Leave such a
+    // process with the system's classes; it loses application routing but
+    // keeps its audio.
+    if (SarCurrentProcessRequiresMicrosoftSignedImages()) {
+        return FALSE;
+    }
+
     PTOKEN_USER tokenUser = nullptr;
     NTSTATUS status = SarCopyProcessUser(PsGetCurrentProcess(), &tokenUser);
 
