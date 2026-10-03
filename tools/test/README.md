@@ -82,6 +82,23 @@ watched; one that does not return within `--phase-timeout` is reported as
 `HANG`. The scenario fails if any call hung, the host failed to start or
 stop, or no stream was ever opened.
 
+After the race, `settle-after-race` waits (up to two minutes) for Windows'
+audio endpoint builder to go idle and records how long that took. The
+race's restarts queue more endpoint arrivals and removals than the builder
+can process as they happen; with 16 pairs it stays busy for about 15 s
+afterwards, tearing down and rebuilding SAR endpoints one at a time, and
+streams opened meanwhile stall for up to 4 s in Activate (and longer in
+Initialize, which the audio service serializes) or get invalidated. Without
+the wait, `recovery-after-kill` measured that instead of recovery from a
+killed host.
+
+`SarTest.exe watch` runs from before the race through recovery and logs,
+with timestamps, every change in which SAR KS interfaces are enabled, every
+endpoint state change Windows reports, and seconds in which the endpoint
+builder or audio service used 50 ms of CPU or more (`watch.log`,
+`watch.json`). An endpoint that goes `notpresent` while its interface stays
+enabled is the endpoint builder rebuilding it.
+
 The `issue-*` scenarios are regression checks for specific GitHub issues.
 `SarTest.exe control-panel` (#133) opens SAR's control panel on a running
 host, presses the hardware interface's Configure button and checks that the
@@ -120,6 +137,7 @@ SarTest control-panel
 SarTest no-interface
 SarTest endpoint-names
 SarTest meter [--duration S] [--process <name.exe>] [--min-peak P]
+SarTest watch [--duration S] [--stop-file <path>] [--poll MS] [--probe MS]
 ```
 
 `install` creates the SAR software device node if needed, installs the
