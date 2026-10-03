@@ -156,9 +156,10 @@ UINT __stdcall RemoveDeviceNode(MSIHANDLE hInstall)
 
         BOOL found = FALSE;
 
+        // A REG_MULTI_SZ: strings separated by one null, ended by two.
         for (WCHAR *p = buffer;
-            p < p + requiredSize / sizeof(WCHAR) && *p;
-            p += lstrlen(p) + 2) {
+            p < buffer + requiredSize / sizeof(WCHAR) && *p;
+            p += lstrlen(p) + 1) {
 
             if (!lstrcmpi(p, HARDWARE_ID)) {
                 found = TRUE;
