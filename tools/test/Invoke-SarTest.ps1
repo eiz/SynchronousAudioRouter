@@ -159,7 +159,7 @@ function Invoke-BrowserScenario {
     $page = 'file:///' + ((Join-Path $PSScriptRoot 'tone.html') -replace '\\', '/')
     $userData = Join-Path $env:TEMP "sartest-edge-$Name"
     $edgeArgs = "--user-data-dir=`"$userData`" --no-first-run --no-default-browser-check " +
-        "--autoplay-policy=no-user-gesture-required `"$page`""
+        "--autoplay-policy=no-user-gesture-required --enable-logging --v=0 `"$page`""
     $me = [Security.Principal.WindowsIdentity]::GetCurrent().Name
     Register-ScheduledTask -TaskName 'SarTestEdge' -Force `
         -Action (New-ScheduledTaskAction -Execute $edge -Argument $edgeArgs) `
@@ -189,6 +189,14 @@ function Invoke-BrowserScenario {
     if (-not $record.edgeStarted) {
         $record.outcome = 'error'
         $record.error = "Edge's audio service never started"
+        # What Edge was doing instead, for working out why.
+        $record.edgeProcesses = @(Get-CimInstance Win32_Process |
+            Where-Object { $_.Name -match '^(msedge|MicrosoftEdgeUpdate|setup|elevation_service)' } |
+            ForEach-Object { "$($_.ProcessId) $($_.Name) $($_.CommandLine)" })
+        $record.edgeVersion = (Get-Item $edge).VersionInfo.ProductVersion
+        $debugLog = Join-Path $userData 'chrome_debug.log'
+        if (Test-Path $debugLog) { Copy-Item $debugLog (Join-Path $ResultsDir "$Name-chrome_debug.log") }
+        $record.edgeProcesses | ForEach-Object { Write-Host "    $_" }
         Unregister-ScheduledTask -TaskName 'SarTestEdge' -Confirm:$false -ErrorAction SilentlyContinue
         try { Stop-Process -Id $hostProc.Id -Force } catch { }
         $null = $hostProc.WaitForExit(60000)
