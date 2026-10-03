@@ -153,6 +153,11 @@ if ($Scenarios -contains 'issues') {
         @('no-interface') + $common) -Timeout 120
     $summary.scenarios += Invoke-Scenario 'issue-15-endpoint-names' (
         @('endpoint-names') + $common) -Timeout 300
+    # An endpoint name longer than the driver's 63 characters used to abort
+    # the host process in SarAsio.
+    $summary.scenarios += Invoke-Scenario 'long-endpoint-name' (
+        @('host', '--endpoints', 1, '--duration', 2, '--id-prefix', 'SarTest-long',
+          '--prefix', ('SarTestLongEndpointName' * 4)) + $common) -Timeout 120
 }
 
 if ($Scenarios -contains 'matrix') {
