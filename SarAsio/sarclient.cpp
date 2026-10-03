@@ -397,8 +397,20 @@ bool SarClient::createEndpoints()
             SAR_ENDPOINT_TYPE_PLAYBACK : SAR_ENDPOINT_TYPE_RECORDING;
         request.channelCount = endpoint.channelCount;
         request.index = i++;
-        wcscpy_s(request.name, endpoint.description.c_str());
-        wcscpy_s(request.id, UTF8ToWide(endpoint.id).c_str());
+
+        // wcscpy_s would abort the host process on a value that doesn't fit.
+        // A long name is only cut short; a long ID can't be, since two IDs
+        // could then collide.
+        auto id = UTF8ToWide(endpoint.id);
+
+        if (id.size() > MAX_ENDPOINT_NAME_LENGTH) {
+            LOG(ERROR) << "Endpoint ID " << endpoint.id << " is longer than "
+                << MAX_ENDPOINT_NAME_LENGTH << " characters.";
+            return false;
+        }
+
+        wcsncpy_s(request.name, endpoint.description.c_str(), _TRUNCATE);
+        wcscpy_s(request.id, id.c_str());
 
         if (!DeviceIoControl(_device, SAR_CREATE_ENDPOINT,
             (LPVOID)&request, sizeof(request), nullptr, 0, &dummy, nullptr)) {
