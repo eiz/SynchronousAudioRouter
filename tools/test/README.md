@@ -95,8 +95,16 @@ runs a host whose endpoint names are longer than the driver's 63-character
 limit. `app-routing` runs a loopback with application routing on and
 SarAsio's COM classes registered, which turns on the driver's registry
 filter.
-`Invoke-SarTest.ps1 -Scenarios` selects any of `issues`, `matrix`, `race`
-and `kill`.
+
+The `browser-audio-*` scenarios (#80, #102, #121, #127) register SarAsio's
+COM classes, run a host with application routing on, play `tone.html` in
+Edge (with its audio sandbox off, then on) and use `SarTest.exe meter` to
+check that Edge's audio session was heard. They also record the sandboxed
+audio service's mitigation policies, whether `SarAsio.dll` was loaded into
+it, and Code Integrity events naming it. They run last, and are skipped
+without Edge.
+`Invoke-SarTest.ps1 -Scenarios` selects any of `issues`, `matrix`, `race`,
+`kill` and `browser`.
 
 ## Commands
 
@@ -111,6 +119,7 @@ SarTest race [--cycles K] [--up S] [--down MS] [--openers T] [--hold MS]
 SarTest control-panel
 SarTest no-interface
 SarTest endpoint-names
+SarTest meter [--duration S] [--process <name.exe>] [--min-peak P]
 ```
 
 `install` creates the SAR software device node if needed, installs the
