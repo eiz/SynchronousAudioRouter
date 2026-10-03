@@ -68,6 +68,7 @@ int usage()
         "                --id-prefix <id> (endpoint IDs; default: the name prefix)\n"
         "Other options:  --results <file.json> --phase-timeout S --no-sarasio-log\n"
         "                --keep-config (host/run: do not rewrite default.json)\n"
+        "                --app-routing (turn on application routing in default.json)\n"
         "                --registered (use the COM-registered SarAsio instead of a path)\n"
         "                --wait S --wait-gone S --restart-delay MS --rate HZ\n"
         "                --min-valid RATIO --max-discontinuities N\n"
@@ -145,7 +146,7 @@ bool prepareConfig(const Args& args, const EndpointLayout& layout,
     }
 
     if (!writeDriverConfig(layout, driverClsid,
-        args.getInt(L"wavert-min-frames", 0), path)) {
+        args.getInt(L"wavert-min-frames", 0), path, args.has(L"app-routing"))) {
         return false;
     }
 
@@ -211,7 +212,7 @@ int cmdConfig(const Args& args)
     std::wstring out = args.get(L"out", configurationPath().c_str());
 
     if (!writeDriverConfig(layout, SAR_TEST_CLOCK_CLSID_STR,
-        args.getInt(L"wavert-min-frames", 0), out)) {
+        args.getInt(L"wavert-min-frames", 0), out, args.has(L"app-routing"))) {
         return 1;
     }
 

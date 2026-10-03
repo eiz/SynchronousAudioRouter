@@ -109,6 +109,16 @@ function Invoke-Scenario {
     return $record
 }
 
+# Registers or unregisters SarAsio's COM classes. The driver's application
+# routing only redirects to SarAsio when they are registered.
+function Set-SarAsioRegistered {
+    param([bool]$Registered)
+
+    $regArgs = @('/s') + $(if ($Registered) { @() } else { @('/u') }) + @("`"$sarAsio`"")
+    $proc = Start-Process regsvr32.exe -ArgumentList $regArgs -Wait -PassThru
+    if ($proc.ExitCode -ne 0) { Write-Warning "regsvr32 $($regArgs -join ' ') exited with $($proc.ExitCode)" }
+}
+
 # Windows Server images ship with the audio stack disabled.
 foreach ($service in 'AudioEndpointBuilder', 'Audiosrv') {
     try {
@@ -146,7 +156,7 @@ if (-not $SkipInstall) {
 $common = @('--sarasio', "`"$sarAsio`"", '--channels', $Channels)
 
 if ($Scenarios -contains 'issues') {
-    # Regression checks for specific GitHub issues, one short host each.
+    # Regression checks, one short host each, most for a GitHub issue.
     $summary.scenarios += Invoke-Scenario 'issue-133-control-panel' (
         @('control-panel', '--endpoints', 1) + $common) -Timeout 120
     $summary.scenarios += Invoke-Scenario 'issue-54-no-interface' (
@@ -158,6 +168,14 @@ if ($Scenarios -contains 'issues') {
     $summary.scenarios += Invoke-Scenario 'long-endpoint-name' (
         @('host', '--endpoints', 1, '--duration', 2, '--id-prefix', 'SarTest-long',
           '--prefix', ('SarTestLongEndpointName' * 4)) + $common) -Timeout 120
+    # Application routing on: from then on the driver's registry filter sees
+    # every registry value query on the machine. With SarAsio's COM classes
+    # registered, the harness's own WASAPI client also goes through SarAsio's
+    # device enumerator wrapper.
+    Set-SarAsioRegistered $true
+    $summary.scenarios += Invoke-Scenario 'app-routing' (
+        @('run', '--endpoints', 1, '--iterations', 1, '--duration', $Duration, '--app-routing') + $common)
+    Set-SarAsioRegistered $false
 }
 
 if ($Scenarios -contains 'matrix') {

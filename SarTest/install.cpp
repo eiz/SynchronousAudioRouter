@@ -58,7 +58,8 @@ std::wstring loggingPath()
 
 bool writeDriverConfig(
     const EndpointLayout& layout, const std::wstring& driverClsid,
-    int waveRtMinimumFrames, const std::wstring& path)
+    int waveRtMinimumFrames, const std::wstring& path,
+    bool applicationRouting)
 {
     std::vector<std::string> endpoints;
 
@@ -80,7 +81,7 @@ bool writeDriverConfig(
     JsonObject root;
 
     root.setString("driverClsid", narrow(driverClsid))
-        .setBool("enableApplicationRouting", false)
+        .setBool("enableApplicationRouting", applicationRouting)
         .setInt("waveRtMinimumFrames", waveRtMinimumFrames)
         .setRaw("endpoints", jsonArray(endpoints))
         .setRaw("applications", "[]");
