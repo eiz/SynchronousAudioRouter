@@ -117,6 +117,52 @@ jobs:
             -DriverVersion ${{ steps.ver.outputs.numeric }} `
             -Describe "${{ steps.ver.outputs.describe }}"
 
+      - name: Test-sign package
+        shell: pwsh
+        run: |
+          # A second copy of the package signed with a throwaway self-signed
+          # certificate, for test machines with test signing enabled. The
+          # certificate (.cer) ships alongside so the guest can trust it.
+          $plat = "${{ matrix.platform }}"
+          $stage = "artifacts/$plat"
+          $signed = "artifacts/$plat-testsigned"
+          New-Item -ItemType Directory -Force -Path $signed | Out-Null
+          foreach ($ext in 'sys', 'inf', 'cat') {
+            Copy-Item "$stage/SynchronousAudioRouter.$ext" $signed -Force
+          }
+          # Driver symbols, for reading crash dumps from test machines.
+          $pdb = Get-ChildItem -Recurse -Filter 'SynchronousAudioRouter.pdb' |
+                 Where-Object { $_.FullName -match "\\$plat\\Release\\" } |
+                 Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          if ($pdb) { Copy-Item $pdb.FullName $signed -Force } else { Write-Warning 'SynchronousAudioRouter.pdb not found' }
+          $cert = New-SelfSignedCertificate -Type CodeSigningCert -Subject 'CN=SAR CI test signing' `
+            -CertStoreLocation Cert:\CurrentUser\My -HashAlgorithm SHA256 -NotAfter (Get-Date).AddYears(2)
+          Export-Certificate -Cert $cert -FilePath "$signed/testsign.cer" | Out-Null
+          $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Recurse -Filter signtool.exe |
+                      Where-Object { $_.FullName -match '\\x64\\' } |
+                      Sort-Object FullName -Descending | Select-Object -First 1
+          if (-not $signtool) { throw 'signtool.exe not found' }
+          & $signtool.FullName sign /fd SHA256 /sha1 $cert.Thumbprint /s My `
+            "$signed/SynchronousAudioRouter.sys" "$signed/SynchronousAudioRouter.cat"
+          if ($LASTEXITCODE -ne 0) { throw "signtool failed (exit $LASTEXITCODE)" }
+          Remove-Item "Cert:\CurrentUser\My\$($cert.Thumbprint)" -Force
+          $lines = Get-ChildItem $signed -File | Where-Object { $_.Name -ne 'SHA256SUMS.txt' } |
+                   Get-FileHash -Algorithm SHA256 |
+                   ForEach-Object { '{0}  {1}' -f $_.Hash, (Split-Path $_.Path -Leaf) }
+          $lines | Out-File "$signed/SHA256SUMS.txt" -Encoding ascii
+          @"
+          TEST-SIGNED package: only loads on machines with test signing enabled
+          (bcdedit /set testsigning on) that trust testsign.cer in both the Root and
+          TrustedPublisher stores. Not for distribution.
+          "@ | Out-File "$signed/README.txt" -Encoding ascii
+
+      - name: Upload test-signed package
+        uses: actions/upload-artifact@v4
+        with:
+          name: sar-driver-${{ matrix.platform }}-testsigned
+          path: artifacts/${{ matrix.platform }}-testsigned/
+          if-no-files-found: error
+
       - name: Attest build provenance
         if: github.event_name == 'push'   # OIDC token isn't writable on fork PRs
         uses: actions/attest-build-provenance@v1
@@ -149,11 +195,11 @@ jobs:
         with:
           vs-version: "[17.0,18.0)"
 
-      - name: Build SarAsio
+      - name: Build user-mode projects
         shell: pwsh
         run: |
           & msbuild SynchronousAudioRouter.sln `
-              '/t:SarAsio;SarConfigure;SarCtl' `
+              '/t:SarAsio;SarConfigure;SarCtl;SarTest;SarTestClock' `
               /p:Configuration=Release `
               /p:Platform=${{ matrix.platform }} `
               /m /verbosity:minimal /nologo
@@ -165,11 +211,22 @@ jobs:
           $plat = "${{ matrix.platform }}"
           $stage = "artifacts/$plat"
           New-Item -ItemType Directory -Force -Path $stage | Out-Null
-          $dll = Get-ChildItem -Recurse -Filter 'SarAsio.dll' |
-                 Where-Object { $_.FullName -match "\\Release\\" } |
-                 Sort-Object LastWriteTime -Descending | Select-Object -First 1
-          if (-not $dll) { throw "SarAsio.dll not found - did the build succeed?" }
-          Copy-Item $dll.FullName $stage -Force
+          foreach ($name in 'SarAsio.dll', 'SarConfigure.exe', 'SarTest.exe', 'SarTestClock.dll') {
+            $file = Get-ChildItem -Recurse -Filter $name |
+                    Where-Object { $_.FullName -match "\\Release\\" } |
+                    Sort-Object LastWriteTime -Descending | Select-Object -First 1
+            if (-not $file) { throw "$name not found - did the build succeed?" }
+            Copy-Item $file.FullName $stage -Force
+          }
+          # Symbols, for reading crash dumps from test machines.
+          foreach ($name in 'SarAsio.pdb', 'SarTest.pdb', 'SarTestClock.pdb') {
+            $file = Get-ChildItem -Recurse -Filter $name |
+                    Where-Object { $_.FullName -match "\\Release\\" } |
+                    Sort-Object LastWriteTime -Descending | Select-Object -First 1
+            if ($file) { Copy-Item $file.FullName $stage -Force } else { Write-Warning "$name not found" }
+          }
+          New-Item -ItemType Directory -Force -Path "$stage/test" | Out-Null
+          Copy-Item tools/test/* "$stage/test" -Force
           # Materialize the hash lines into a variable BEFORE opening the output
           # file, and skip the sums file itself - otherwise the same pipeline both
           # reads and writes SHA256SUMS.txt and Get-FileHash hits a file lock.
