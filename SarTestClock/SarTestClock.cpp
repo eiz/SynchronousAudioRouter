@@ -62,6 +62,9 @@ const wchar_t kInprocKey[] = L"CLSID\\" SAR_TEST_CLOCK_CLSID_STR L"\\InProcServe
 HMODULE gModule = nullptr;
 std::atomic<long> gObjectCount{ 0 };
 std::atomic<long> gLockCount{ 0 };
+std::atomic<long> gClockCount{ 0 };
+std::atomic<long> gMaxClockCount{ 0 };
+std::atomic<uint64_t> gControlPanelCalls{ 0 };
 
 long envLong(const wchar_t *name, long def)
 {
@@ -90,6 +93,13 @@ public:
     SoftwareClock()
     {
         gObjectCount++;
+
+        long clocks = ++gClockCount;
+        long max = gMaxClockCount.load();
+
+        while (clocks > max && !gMaxClockCount.compare_exchange_weak(max, clocks)) {
+        }
+
         _sampleRate = (double)envLong(L"SAR_TEST_CLOCK_RATE", 48000);
         _bufferFrames = envLong(L"SAR_TEST_CLOCK_FRAMES", 480);
         _inputCount = envLong(L"SAR_TEST_CLOCK_INPUTS", 2);
@@ -99,6 +109,7 @@ public:
     virtual ~SoftwareClock()
     {
         disposeBuffers();
+        gClockCount--;
         gObjectCount--;
     }
 
@@ -359,6 +370,7 @@ public:
 
     AsioStatus controlPanel() override
     {
+        gControlPanelCalls++;
         return AsioStatus::OK;
     }
 
@@ -381,6 +393,9 @@ public:
             stats->reserved = 0;
             stats->maxCallbackMs = _maxCallbackMs.load();
             stats->slowCallbacks = _slowCallbacks.load();
+            stats->liveInstances = (uint32_t)gClockCount.load();
+            stats->maxLiveInstances = (uint32_t)gMaxClockCount.load();
+            stats->controlPanelCalls = gControlPanelCalls.load();
             return AsioStatus::OK;
         }
 
