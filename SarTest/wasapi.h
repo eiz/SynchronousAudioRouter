@@ -99,9 +99,10 @@ struct WasapiOptions
     bool expectInvalidation = false;
     double minValidRatio = 0.5;
     long long maxDiscontinuities = -1;   // -1: report only
-    // SarAsio broadcasts a format change whenever one of its endpoints
-    // becomes active, which invalidates open streams: wait before streaming,
-    // and reopen invalidated streams like a well-behaved client would.
+    // Streams opened just as a host's endpoints appear can be invalidated
+    // (SarAsio used to broadcast a format change on every endpoint
+    // activation): wait before streaming, and reopen invalidated streams like
+    // a well-behaved client would.
     double settleSeconds = 2.0;
     int maxReopens = 20;
     long long maxTransitionFrames = 4800;

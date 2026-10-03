@@ -39,10 +39,6 @@ struct SarClient: public std::enable_shared_from_this<SarClient>
     void tick(long bufferIndex);
     bool start();
     void stop();
-    void updateSampleRateOnTick()
-    {
-        _updateSampleRateOnTick = true;
-    }
 
 private:
     struct NotificationHandle
@@ -64,42 +60,7 @@ private:
         SarHandleQueueResponse responses[32];
     };
 
-    struct ATL_NO_VTABLE NotificationClient:
-        public CComObjectRootEx<CComMultiThreadModel>,
-        public IMMNotificationClient
-    {
-        BEGIN_COM_MAP(NotificationClient)
-            COM_INTERFACE_ENTRY(IMMNotificationClient)
-        END_COM_MAP()
-
-        DECLARE_NO_REGISTRY()
-
-        void setClient(std::weak_ptr<SarClient> client)
-        {
-            _client = client;
-        }
-
-        virtual HRESULT STDMETHODCALLTYPE OnDeviceStateChanged(
-            _In_  LPCWSTR pwstrDeviceId,
-            _In_  DWORD dwNewState) override;
-        virtual HRESULT STDMETHODCALLTYPE OnDeviceAdded(
-            _In_  LPCWSTR pwstrDeviceId) override;
-        virtual HRESULT STDMETHODCALLTYPE OnDeviceRemoved(
-            _In_  LPCWSTR pwstrDeviceId) override;
-        virtual HRESULT STDMETHODCALLTYPE OnDefaultDeviceChanged(
-            _In_  EDataFlow flow,
-            _In_  ERole role,
-            _In_  LPCWSTR pwstrDefaultDeviceId) override;
-        virtual HRESULT STDMETHODCALLTYPE OnPropertyValueChanged(
-            _In_  LPCWSTR pwstrDeviceId,
-            _In_  const PROPERTYKEY key) override;
-
-    private:
-        std::weak_ptr<SarClient> _client;
-    };
-
     bool openControlDevice();
-    bool openMmNotificationClient();
     bool setBufferLayout();
     bool createEndpoints();
     bool enableRegistryFilter();
@@ -127,10 +88,6 @@ private:
     volatile SarEndpointRegisters *_registers;
     HandleQueueCompletion _handleQueueCompletion;
     bool _handleQueueStarted;
-    CComPtr<IMMDeviceEnumerator> _mmEnumerator;
-    CComObject<NotificationClient> *_mmNotificationClient = nullptr;
-    bool _mmNotificationClientRegistered = false;
-    std::atomic<bool> _updateSampleRateOnTick = false;
     std::mutex _registersLock;
 };
 

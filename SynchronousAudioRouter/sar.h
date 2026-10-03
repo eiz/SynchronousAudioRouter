@@ -60,8 +60,7 @@ DEFINE_GUID(GUID_DEVINTERFACE_SYNCHRONOUSAUDIOROUTER,
     FILE_DEVICE_UNKNOWN, 3, METHOD_BUFFERED, FILE_READ_DATA | FILE_WRITE_DATA)
 #define SAR_START_REGISTRY_FILTER CTL_CODE( \
     FILE_DEVICE_UNKNOWN, 4, METHOD_NEITHER, FILE_READ_DATA | FILE_WRITE_DATA)
-#define SAR_SEND_FORMAT_CHANGE_EVENT CTL_CODE( \
-    FILE_DEVICE_UNKNOWN, 5, METHOD_NEITHER, FILE_READ_DATA | FILE_WRITE_DATA)
+// 5 was SAR_SEND_FORMAT_CHANGE_EVENT, removed with pre-Windows 10 support.
 
 // SarNdis ioctls
 #define SARNDIS_IOCTL_CODE(i) CTL_CODE( \
@@ -320,9 +319,6 @@ NTSTATUS SarCreateEndpoint(
     SarCreateEndpointRequest *request);
 VOID SarOrphanEndpoint(SarEndpoint *endpoint);
 VOID SarDeleteEndpoint(SarEndpoint *endpoint);
-NTSTATUS SarSendFormatChangeEvent(
-    PDEVICE_OBJECT deviceObject,
-    SarDriverExtension *extension);
 
 FORCEINLINE VOID SarRetainEndpoint(SarEndpoint *endpoint)
 {
