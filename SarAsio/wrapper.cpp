@@ -27,6 +27,9 @@ using namespace Sar;
 SarAsioWrapper *gActiveWrapper;
 
 static const char kNoInterfaceSelected[] = "No Interface Selected";
+// Channels per direction offered while no hardware interface is selected:
+// a stereo pair, since some hosts (Live, Reason) refuse devices without one.
+static const long kFakeChannelCount = 2;
 
 SarAsioWrapper::SarAsioWrapper()
 {
@@ -109,7 +112,7 @@ AsioStatus SarAsioWrapper::getChannels(long *inputCount, long *outputCount)
     LOG(INFO) << "SarAsioWrapper::getChannels";
 
     if (!_innerDriver) {
-        *inputCount = *outputCount = 1;
+        *inputCount = *outputCount = kFakeChannelCount;
         return AsioStatus::OK;
     }
 
@@ -276,7 +279,7 @@ AsioStatus SarAsioWrapper::getSamplePosition(int64_t *pos, int64_t *timestamp)
 AsioStatus SarAsioWrapper::getChannelInfo(AsioChannelInfo *info)
 {
     if (!_innerDriver) {
-        if (info->index != 0) {
+        if (info->index < 0 || info->index >= kFakeChannelCount) {
             return AsioStatus::NotPresent;
         }
 
@@ -335,16 +338,20 @@ AsioStatus SarAsioWrapper::createBuffers(
         LOG(INFO) << "SarAsioWrapper::createBuffers: no inner driver, trying "
             << "to create fake channels.";
 
-        // Allow allocating a single fake channel if hardware device is not yet
-        // selected. Supports one input and one output.
-        if (channelCount > 2) {
+        // Allow allocating the fake channels if a hardware device is not yet
+        // selected, so a host can load SAR to reach its control panel.
+        if (channelCount > 2 * kFakeChannelCount) {
             return AsioStatus::InvalidMode;
         }
 
         for (long i = 0; i < channelCount; ++i) {
-            if (infos[i].index != 0) {
+            if (infos[i].index < 0 || infos[i].index >= kFakeChannelCount) {
                 return AsioStatus::InvalidMode;
             }
+        }
+
+        for (auto buf : _fakeBuffers) {
+            free(buf);
         }
 
         _fakeBuffers.clear();
