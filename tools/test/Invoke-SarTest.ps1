@@ -142,6 +142,20 @@ function Invoke-BrowserScenario {
     Set-ItemProperty $policy AutoplayAllowed 1 -Type DWord
     Set-ItemProperty $policy AudioSandboxEnabled ([int]$Sandbox) -Type DWord
     Get-Process msedge -ErrorAction SilentlyContinue | Stop-Process -Force
+
+    # An Edge started while its installer replaces it exits without playing
+    # (seen in long runs before Edge updates were turned off at the start).
+    # Wait for an Edge installer still running.
+    $updateWait = Get-Date
+    $installers = @()
+    while (((Get-Date) - $updateWait).TotalMinutes -lt 2) {
+        $installers = @(Get-Process setup -ErrorAction SilentlyContinue |
+            Where-Object { $_.Path -like '*\Microsoft\Edge\Application\*' })
+        if (-not $installers) { break }
+        Start-Sleep -Seconds 2
+    }
+    $record.edgeInstallerWaitSeconds = [math]::Round(((Get-Date) - $updateWait).TotalSeconds, 1)
+    if ($installers) { $record.edgeInstallers = @($installers | ForEach-Object { $_.Path }) }
     $started = Get-Date
 
     Set-SarAsioRegistered $true
@@ -247,6 +261,14 @@ function Invoke-BrowserScenario {
     Set-SarAsioRegistered $false
     Start-Sleep -Seconds 5
     return $record
+}
+
+# Edge updates itself some minutes after boot, and an Edge started while it
+# does exits without playing. Turn its updates off before they start.
+if ($Scenarios -contains 'browser') {
+    $updatePolicy = 'HKLM:\SOFTWARE\Policies\Microsoft\EdgeUpdate'
+    New-Item -Path $updatePolicy -Force | Out-Null
+    Set-ItemProperty $updatePolicy UpdateDefault 0 -Type DWord
 }
 
 # Windows Server images ship with the audio stack disabled.
