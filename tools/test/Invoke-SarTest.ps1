@@ -163,8 +163,38 @@ function Invoke-BrowserScenario {
     $me = [Security.Principal.WindowsIdentity]::GetCurrent().Name
     Register-ScheduledTask -TaskName 'SarTestEdge' -Force `
         -Action (New-ScheduledTaskAction -Execute $edge -Argument $edgeArgs) `
-        -Principal (New-ScheduledTaskPrincipal -UserId $me -LogonType Interactive -RunLevel Limited) | Out-Null
-    Start-ScheduledTask -TaskName 'SarTestEdge'
+        -Principal (New-ScheduledTaskPrincipal -UserId $me -LogonType Interactive -RunLevel Limited) `
+        -Settings (New-ScheduledTaskSettingsSet -MultipleInstances Parallel) | Out-Null
+
+    # Wait for Edge's audio service to start (the page plays right away).
+    # Edge once didn't come up at all, so a launch that produced no audio
+    # service is retried once and then reported as such, not as silence.
+    $record.edgeStarted = $false
+    foreach ($attempt in 1..2) {
+        Start-ScheduledTask -TaskName 'SarTestEdge'
+        $deadline = (Get-Date).AddSeconds(20)
+        while (-not $record.edgeStarted -and (Get-Date) -lt $deadline) {
+            Start-Sleep -Milliseconds 500
+            $record.edgeStarted = [bool](Get-CimInstance Win32_Process -Filter "Name='msedge.exe'" |
+                Where-Object { $_.CommandLine -match 'audio\.mojom\.AudioService' })
+        }
+        if ($record.edgeStarted) { break }
+        $taskResult = (Get-ScheduledTaskInfo -TaskName 'SarTestEdge').LastTaskResult
+        Write-Warning "$Name : Edge's audio service didn't start (attempt $attempt, task result $taskResult)"
+        Stop-ScheduledTask -TaskName 'SarTestEdge' -ErrorAction SilentlyContinue
+        Get-Process msedge -ErrorAction SilentlyContinue | Stop-Process -Force
+        Start-Sleep -Seconds 2
+    }
+
+    if (-not $record.edgeStarted) {
+        $record.outcome = 'error'
+        $record.error = "Edge's audio service never started"
+        Unregister-ScheduledTask -TaskName 'SarTestEdge' -Confirm:$false -ErrorAction SilentlyContinue
+        try { Stop-Process -Id $hostProc.Id -Force } catch { }
+        $null = $hostProc.WaitForExit(60000)
+        Set-SarAsioRegistered $false
+        return $record
+    }
 
     $meter = Invoke-Scenario $Name @('meter', '--duration', 20, '--process', 'msedge.exe') -Timeout 120
     foreach ($key in $meter.Keys) { if (-not $record.Contains($key)) { $record[$key] = $meter[$key] } }
@@ -201,6 +231,7 @@ function Invoke-BrowserScenario {
     Write-Host "    SarAsio.dll loaded in msedge pids: $($record.sarAsioLoadedIn -join ', ')"
     $record.codeIntegrityEvents | ForEach-Object { Write-Host "    CI: $_" }
 
+    Stop-ScheduledTask -TaskName 'SarTestEdge' -ErrorAction SilentlyContinue
     Unregister-ScheduledTask -TaskName 'SarTestEdge' -Confirm:$false -ErrorAction SilentlyContinue
     Get-Process msedge -ErrorAction SilentlyContinue | Stop-Process -Force
     try { Stop-Process -Id $hostProc.Id -Force } catch { }
