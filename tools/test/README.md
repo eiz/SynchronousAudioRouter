@@ -88,6 +88,9 @@ host, presses the hardware interface's Configure button and checks that the
 clock never had a second instance alive. It needs an interactive desktop.
 `SarTest.exe no-interface` (#31, #54) opens SAR with no hardware interface
 configured and checks that it still offers a stereo input and output.
+`SarTest.exe endpoint-names` (#15, #66) renames an endpoint keeping its ID,
+then gives it a new ID, and checks that the new ID shows the new name; the
+results record what Windows shows for the reused ID.
 `Invoke-SarTest.ps1 -Scenarios` selects any of `issues`, `matrix`, `race`
 and `kill`.
 
@@ -103,6 +106,7 @@ SarTest run [--iterations K] [--duration S]
 SarTest race [--cycles K] [--up S] [--down MS] [--openers T] [--hold MS]
 SarTest control-panel
 SarTest no-interface
+SarTest endpoint-names
 ```
 
 `install` creates the SAR software device node if needed, installs the

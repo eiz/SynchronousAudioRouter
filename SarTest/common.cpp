@@ -201,12 +201,12 @@ std::wstring EndpointLayout::recordingName(int pair) const
 
 std::string EndpointLayout::playbackId(int pair) const
 {
-    return narrow(prefix) + "-out-" + std::to_string(pair + 1);
+    return narrow(idPrefix.empty() ? prefix : idPrefix) + "-out-" + std::to_string(pair + 1);
 }
 
 std::string EndpointLayout::recordingId(int pair) const
 {
-    return narrow(prefix) + "-in-" + std::to_string(pair + 1);
+    return narrow(idPrefix.empty() ? prefix : idPrefix) + "-in-" + std::to_string(pair + 1);
 }
 
 EndpointLayout EndpointLayout::fromArgs(const Args& args)

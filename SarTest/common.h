@@ -66,6 +66,8 @@ struct EndpointLayout
     int pairs = 2;
     int channels = 2;
     std::wstring prefix = L"SarTest";
+    // Prefix of the endpoint IDs; the name prefix when empty.
+    std::wstring idPrefix;
 
     std::wstring playbackName(int pair) const;
     std::wstring recordingName(int pair) const;

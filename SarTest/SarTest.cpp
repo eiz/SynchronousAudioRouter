@@ -59,6 +59,9 @@ int usage()
         "      Open SAR with no hardware interface configured, the way a DAW sees\n"
         "      it before first-time setup; fail unless it offers a stereo input\n"
         "      and output (issues #31, #54).\n"
+        "  SarTest endpoint-names\n"
+        "      Rename an endpoint keeping its ID, then give it a new ID, and report\n"
+        "      the name Windows shows each time (issues #15, #66).\n"
         "\n"
         "Layout options: --endpoints N (playback/recording pairs, default 2)\n"
         "                --channels C (per endpoint, default 2) --prefix <name>\n"
@@ -711,6 +714,112 @@ int cmdNoInterface(const Args& args)
     return rc;
 }
 
+// Starts a host on the layout, records whether Windows shows the layout's
+// endpoints (and, when stale is given, endpoints under those names instead)
+// and stops it again.
+bool showsEndpoints(const Args& args, const EndpointLayout& layout,
+    const EndpointLayout *stale, bool *staleShown)
+{
+    if (!prepareConfig(args, layout)) {
+        return false;
+    }
+
+    AsioHost host(hostOptions(args, layout));
+
+    if (!host.load() || !host.open() || !host.start()) {
+        host.close();
+        return false;
+    }
+
+    FoundEndpoints found;
+    bool shown = findEndpoints(layout, args.getInt(L"wait", 30), &found);
+
+    found.release();
+
+    if (stale) {
+        *staleShown = findEndpoints(*stale, 5, &found);
+        found.release();
+    }
+
+    host.close();
+
+    if (!waitForEndpointsGone(layout, args.getInt(L"wait-gone", 30))) {
+        logf("Endpoints lingered after stop");
+    }
+
+    return shown;
+}
+
+// Issues #15 and #66: SarAsio's control panel gave a new endpoint the lowest
+// unused "ep_N", so a deleted endpoint's ID went to the next one, and Windows
+// kept showing the old endpoint's name for it. Windows keys what it stores
+// about an endpoint (its name, the user's settings) on the ID. Checks that a
+// fresh ID gets the new name, and reports what a reused ID shows.
+int cmdEndpointNames(const Args& args)
+{
+    EndpointLayout before = EndpointLayout::fromArgs(args);
+
+    before.pairs = 1;
+    before.prefix = L"SarTest Alpha";
+    before.idPrefix = L"SarTest-names";
+
+    EndpointLayout renamed = before;
+
+    renamed.prefix = L"SarTest Beta";
+
+    EndpointLayout fresh = renamed;
+
+    fresh.idPrefix = L"SarTest-names-fresh";
+
+    logf("--- %s, IDs %s ---", narrow(before.prefix).c_str(), narrow(before.idPrefix).c_str());
+
+    bool firstShown = showsEndpoints(args, before, nullptr, nullptr);
+
+    logf("--- renamed to %s, same IDs ---", narrow(renamed.prefix).c_str());
+
+    bool oldNameShown = false;
+    bool renamedShown = showsEndpoints(args, renamed, &before, &oldNameShown);
+
+    logf("--- %s, new IDs %s ---", narrow(fresh.prefix).c_str(), narrow(fresh.idPrefix).c_str());
+
+    bool freshShown = showsEndpoints(args, fresh, nullptr, nullptr);
+
+    logf("Reused IDs: Windows shows the %s name", renamedShown ? "new" :
+        oldNameShown ? "old" : "neither");
+
+    int rc = 0;
+    std::string failure;
+
+    if (!firstShown) {
+        rc = 2;
+        failure = "endpoints never appeared";
+    } else if (!freshShown) {
+        rc = 2;
+        failure = "endpoints with new IDs did not show their names";
+    }
+
+    if (rc != 0) {
+        logf("%s", failure.c_str());
+    }
+
+    JsonObject result;
+
+    result.setString("command", "endpoint-names")
+        .setBool("passed", rc == 0)
+        .setInt("exitCode", rc)
+        .setBool("reusedIdShowsNewName", renamedShown)
+        .setBool("reusedIdShowsOldName", oldNameShown)
+        .setBool("newIdShowsNewName", freshShown);
+
+    if (!failure.empty()) {
+        result.setString("failure", failure);
+    }
+
+    writeResults(args, result.str());
+    logf("%s", rc == 0 ? "PASSED" : "FAILED");
+    return rc;
+}
+
 } // namespace
 
 int wmain(int argc, wchar_t **argv)
@@ -748,6 +857,8 @@ int wmain(int argc, wchar_t **argv)
         rc = cmdControlPanel(args);
     } else if (args.command == L"no-interface") {
         rc = cmdNoInterface(args);
+    } else if (args.command == L"endpoint-names") {
+        rc = cmdEndpointNames(args);
     } else {
         rc = usage();
     }
