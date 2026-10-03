@@ -1,0 +1,21 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>SarTest tone</title>
+<!-- Played by Invoke-SarTest.ps1's browser scenarios: a steady 440 Hz tone
+     at half scale through Web Audio, which a browser renders in its audio
+     service process. Needs autoplay allowed (no user gesture). -->
+<p id="state">starting</p>
+<script>
+const context = new AudioContext();
+const oscillator = context.createOscillator();
+const gain = context.createGain();
+
+oscillator.frequency.value = 440;
+gain.gain.value = 0.5;
+oscillator.connect(gain).connect(context.destination);
+oscillator.start();
+setInterval(() => {
+  document.getElementById('state').textContent =
+    context.state + ' ' + context.currentTime.toFixed(1);
+}, 500);
+</script>

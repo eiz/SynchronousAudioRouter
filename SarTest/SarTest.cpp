@@ -62,6 +62,10 @@ int usage()
         "  SarTest endpoint-names\n"
         "      Rename an endpoint keeping its ID, then give it a new ID, and report\n"
         "      the name Windows shows each time (issues #15, #66).\n"
+        "  SarTest meter [--duration S] [--process <name.exe>] [--min-peak P]\n"
+        "      Watch the audio sessions on every active playback endpoint and\n"
+        "      report which processes played and how loud; with --process, fail\n"
+        "      unless that process reached --min-peak (default 0.01).\n"
         "\n"
         "Layout options: --endpoints N (playback/recording pairs, default 2)\n"
         "                --channels C (per endpoint, default 2) --prefix <name>\n"
@@ -822,6 +826,35 @@ int cmdEndpointNames(const Args& args)
     return rc;
 }
 
+int cmdMeter(const Args& args)
+{
+    SessionMeterOptions options;
+
+    options.durationSeconds = args.getDouble(L"duration", 10.0);
+    options.process = args.get(L"process", L"");
+    options.minPeak = args.getDouble(L"min-peak", 0.01);
+
+    SessionMeterResult meter = runSessionMeter(options);
+    int rc = meter.passed ? 0 : 2;
+    JsonObject result;
+
+    result.setString("command", "meter")
+        .setBool("passed", meter.passed)
+        .setInt("exitCode", rc)
+        .setString("process", narrow(options.process))
+        .setDouble("processPeak", meter.processPeak)
+        .setRaw("sessions", meter.sessionsJson);
+
+    if (!meter.failure.empty()) {
+        result.setString("failure", meter.failure);
+        logf("%s", meter.failure.c_str());
+    }
+
+    writeResults(args, result.str());
+    logf("%s", rc == 0 ? "PASSED" : "FAILED");
+    return rc;
+}
+
 } // namespace
 
 int wmain(int argc, wchar_t **argv)
@@ -861,6 +894,8 @@ int wmain(int argc, wchar_t **argv)
         rc = cmdNoInterface(args);
     } else if (args.command == L"endpoint-names") {
         rc = cmdEndpointNames(args);
+    } else if (args.command == L"meter") {
+        rc = cmdMeter(args);
     } else {
         rc = usage();
     }
