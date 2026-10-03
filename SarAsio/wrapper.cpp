@@ -540,7 +540,8 @@ AsioStatus SarAsioWrapper::disposeBuffers()
 AsioStatus SarAsioWrapper::controlPanel()
 {
     LOG(INFO) << "SarAsioWrapper::controlPanel";
-    auto sheet = std::make_shared<ConfigurationPropertyDialog>(_config);
+    auto sheet = std::make_shared<ConfigurationPropertyDialog>(
+        _config, _innerDriver, _innerDriverClsid);
 
     if (sheet->show(_hwnd) > 0) {
         _config = sheet->newConfig();
@@ -578,6 +579,7 @@ AsioStatus SarAsioWrapper::outputReady()
 bool SarAsioWrapper::initInnerDriver()
 {
     _innerDriver = nullptr;
+    _innerDriverClsid = "";
 
     for (auto driver : InstalledAsioDrivers()) {
         if (driver.clsid == _config.driverClsid) {
@@ -593,6 +595,7 @@ bool SarAsioWrapper::initInnerDriver()
                 return false;
             }
 
+            _innerDriverClsid = driver.clsid;
             return true;
         }
     }

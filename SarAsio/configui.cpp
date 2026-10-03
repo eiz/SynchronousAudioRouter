@@ -112,8 +112,11 @@ INT_PTR CALLBACK SimpleDialog::dialogProcStub(
     return 0;
 }
 
-EndpointsPropertySheetPage::EndpointsPropertySheetPage(DriverConfig& config)
-    : _config(config)
+EndpointsPropertySheetPage::EndpointsPropertySheetPage(
+    DriverConfig& config, IASIO *runningDriver,
+    const std::string& runningDriverClsid)
+    : _config(config), _runningDriver(runningDriver),
+      _runningDriverClsid(runningDriverClsid)
 {
     pszTemplate = MAKEINTRESOURCE(IDD_CONFIG_ENDPOINTS);
 
@@ -198,6 +201,14 @@ void EndpointsPropertySheetPage::onConfigureHardwareInterface()
 {
     for (auto& driver : _drivers) {
         if (driver.clsid == _config.driverClsid) {
+            // ASIO drivers expect a single instance per process, and some
+            // crash when a second one is created next to a running one. Use
+            // the instance the host already has when it is the selected one.
+            if (_runningDriver && driver.clsid == _runningDriverClsid) {
+                _runningDriver->controlPanel();
+                break;
+            }
+
             CComPtr<IASIO> asio;
 
             if (SUCCEEDED(driver.open(&asio))) {
@@ -856,10 +867,13 @@ void ApplicationConfigDialog::onBrowseClicked()
     }
 }
 
-ConfigurationPropertyDialog::ConfigurationPropertyDialog(DriverConfig& config)
+ConfigurationPropertyDialog::ConfigurationPropertyDialog(
+    DriverConfig& config, IASIO *runningDriver,
+    const std::string& runningDriverClsid)
     : _originalConfig(config),
       _newConfig(_originalConfig),
-      _endpoints(std::make_shared<EndpointsPropertySheetPage>(_newConfig)),
+      _endpoints(std::make_shared<EndpointsPropertySheetPage>(
+          _newConfig, runningDriver, runningDriverClsid)),
       _applications(std::make_shared<ApplicationsPropertySheetPage>(_newConfig))
 {
     pszCaption = TEXT("Synchronous Audio Router");

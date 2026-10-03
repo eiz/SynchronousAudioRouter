@@ -69,7 +69,11 @@ private:
 
 struct EndpointsPropertySheetPage: public PropertySheetPage
 {
-    EndpointsPropertySheetPage(DriverConfig& config);
+    // runningDriver is the hardware interface the caller already has open and
+    // initialized (CLSID runningDriverClsid), if any.
+    EndpointsPropertySheetPage(
+        DriverConfig& config, IASIO *runningDriver = nullptr,
+        const std::string& runningDriverClsid = "");
 
 protected:
     virtual INT_PTR dialogProc(
@@ -87,6 +91,8 @@ private:
 
     DriverConfig& _config;
     std::vector<AsioDriver> _drivers;
+    IASIO *_runningDriver;
+    std::string _runningDriverClsid;
     HWND _hardwareInterfaceDropdown;
     HWND _hardwareInterfaceConfigButton;
     HWND _listView;
@@ -170,7 +176,9 @@ private:
 
 struct ConfigurationPropertyDialog: public PropertyDialog
 {
-    ConfigurationPropertyDialog(DriverConfig& config);
+    ConfigurationPropertyDialog(
+        DriverConfig& config, IASIO *runningDriver = nullptr,
+        const std::string& runningDriverClsid = "");
     DriverConfig newConfig() { return _newConfig; }
 
 private:
