@@ -34,8 +34,8 @@ param(
     [int]$TimeoutSeconds = 600,
     [switch]$SkipInstall,
     [switch]$SkipKillTest,
-    # Any of matrix, race, kill. Installation always runs.
-    [string[]]$Scenarios = @('matrix', 'race', 'kill'),
+    # Any of issues, matrix, race, kill. Installation always runs.
+    [string[]]$Scenarios = @('issues', 'matrix', 'race', 'kill'),
     [int]$RaceCycles = 10
 )
 
@@ -144,6 +144,12 @@ if (-not $SkipInstall) {
 }
 
 $common = @('--sarasio', "`"$sarAsio`"", '--channels', $Channels)
+
+if ($Scenarios -contains 'issues') {
+    # Regression checks for specific GitHub issues, one short host each.
+    $summary.scenarios += Invoke-Scenario 'issue-133-control-panel' (
+        @('control-panel', '--endpoints', 1) + $common) -Timeout 120
+}
 
 if ($Scenarios -contains 'matrix') {
     foreach ($count in $EndpointCounts) {

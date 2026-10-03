@@ -104,6 +104,7 @@ private:
     std::shared_ptr<SarClient> _sar;
     std::shared_ptr<SarCastMaster> _castMaster;
     CComPtr<IASIO> _innerDriver;
+    std::string _innerDriverClsid;
     std::vector<VirtualChannel> _virtualInputs;
     std::vector<VirtualChannel> _virtualOutputs;
     AsioTickCallback *_userTick;

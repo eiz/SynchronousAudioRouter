@@ -23,6 +23,9 @@
 #include "wasapi.h"
 #include "clockstats.h"
 
+#include <prsht.h>
+#include <thread>
+
 using namespace SarTest;
 
 namespace {
@@ -48,6 +51,10 @@ int usage()
         "  SarTest race [--cycles K] [--up S] [--down MS] [--openers T] [--hold MS]\n"
         "      Start and stop the host repeatedly while threads keep opening and\n"
         "      closing streams on its endpoints; report any call that hangs.\n"
+        "  SarTest control-panel\n"
+        "      Open SAR's control panel on a running host, press the hardware\n"
+        "      interface's Configure button and close it again; fail if a second\n"
+        "      clock instance was created (issue #133).\n"
         "\n"
         "Layout options: --endpoints N (playback/recording pairs, default 2)\n"
         "                --channels C (per endpoint, default 2) --prefix <name>\n"
@@ -484,6 +491,166 @@ int cmdRun(const Args& args)
     return rc;
 }
 
+// Control IDs in SarAsio's endpoints page (SarAsio.rc).
+const int kConfigureHardwareInterfaceButton = 1002;
+
+struct ControlPanelWindow
+{
+    DWORD pid = 0;
+    HWND sheet = nullptr;
+    HWND button = nullptr;
+};
+
+BOOL CALLBACK findConfigureButton(HWND hwnd, LPARAM lparam)
+{
+    auto *find = (ControlPanelWindow *)lparam;
+    wchar_t cls[32] = {};
+
+    GetClassNameW(hwnd, cls, 32);
+
+    if (GetDlgCtrlID(hwnd) == kConfigureHardwareInterfaceButton &&
+        _wcsicmp(cls, L"Button") == 0) {
+        find->button = hwnd;
+        return FALSE;
+    }
+
+    return TRUE;
+}
+
+BOOL CALLBACK findControlPanel(HWND hwnd, LPARAM lparam)
+{
+    auto *find = (ControlPanelWindow *)lparam;
+    DWORD pid = 0;
+
+    GetWindowThreadProcessId(hwnd, &pid);
+
+    if (pid != find->pid || !IsWindowVisible(hwnd)) {
+        return TRUE;
+    }
+
+    EnumChildWindows(hwnd, findConfigureButton, lparam);
+
+    if (find->button) {
+        find->sheet = hwnd;
+        return FALSE;
+    }
+
+    return TRUE;
+}
+
+// Issue #133: with the host running, the hardware interface's Configure
+// button in SAR's control panel created a second instance of the inner ASIO
+// driver instead of using the running one. ASIO drivers may assume one
+// instance per process; FlexASIO crashed on it.
+int cmdControlPanel(const Args& args)
+{
+    EndpointLayout layout = EndpointLayout::fromArgs(args);
+
+    if (!prepareConfig(args, layout)) {
+        return 1;
+    }
+
+    AsioHost host(hostOptions(args, layout));
+
+    if (!host.load() || !host.open()) {
+        return 1;
+    }
+
+    if (!host.start()) {
+        host.close();
+        return 1;
+    }
+
+    bool found = false;
+    bool enabled = false;
+    bool clicked = false;
+    std::thread clicker([&] {
+        ControlPanelWindow window;
+
+        window.pid = GetCurrentProcessId();
+
+        for (int i = 0; i < 200 && !window.button; ++i) {
+            Sleep(50);
+            EnumWindows(findControlPanel, (LPARAM)&window);
+        }
+
+        if (!window.button) {
+            logf("SAR's control panel did not appear within 10 s");
+            return;
+        }
+
+        found = true;
+        enabled = IsWindowEnabled(window.button) != FALSE;
+        logf("Found the control panel; Configure is %s", enabled ? "enabled" : "disabled");
+
+        DWORD_PTR ignored = 0;
+
+        // What a click on the button sends its page. The handler runs on the
+        // panel's thread and returns once the inner driver's panel does.
+        clicked = SendMessageTimeoutW(GetParent(window.button), WM_COMMAND,
+            MAKEWPARAM(kConfigureHardwareInterfaceButton, BN_CLICKED),
+            (LPARAM)window.button, SMTO_NORMAL, 10000, &ignored) != 0;
+
+        if (!clicked) {
+            logf("The Configure handler did not return within 10 s");
+        }
+
+        PostMessageW(window.sheet, PSM_PRESSBUTTON, PSBTN_CANCEL, 0);
+    });
+
+    logf("Opening SAR's control panel");
+
+    bool opened = host.controlPanel();
+
+    clicker.join();
+    host.readClockStats();
+
+    SarTestClock::ClockStats clock = host.stats().clock;
+
+    host.close();
+    logf("Clock instances: %u alive, at most %u; inner controlPanel calls: %llu",
+        clock.liveInstances, clock.maxLiveInstances,
+        (unsigned long long)clock.controlPanelCalls);
+
+    int rc = 0;
+    std::string failure;
+
+    if (!opened || !found || !enabled || !clicked) {
+        rc = 2;
+        failure = "could not drive the control panel";
+    } else if (clock.controlPanelCalls == 0) {
+        rc = 2;
+        failure = "Configure did not open the clock's control panel";
+    } else if (clock.maxLiveInstances > 1) {
+        rc = 2;
+        failure = "Configure created a second clock instance";
+    }
+
+    if (rc != 0) {
+        logf("%s", failure.c_str());
+    }
+
+    JsonObject result;
+
+    result.setString("command", "control-panel")
+        .setBool("passed", rc == 0)
+        .setInt("exitCode", rc)
+        .setBool("panelFound", found)
+        .setBool("configureEnabled", enabled)
+        .setBool("configureClicked", clicked)
+        .setInt("maxClockInstances", clock.maxLiveInstances)
+        .setInt("clockControlPanelCalls", (long long)clock.controlPanelCalls)
+        .setRaw("host", host.toJson());
+
+    if (!failure.empty()) {
+        result.setString("failure", failure);
+    }
+
+    writeResults(args, result.str());
+    logf("%s", rc == 0 ? "PASSED" : "FAILED");
+    return rc;
+}
+
 } // namespace
 
 int wmain(int argc, wchar_t **argv)
@@ -517,6 +684,8 @@ int wmain(int argc, wchar_t **argv)
         rc = cmdRun(args);
     } else if (args.command == L"race") {
         rc = cmdRace(args);
+    } else if (args.command == L"control-panel") {
+        rc = cmdControlPanel(args);
     } else {
         rc = usage();
     }

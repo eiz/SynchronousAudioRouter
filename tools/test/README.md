@@ -80,8 +80,14 @@ them, which is what applications that use a SAR endpoint as their default
 device do while a DAW starts. Every WASAPI call and every host call is
 watched; one that does not return within `--phase-timeout` is reported as
 `HANG`. The scenario fails if any call hung, the host failed to start or
-stop, or no stream was ever opened. `Invoke-SarTest.ps1 -Scenarios` selects
-any of `matrix`, `race` and `kill`.
+stop, or no stream was ever opened.
+
+The `issue-*` scenarios are regression checks for specific GitHub issues.
+`SarTest.exe control-panel` (#133) opens SAR's control panel on a running
+host, presses the hardware interface's Configure button and checks that the
+clock never had a second instance alive. It needs an interactive desktop.
+`Invoke-SarTest.ps1 -Scenarios` selects any of `issues`, `matrix`, `race`
+and `kill`.
 
 ## Commands
 
@@ -93,6 +99,7 @@ SarTest host [--iterations K] [--duration S]
 SarTest wasapi [--duration S] [--wait S] [--expect-invalidation]
 SarTest run [--iterations K] [--duration S]
 SarTest race [--cycles K] [--up S] [--down MS] [--openers T] [--hold MS]
+SarTest control-panel
 ```
 
 `install` creates the SAR software device node if needed, installs the
@@ -143,7 +150,7 @@ Then, elevated:
 .\Invoke-SarTest.ps1 -PackageDir <driver package> -ToolsDir <usermode package> -CertPath test.cer
 ```
 
-The script runs `run` for 1, 4, 8 and 16 endpoint pairs with three
+The script runs the `issue-*` checks, then `run` for 1, 4, 8 and 16 endpoint pairs with three
 start/stop iterations each, `race` on the largest layout, then a scenario that kills the host while WASAPI
 clients are streaming and checks that a new host can still create endpoints
 afterwards. Results land in `sartest-results\`: one `.log` and `.json` per
