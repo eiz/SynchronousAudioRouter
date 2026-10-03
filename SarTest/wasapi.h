@@ -168,5 +168,27 @@ private:
     bool _clean = true;
 };
 
+// Watches the audio sessions on every active playback endpoint for a while:
+// which process each belongs to and how loud it got. Tells whether an
+// application outside the harness (a browser) produced audio at all.
+struct SessionMeterOptions
+{
+    double durationSeconds = 10.0;
+    // Image name (e.g. msedge.exe) that must reach minPeak; empty to only
+    // report.
+    std::wstring process;
+    double minPeak = 0.01;
+};
+
+struct SessionMeterResult
+{
+    bool passed = false;
+    double processPeak = 0.0;
+    std::string failure;
+    std::string sessionsJson;
+};
+
+SessionMeterResult runSessionMeter(const SessionMeterOptions& options);
+
 } // namespace SarTest
 #endif // _SAR_TEST_WASAPI_H

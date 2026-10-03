@@ -34,8 +34,8 @@ param(
     [int]$TimeoutSeconds = 600,
     [switch]$SkipInstall,
     [switch]$SkipKillTest,
-    # Any of issues, matrix, race, kill. Installation always runs.
-    [string[]]$Scenarios = @('issues', 'matrix', 'race', 'kill'),
+    # Any of issues, matrix, race, kill, browser. Installation always runs.
+    [string[]]$Scenarios = @('issues', 'matrix', 'race', 'kill', 'browser'),
     [int]$RaceCycles = 10
 )
 
@@ -117,6 +117,158 @@ function Set-SarAsioRegistered {
     $regArgs = @('/s') + $(if ($Registered) { @() } else { @('/u') }) + @("`"$sarAsio`"")
     $proc = Start-Process regsvr32.exe -ArgumentList $regArgs -Wait -PassThru
     if ($proc.ExitCode -ne 0) { Write-Warning "regsvr32 $($regArgs -join ' ') exited with $($proc.ExitCode)" }
+}
+
+# Plays tools\test\tone.html in Edge with application routing on and Edge's
+# audio sandbox on or off, and checks that Edge's audio session is heard.
+# Also records what the sandboxed audio service is allowed to load.
+function Invoke-BrowserScenario {
+    param([string]$Name, [bool]$Sandbox)
+
+    $record = [ordered]@{ name = $Name; sandbox = $Sandbox }
+    $edge = @("${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe",
+              "$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe") |
+            Where-Object { Test-Path $_ } | Select-Object -First 1
+
+    if (-not $edge) {
+        Write-Host "==> $Name : skipped, Edge is not installed"
+        $record.outcome = 'skipped'
+        return $record
+    }
+
+    $policy = 'HKLM:\SOFTWARE\Policies\Microsoft\Edge'
+    New-Item -Path $policy -Force | Out-Null
+    Set-ItemProperty $policy HideFirstRunExperience 1 -Type DWord
+    Set-ItemProperty $policy AutoplayAllowed 1 -Type DWord
+    Set-ItemProperty $policy AudioSandboxEnabled ([int]$Sandbox) -Type DWord
+    Get-Process msedge -ErrorAction SilentlyContinue | Stop-Process -Force
+
+    # An Edge started while its installer replaces it exits without playing
+    # (seen in long runs before Edge updates were turned off at the start).
+    # Wait for an Edge installer still running.
+    $updateWait = Get-Date
+    $installers = @()
+    while (((Get-Date) - $updateWait).TotalMinutes -lt 2) {
+        $installers = @(Get-Process setup -ErrorAction SilentlyContinue |
+            Where-Object { $_.Path -like '*\Microsoft\Edge\Application\*' })
+        if (-not $installers) { break }
+        Start-Sleep -Seconds 2
+    }
+    $record.edgeInstallerWaitSeconds = [math]::Round(((Get-Date) - $updateWait).TotalSeconds, 1)
+    if ($installers) { $record.edgeInstallers = @($installers | ForEach-Object { $_.Path }) }
+    $started = Get-Date
+
+    Set-SarAsioRegistered $true
+
+    $hostLog = Join-Path $ResultsDir "$Name-host.log"
+    $hostJson = Join-Path $ResultsDir "$Name-host.json"
+    Write-Host "==> $Name : host with application routing, Edge audio sandbox $(if ($Sandbox) { 'on' } else { 'off' })"
+    $hostProc = Start-Process -FilePath $sarTest -NoNewWindow -PassThru -RedirectStandardOutput $hostLog `
+        -ArgumentList (@('host', '--endpoints', 1, '--duration', 120, '--app-routing',
+            '--results', "`"$hostJson`"") + $common)
+    $null = $hostProc.Handle
+    Start-Sleep -Seconds 8
+
+    # Edge as the logged-on user without elevation, like a user starts it.
+    $page = 'file:///' + ((Join-Path $PSScriptRoot 'tone.html') -replace '\\', '/')
+    $userData = Join-Path $env:TEMP "sartest-edge-$Name"
+    $edgeArgs = "--user-data-dir=`"$userData`" --no-first-run --no-default-browser-check " +
+        "--autoplay-policy=no-user-gesture-required --enable-logging --v=0 `"$page`""
+    $me = [Security.Principal.WindowsIdentity]::GetCurrent().Name
+    Register-ScheduledTask -TaskName 'SarTestEdge' -Force `
+        -Action (New-ScheduledTaskAction -Execute $edge -Argument $edgeArgs) `
+        -Principal (New-ScheduledTaskPrincipal -UserId $me -LogonType Interactive -RunLevel Limited) `
+        -Settings (New-ScheduledTaskSettingsSet -MultipleInstances Parallel) | Out-Null
+
+    # Wait for Edge's audio service to start (the page plays right away).
+    # Edge once didn't come up at all, so a launch that produced no audio
+    # service is retried once and then reported as such, not as silence.
+    $record.edgeStarted = $false
+    foreach ($attempt in 1..2) {
+        Start-ScheduledTask -TaskName 'SarTestEdge'
+        $deadline = (Get-Date).AddSeconds(20)
+        while (-not $record.edgeStarted -and (Get-Date) -lt $deadline) {
+            Start-Sleep -Milliseconds 500
+            $record.edgeStarted = [bool](Get-CimInstance Win32_Process -Filter "Name='msedge.exe'" |
+                Where-Object { $_.CommandLine -match 'audio\.mojom\.AudioService' })
+        }
+        if ($record.edgeStarted) { break }
+        $taskResult = (Get-ScheduledTaskInfo -TaskName 'SarTestEdge').LastTaskResult
+        Write-Warning "$Name : Edge's audio service didn't start (attempt $attempt, task result $taskResult)"
+        Stop-ScheduledTask -TaskName 'SarTestEdge' -ErrorAction SilentlyContinue
+        Get-Process msedge -ErrorAction SilentlyContinue | Stop-Process -Force
+        Start-Sleep -Seconds 2
+    }
+
+    if (-not $record.edgeStarted) {
+        $record.outcome = 'error'
+        $record.error = "Edge's audio service never started"
+        # What Edge was doing instead, for working out why.
+        $record.edgeProcesses = @(Get-CimInstance Win32_Process |
+            Where-Object { $_.Name -match '^(msedge|MicrosoftEdgeUpdate|setup|elevation_service)' } |
+            ForEach-Object { "$($_.ProcessId) $($_.Name) $($_.CommandLine)" })
+        $record.edgeVersion = (Get-Item $edge).VersionInfo.ProductVersion
+        $debugLog = Join-Path $userData 'chrome_debug.log'
+        if (Test-Path $debugLog) { Copy-Item $debugLog (Join-Path $ResultsDir "$Name-chrome_debug.log") }
+        $record.edgeProcesses | ForEach-Object { Write-Host "    $_" }
+        Unregister-ScheduledTask -TaskName 'SarTestEdge' -Confirm:$false -ErrorAction SilentlyContinue
+        try { Stop-Process -Id $hostProc.Id -Force } catch { }
+        $null = $hostProc.WaitForExit(60000)
+        Set-SarAsioRegistered $false
+        return $record
+    }
+
+    $meter = Invoke-Scenario $Name @('meter', '--duration', 20, '--process', 'msedge.exe') -Timeout 120
+    foreach ($key in $meter.Keys) { if (-not $record.Contains($key)) { $record[$key] = $meter[$key] } }
+
+    # Facts about Edge's audio service: its sandbox, its mitigation policies,
+    # whether SarAsio.dll got loaded, and any Code Integrity block events.
+    $record.audioProcesses = @(Get-CimInstance Win32_Process -Filter "Name='msedge.exe'" |
+        Where-Object { $_.CommandLine -match 'audio\.mojom\.AudioService' } | ForEach-Object {
+            $info = [ordered]@{
+                pid = $_.ProcessId
+                sandboxType = if ($_.CommandLine -match '--service-sandbox-type=(\S+)') { $Matches[1] } else { $null }
+            }
+            try {
+                $m = Get-ProcessMitigation -Id $_.ProcessId
+                $info.microsoftSignedOnly = "$($m.BinarySignature.MicrosoftSignedOnly)"
+                $info.blockLowLabelImageLoads = "$($m.ImageLoad.BlockLowLabelImageLoads)"
+                $info.blockRemoteImageLoads = "$($m.ImageLoad.BlockRemoteImageLoads)"
+                $info.blockDynamicCode = "$($m.DynamicCode.BlockDynamicCode)"
+            } catch { $info.mitigationError = "$_" }
+            try {
+                $info.sarAsioLoaded = [bool]((Get-Process -Id $_.ProcessId).Modules |
+                    Where-Object ModuleName -eq 'SarAsio.dll')
+            } catch { $info.modulesError = "$_" }
+            [pscustomobject]$info
+        })
+    $record.sarAsioLoadedIn = @(Get-Process msedge -ErrorAction SilentlyContinue | Where-Object {
+        try { $_.Modules | Where-Object ModuleName -eq 'SarAsio.dll' } catch { $false }
+    } | ForEach-Object { $_.Id })
+    $record.codeIntegrityEvents = @(Get-WinEvent -ErrorAction SilentlyContinue -FilterHashtable @{
+            LogName = 'Microsoft-Windows-CodeIntegrity/Operational'; StartTime = $started } |
+        Where-Object { $_.Message -match 'SarAsio' } | Select-Object -First 5 |
+        ForEach-Object { "$($_.Id): $($_.Message)" })
+    $record.audioProcesses | ForEach-Object { Write-Host "    audio service: $($_ | ConvertTo-Json -Compress)" }
+    Write-Host "    SarAsio.dll loaded in msedge pids: $($record.sarAsioLoadedIn -join ', ')"
+    $record.codeIntegrityEvents | ForEach-Object { Write-Host "    CI: $_" }
+
+    Stop-ScheduledTask -TaskName 'SarTestEdge' -ErrorAction SilentlyContinue
+    Unregister-ScheduledTask -TaskName 'SarTestEdge' -Confirm:$false -ErrorAction SilentlyContinue
+    Get-Process msedge -ErrorAction SilentlyContinue | Stop-Process -Force
+    try { Stop-Process -Id $hostProc.Id -Force } catch { }
+    $null = $hostProc.WaitForExit(60000)
+    Set-SarAsioRegistered $false
+    Start-Sleep -Seconds 5
+    return $record
+}
+
+# Edge updates itself some minutes after boot, and an Edge started while it
+# does exits without playing. Turn its updates off before they start.
+if ($Scenarios -contains 'browser') {
+    $updatePolicy = 'HKLM:\SOFTWARE\Policies\Microsoft\EdgeUpdate'
+    New-Item -Path $updatePolicy -Force | Out-Null
+    Set-ItemProperty $updatePolicy UpdateDefault 0 -Type DWord
 }
 
 # Windows Server images ship with the audio stack disabled.
@@ -235,6 +387,16 @@ if (-not $SkipKillTest -and $Scenarios -contains 'kill') {
         @('run', '--endpoints', $count, '--iterations', 1, '--duration', $Duration) + $common)
 }
 
+if ($Scenarios -contains 'browser') {
+    # With application routing on, the driver points the audio device
+    # enumerator's COM registration at SarAsio.dll for every process of the
+    # user, Chromium's sandboxed audio service included, which then played
+    # nothing (#80, #102, #121, #127). Runs last, since Edge is slow and the
+    # rest of the run doesn't need it.
+    $summary.scenarios += Invoke-BrowserScenario 'browser-audio-unsandboxed' $false
+    $summary.scenarios += Invoke-BrowserScenario 'browser-audio-sandboxed' $true
+}
+
 $sarLogs = Join-Path $env:APPDATA 'SynchronousAudioRouter\logs'
 if (Test-Path $sarLogs) {
     $dest = Join-Path $ResultsDir 'sarasio-logs'
@@ -244,7 +406,7 @@ if (Test-Path $sarLogs) {
 
 $summary.finished = (Get-Date).ToString('o')
 $outcomes = $summary.scenarios | ForEach-Object { $_.outcome }
-$summary.passed = -not ($outcomes | Where-Object { $_ -ne 'passed' })
+$summary.passed = -not ($outcomes | Where-Object { $_ -ne 'passed' -and $_ -ne 'skipped' })
 $summary | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $ResultsDir 'summary.json')
 
 Write-Host ''

@@ -1564,4 +1564,173 @@ void RaceOpeners::work(Worker *worker)
 }
 
 
+namespace {
+
+std::wstring processImageName(DWORD pid)
+{
+    HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    std::wstring name;
+
+    if (!process) {
+        return name;
+    }
+
+    wchar_t path[MAX_PATH] = {};
+    DWORD size = MAX_PATH;
+
+    if (QueryFullProcessImageNameW(process, 0, path, &size)) {
+        name = path;
+
+        auto slash = name.find_last_of(L"\\/");
+
+        if (slash != std::wstring::npos) {
+            name = name.substr(slash + 1);
+        }
+    }
+
+    CloseHandle(process);
+    return name;
+}
+
+struct SessionSeen
+{
+    std::string endpoint;
+    DWORD pid = 0;
+    std::wstring process;
+    bool active = false;
+    float maxPeak = 0.0f;
+};
+
+} // namespace
+
+SessionMeterResult runSessionMeter(const SessionMeterOptions& options)
+{
+    SessionMeterResult result;
+    ComPtr<IMMDeviceEnumerator> enumerator;
+
+    if (!createEnumerator(&enumerator)) {
+        result.failure = "no device enumerator";
+        result.sessionsJson = "[]";
+        return result;
+    }
+
+    // Keyed by endpoint and process ID.
+    std::map<std::string, SessionSeen> seen;
+    double deadline = nowMs() + options.durationSeconds * 1000.0;
+
+    while (nowMs() < deadline) {
+        ComPtr<IMMDeviceCollection> devices;
+        UINT count = 0;
+
+        if (SUCCEEDED(enumerator->EnumAudioEndpoints(
+                eRender, DEVICE_STATE_ACTIVE, devices.put()))) {
+            devices->GetCount(&count);
+        }
+
+        for (UINT i = 0; i < count; ++i) {
+            ComPtr<IMMDevice> device;
+            ComPtr<IPropertyStore> store;
+            ComPtr<IAudioSessionManager2> manager;
+            ComPtr<IAudioSessionEnumerator> sessions;
+            std::string endpoint;
+            int sessionCount = 0;
+
+            if (FAILED(devices->Item(i, device.put()))) {
+                continue;
+            }
+
+            if (SUCCEEDED(device->OpenPropertyStore(STGM_READ, store.put()))) {
+                endpoint = narrow(propertyString(store.get(), PKEY_Device_FriendlyName));
+            }
+
+            if (FAILED(device->Activate(__uuidof(IAudioSessionManager2),
+                    CLSCTX_ALL, nullptr, manager.putVoid())) ||
+                FAILED(manager->GetSessionEnumerator(sessions.put()))) {
+                continue;
+            }
+
+            sessions->GetCount(&sessionCount);
+
+            for (int k = 0; k < sessionCount; ++k) {
+                ComPtr<IAudioSessionControl> control;
+                ComPtr<IAudioSessionControl2> control2;
+                ComPtr<IAudioMeterInformation> meter;
+                AudioSessionState state = AudioSessionStateInactive;
+                DWORD pid = 0;
+                float peak = 0.0f;
+
+                if (FAILED(sessions->GetSession(k, control.put())) ||
+                    FAILED(control->QueryInterface(
+                        __uuidof(IAudioSessionControl2), control2.putVoid()))) {
+                    continue;
+                }
+
+                control2->GetProcessId(&pid);
+
+                if (pid == 0) {
+                    continue; // system sounds
+                }
+
+                control->GetState(&state);
+
+                if (SUCCEEDED(control->QueryInterface(
+                        __uuidof(IAudioMeterInformation), meter.putVoid()))) {
+                    meter->GetPeakValue(&peak);
+                }
+
+                SessionSeen& entry = seen[endpoint + "|" + std::to_string(pid)];
+
+                if (entry.pid == 0) {
+                    entry.endpoint = endpoint;
+                    entry.pid = pid;
+                    entry.process = processImageName(pid);
+                    logf("Session of %s (pid %lu) on %s",
+                        narrow(entry.process).c_str(), pid, endpoint.c_str());
+                }
+
+                entry.active = entry.active || state == AudioSessionStateActive;
+                entry.maxPeak = std::max(entry.maxPeak, peak);
+            }
+        }
+
+        Sleep(100);
+    }
+
+    std::vector<std::string> items;
+
+    for (auto& pair : seen) {
+        const SessionSeen& entry = pair.second;
+        JsonObject item;
+
+        logf("%s (pid %lu) on %s: %s, peak %.3f", narrow(entry.process).c_str(),
+            entry.pid, entry.endpoint.c_str(), entry.active ? "active" : "never active",
+            entry.maxPeak);
+        item.setString("endpoint", entry.endpoint)
+            .setInt("pid", entry.pid)
+            .setString("process", narrow(entry.process))
+            .setBool("active", entry.active)
+            .setDouble("maxPeak", entry.maxPeak);
+        items.push_back(item.str());
+
+        if (!options.process.empty() &&
+            _wcsicmp(entry.process.c_str(), options.process.c_str()) == 0) {
+            result.processPeak = std::max(result.processPeak, (double)entry.maxPeak);
+        }
+    }
+
+    result.sessionsJson = jsonArray(items);
+
+    if (options.process.empty() || result.processPeak >= options.minPeak) {
+        result.passed = true;
+    } else {
+        char buf[160];
+
+        sprintf_s(buf, "%s never played louder than %.3f (needs %.3f)",
+            narrow(options.process).c_str(), result.processPeak, options.minPeak);
+        result.failure = buf;
+    }
+
+    return result;
+}
+
 } // namespace SarTest
