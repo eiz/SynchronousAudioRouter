@@ -37,6 +37,8 @@ bool writeDriverConfig(
 
 // Software device node for the SAR driver, matching the INF's hardware ID.
 bool deviceNodeExists();
+// Device instance ID of the present SAR device node; empty if there is none.
+std::wstring sarDeviceInstanceId();
 bool createDeviceNode();
 bool removeDeviceNode();
 

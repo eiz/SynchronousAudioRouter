@@ -36,7 +36,10 @@ param(
     [switch]$SkipKillTest,
     # Any of issues, matrix, race, kill, browser. Installation always runs.
     [string[]]$Scenarios = @('issues', 'matrix', 'race', 'kill', 'browser'),
-    [int]$RaceCycles = 10
+    [int]$RaceCycles = 10,
+    # Extra idle time between the race and the kill scenario, on top of
+    # waiting for the endpoint builder to go idle (diagnostics).
+    [int]$PostRaceDelaySeconds = 0
 )
 
 $ErrorActionPreference = 'Stop'
@@ -271,6 +274,35 @@ if ($Scenarios -contains 'browser') {
     Set-ItemProperty $updatePolicy UpdateDefault 0 -Type DWord
 }
 
+# Waits until Windows' audio endpoint builder has worked off the endpoint
+# changes earlier scenarios caused, and returns the seconds waited. A burst
+# of host restarts (the race) leaves it busy for a while, tearing down and
+# rebuilding SAR endpoints one at a time; streams opened meanwhile stall in
+# Activate/Initialize or fail. Idle: under 100 ms of its CPU per second for
+# three seconds in a row.
+function Wait-EndpointBuilderIdle {
+    param([int]$TimeoutSeconds = 120)
+
+    $svc = Get-CimInstance Win32_Service -Filter "Name='AudioEndpointBuilder'"
+    $proc = if ($svc) { Get-Process -Id $svc.ProcessId -ErrorAction SilentlyContinue }
+    $started = Get-Date
+
+    if (-not $proc) { return 0 }
+
+    $last = $proc.TotalProcessorTime.TotalMilliseconds
+    $quiet = 0
+
+    while (((Get-Date) - $started).TotalSeconds -lt $TimeoutSeconds -and $quiet -lt 3) {
+        Start-Sleep -Seconds 1
+        $proc.Refresh()
+        $now = $proc.TotalProcessorTime.TotalMilliseconds
+        if ($now - $last -lt 100) { $quiet++ } else { $quiet = 0 }
+        $last = $now
+    }
+
+    return [math]::Round(((Get-Date) - $started).TotalSeconds, 1)
+}
+
 # Windows Server images ship with the audio stack disabled.
 foreach ($service in 'AudioEndpointBuilder', 'Audiosrv') {
     try {
@@ -337,6 +369,20 @@ if ($Scenarios -contains 'matrix') {
     }
 }
 
+# Timeline of SAR interface and endpoint state changes across the race, kill
+# and recovery scenarios, for lining up with what their clients saw.
+$watchProc = $null
+if ($Scenarios -contains 'race' -or $Scenarios -contains 'kill') {
+    $watchStop = Join-Path $ResultsDir 'watch.stop'
+    $watchJson = Join-Path $ResultsDir 'watch.json'
+    Remove-Item $watchStop -ErrorAction SilentlyContinue
+    $watchProc = Start-Process -FilePath $sarTest -NoNewWindow -PassThru `
+        -RedirectStandardOutput (Join-Path $ResultsDir 'watch.log') `
+        -ArgumentList @('watch', '--duration', 3600, '--stop-file', "`"$watchStop`"",
+            '--results', "`"$watchJson`"")
+    $null = $watchProc.Handle
+}
+
 if ($Scenarios -contains 'race') {
     # Start and stop the host over and over while other threads keep opening
     # streams on its endpoints: the start-up race reported against
@@ -345,6 +391,26 @@ if ($Scenarios -contains 'race') {
     $summary.scenarios += Invoke-Scenario "race-${count}x${Channels}" (
         @('race', '--endpoints', $count, '--cycles', $RaceCycles, '--up', 3, '--down', 200,
           '--openers', 4) + $common)
+}
+
+if ($Scenarios -contains 'race') {
+    # Let the endpoint builder catch up with the race before the kill
+    # scenario, so recovery-after-kill measures recovery from a killed host
+    # rather than the race's aftermath. How long that takes is the race's
+    # cost to Windows; a builder still busy after two minutes fails.
+    $settleTimeout = 120
+    $waited = Wait-EndpointBuilderIdle -TimeoutSeconds $settleTimeout
+    Write-Host "==> settle-after-race : endpoint builder idle after $waited s"
+    $summary.scenarios += [ordered]@{
+        name = 'settle-after-race'
+        outcome = if ($waited -lt $settleTimeout) { 'passed' } else { 'failed' }
+        seconds = $waited
+    }
+
+    if ($PostRaceDelaySeconds -gt 0) {
+        Write-Host "==> idling another $PostRaceDelaySeconds s"
+        Start-Sleep -Seconds $PostRaceDelaySeconds
+    }
 }
 
 if (-not $SkipKillTest -and $Scenarios -contains 'kill') {
@@ -385,6 +451,11 @@ if (-not $SkipKillTest -and $Scenarios -contains 'kill') {
 
     $summary.scenarios += Invoke-Scenario 'recovery-after-kill' (
         @('run', '--endpoints', $count, '--iterations', 1, '--duration', $Duration) + $common)
+}
+
+if ($watchProc) {
+    New-Item -ItemType File -Path $watchStop -Force | Out-Null
+    if (-not $watchProc.WaitForExit(30000)) { try { $watchProc.Kill() } catch { } }
 }
 
 if ($Scenarios -contains 'browser') {

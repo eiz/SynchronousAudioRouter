@@ -67,7 +67,7 @@
     <Link>
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalDependencies>setupapi.lib;newdev.lib;shlwapi.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;advapi32.lib;kernel32.lib;user32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>setupapi.lib;cfgmgr32.lib;newdev.lib;shlwapi.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;advapi32.lib;kernel32.lib;user32.lib;%(AdditionalDependencies)</AdditionalDependencies>
 
     </Link>
   </ItemDefinitionGroup>
@@ -97,12 +97,14 @@
     <ClCompile Include="common.cpp" />
     <ClCompile Include="install.cpp" />
     <ClCompile Include="wasapi.cpp" />
+    <ClCompile Include="watch.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="asiohost.h" />
     <ClInclude Include="common.h" />
     <ClInclude Include="install.h" />
     <ClInclude Include="wasapi.h" />
+    <ClInclude Include="watch.h" />
     <ClInclude Include="..\SarAsio\tinyasio.h" />
     <ClInclude Include="..\SarTestClock\clockstats.h" />
   </ItemGroup>
