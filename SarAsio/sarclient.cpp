@@ -43,13 +43,6 @@ void SarClient::tick(long bufferIndex)
     if (!_registers)
         return;
 
-    if (_updateSampleRateOnTick.exchange(false)) {
-        DWORD dummy;
-
-        DeviceIoControl(_device, SAR_SEND_FORMAT_CHANGE_EVENT,
-            nullptr, 0, nullptr, 0, &dummy, nullptr);
-    }
-
     // for each endpoint
     // read isActive, generation and buffer offset/size/position
     //   if offset/size invalid, skip endpoint (fill asio buffers with 0)
@@ -187,12 +180,6 @@ bool SarClient::start()
         return false;
     }
 
-    if (!openMmNotificationClient()) {
-        LOG(ERROR) << "Couldn't open MMDevice notification client";
-        stop();
-        return false;
-    }
-
     if (!setBufferLayout()) {
         LOG(ERROR) << "Couldn't set layout";
         stop();
@@ -214,21 +201,6 @@ bool SarClient::start()
 
 void SarClient::stop()
 {
-    if (_mmNotificationClientRegistered) {
-        _mmEnumerator->UnregisterEndpointNotificationCallback(
-            _mmNotificationClient);
-        _mmNotificationClientRegistered = false;
-    }
-
-    if (_mmNotificationClient) {
-        _mmNotificationClient->Release();
-        _mmNotificationClient = nullptr;
-    }
-
-    if (_mmEnumerator) {
-        _mmEnumerator = nullptr;
-    }
-
     if (_device != INVALID_HANDLE_VALUE) {
         _registersLock.lock();
         CancelIoEx(_device, nullptr);
@@ -324,34 +296,6 @@ bool SarClient::openControlDevice()
     _notificationHandles.clear();
     _notificationHandles.resize(_driverConfig.endpoints.size());
     free(interfaceDetail);
-    return true;
-}
-
-bool SarClient::openMmNotificationClient()
-{
-    if (FAILED(CoCreateInstance(
-        __uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL,
-        __uuidof(IMMDeviceEnumerator), (LPVOID *)&_mmEnumerator))) {
-
-        return false;
-    }
-
-    if (FAILED(CComObject<NotificationClient>::CreateInstance(
-        &_mmNotificationClient))) {
-
-        return false;
-    }
-
-    _mmNotificationClient->AddRef();
-    _mmNotificationClient->setClient(shared_from_this());
-
-    if (FAILED(_mmEnumerator->RegisterEndpointNotificationCallback(
-        _mmNotificationClient))) {
-
-        return false;
-    }
-
-    _mmNotificationClientRegistered = true;
     return true;
 }
 
@@ -578,91 +522,6 @@ void SarClient::mux(
             }
         }
     }
-}
-
-HRESULT STDMETHODCALLTYPE SarClient::NotificationClient::OnDeviceStateChanged(
-    _In_  LPCWSTR pwstrDeviceId,
-    _In_  DWORD dwNewState)
-{
-    // When a SAR endpoint is re-activated after its initial creation, its
-    // supported sample rate may be different. To force the audio engine to
-    // notice the possible format change, we listen for device state change
-    // events and tell the kernel mode driver to broadcast a
-    // KSEVENT_PINCAPS_FORMATCHANGE event, which causes the audio engine to
-    // re-query the pin capabilities. This isn't needed for newly added
-    // endpoints or non-SAR endpoints, so we filter out those events.
-    if (dwNewState != DEVICE_STATE_ACTIVE) {
-        return S_OK;
-    }
-
-    if (auto client = _client.lock()) {
-        do {
-            CComPtr<IMMDeviceEnumerator> mmEnumerator;
-            CComPtr<IMMDevice> device;
-            CComPtr<IPropertyStore> ps;
-            PROPVARIANT pvalue = {};
-
-            // This seems a bit shady, but MSDN's device events example
-            // initializes COM the same way. It's not clear what the ownership
-            // of the thread that delivers the IMMNotificationClient events is.
-            CoInitialize(NULL);
-
-            if (FAILED(CoCreateInstance(
-                __uuidof(MMDeviceEnumerator), nullptr, CLSCTX_ALL,
-                __uuidof(IMMDeviceEnumerator), (LPVOID *)&mmEnumerator))) {
-
-                break;
-            }
-
-            if (FAILED(mmEnumerator->GetDevice(pwstrDeviceId, &device))) {
-                break;
-            }
-
-            if (FAILED(device->OpenPropertyStore(STGM_READ, &ps))) {
-                break;
-            }
-
-            if (FAILED(ps->GetValue(
-                PKEY_SynchronousAudioRouter_EndpointId, &pvalue))) {
-
-                break;
-            }
-
-            client->updateSampleRateOnTick();
-            PropVariantClear(&pvalue);
-        } while(false);
-
-        CoUninitialize();
-    }
-
-    return S_OK;
-}
-
-HRESULT STDMETHODCALLTYPE SarClient::NotificationClient::OnDeviceAdded(
-    _In_  LPCWSTR pwstrDeviceId)
-{
-    return S_OK;
-}
-
-HRESULT STDMETHODCALLTYPE SarClient::NotificationClient::OnDeviceRemoved(
-    _In_  LPCWSTR pwstrDeviceId)
-{
-    return S_OK;
-}
-
-HRESULT STDMETHODCALLTYPE SarClient::NotificationClient::OnDefaultDeviceChanged(
-    _In_  EDataFlow flow,
-    _In_  ERole role,
-    _In_  LPCWSTR pwstrDefaultDeviceId)
-{
-    return S_OK;
-}
-
-HRESULT STDMETHODCALLTYPE SarClient::NotificationClient::OnPropertyValueChanged(
-    _In_  LPCWSTR pwstrDeviceId,
-    _In_  const PROPERTYKEY key)
-{
-    return S_OK;
 }
 
 } // namespace Sar
