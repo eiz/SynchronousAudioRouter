@@ -238,6 +238,16 @@ void SarClient::stop()
         _registers = nullptr;
         _sharedBuffer = nullptr;
         _sharedBufferSize = 0;
+
+        for (auto& notificationHandle : _notificationHandles) {
+            if (notificationHandle.handle) {
+                CloseHandle(notificationHandle.handle);
+                notificationHandle.handle = nullptr;
+            }
+
+            notificationHandle.generation = 0;
+        }
+
         _registersLock.unlock();
     }
 

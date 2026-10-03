@@ -53,8 +53,9 @@ std::vector<AsioDriver> InstalledAsioDrivers()
 
     LOG(INFO) << "Querying installed ASIO drivers.";
 
-    if (!SUCCEEDED(err = RegOpenKeyEx(
-        HKEY_LOCAL_MACHINE, TEXT("SOFTWARE\\ASIO"), 0, KEY_READ, &asio))) {
+    if ((err = RegOpenKeyEx(
+        HKEY_LOCAL_MACHINE, TEXT("SOFTWARE\\ASIO"), 0, KEY_READ, &asio)) !=
+        ERROR_SUCCESS) {
 
         LOG(INFO) << "Failed to open HKLM\\SOFTWARE\\ASIO: status " << err;
         return result;

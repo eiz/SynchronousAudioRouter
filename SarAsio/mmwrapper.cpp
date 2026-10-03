@@ -422,7 +422,10 @@ HRESULT STDMETHODCALLTYPE SarActivateAudioInterfaceWorker::Initialize(
                 break;
             }
 
-            defaultDevicePath = pvalue.pwszVal;
+            if (pvalue.vt == VT_LPWSTR && pvalue.pwszVal) {
+                defaultDevicePath = pvalue.pwszVal;
+            }
+
             PropVariantClear(&pvalue);
         } while(0);
     }

@@ -16,12 +16,36 @@
 
 #include "sar.h"
 
+// Undo a failed SarKsPinRtGetBufferCore: release the buffer cells reserved
+// for the endpoint and, if the view was already mapped into the calling
+// process, unmap it. Without this a retried buffer allocation leaks the
+// cells until the control context is destroyed.
+static VOID SarKsPinRtGetBufferCleanup(
+    SarEndpoint *endpoint, SarEndpointProcessContext *processContext,
+    ULONG cellIndex, ULONG cellCount)
+{
+    SarControlContext *controlContext = endpoint->owner;
+
+    if (processContext && processContext->bufferUVA) {
+        ZwUnmapViewOfSection(ZwCurrentProcess(), processContext->bufferUVA);
+        processContext->bufferUVA = nullptr;
+    }
+
+    ExAcquireFastMutex(&controlContext->mutex);
+    RtlClearBits(&controlContext->bufferMap, cellIndex, cellCount);
+    ExReleaseFastMutex(&controlContext->mutex);
+
+    endpoint->activeCellIndex = 0;
+    endpoint->activeViewSize = 0;
+    endpoint->activeBufferSize = 0;
+}
+
 NTSTATUS SarKsPinRtGetBufferCore(
     PIRP irp, PVOID baseAddress, ULONG requestedBufferSize,
     ULONG notificationCount, PKSRTAUDIO_BUFFER buffer)
 {
     SarEndpoint *endpoint = SarGetEndpointFromIrp(irp, TRUE);
-    SarControlContext *controlContext = endpoint->owner;
+    SarControlContext *controlContext;
     SarEndpointProcessContext *processContext;
     NTSTATUS status;
 
@@ -29,6 +53,8 @@ NTSTATUS SarKsPinRtGetBufferCore(
         SAR_ERROR("No valid endpoint");
         return STATUS_NOT_FOUND;
     }
+
+    controlContext = endpoint->owner;
 
     if (baseAddress != nullptr) {
         SAR_ERROR("It wants a specific address");
@@ -58,6 +84,7 @@ NTSTATUS SarKsPinRtGetBufferCore(
             endpoint->activeChannelCount),
         controlContext->sampleSize * endpoint->activeChannelCount);
     SIZE_T viewSize = ROUND_UP(actualSize, SAR_BUFFER_CELL_SIZE);
+    ULONG cellCount = (ULONG)(viewSize / SAR_BUFFER_CELL_SIZE);
 
     ExAcquireFastMutex(&controlContext->mutex);
 
@@ -69,8 +96,7 @@ NTSTATUS SarKsPinRtGetBufferCore(
     }
 
     ULONG cellIndex = RtlFindClearBitsAndSet(
-        &controlContext->bufferMap,
-        (ULONG)(viewSize / SAR_BUFFER_CELL_SIZE), 0);
+        &controlContext->bufferMap, cellCount, 0);
 
     if (cellIndex == 0xFFFFFFFF) {
         SAR_ERROR("Cell index full 0xFFFFFFFF");
@@ -97,6 +123,7 @@ NTSTATUS SarKsPinRtGetBufferCore(
 
     if (!NT_SUCCESS(status)) {
         SAR_ERROR("Section mapping failed %08X", status);
+        SarKsPinRtGetBufferCleanup(endpoint, nullptr, cellIndex, cellCount);
         SarReleaseEndpointAndContext(endpoint);
         return status;
     }
@@ -108,6 +135,7 @@ NTSTATUS SarKsPinRtGetBufferCore(
 
     if (!NT_SUCCESS(status)) {
         SAR_ERROR("Read endpoint registers failed %08X", status);
+        SarKsPinRtGetBufferCleanup(endpoint, processContext, cellIndex, cellCount);
         SarReleaseEndpointAndContext(endpoint);
         return status;
     }
@@ -120,8 +148,9 @@ NTSTATUS SarKsPinRtGetBufferCore(
     if (!NT_SUCCESS(status)) {
         SAR_ERROR("Couldn't write endpoint registers: %08X %p %p", status,
             processContext->process, PsGetCurrentProcess());
+        SarKsPinRtGetBufferCleanup(endpoint, processContext, cellIndex, cellCount);
         SarReleaseEndpointAndContext(endpoint);
-        return status; // TODO: goto err_out
+        return status;
     }
 
     buffer->ActualBufferSize = actualSize;

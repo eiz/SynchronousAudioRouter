@@ -193,7 +193,7 @@ NTSTATUS SarTopologyFilterDescriptor::getPhysicalConnection(PIRP irp, PKSIDENTIF
 
     pinData->Size = symlink->Length + sizeof(KSPIN_PHYSICALCONNECTION);
     RtlCopyMemory(pinData->SymbolicLinkName, symlink->Buffer, symlink->Length);
-    pinData->SymbolicLinkName[symlink->Length/2];
+    pinData->SymbolicLinkName[symlink->Length / sizeof(WCHAR)] = UNICODE_NULL;
     pinData->Pin = 1;
 
     SarReleaseEndpointAndContext(endpoint);

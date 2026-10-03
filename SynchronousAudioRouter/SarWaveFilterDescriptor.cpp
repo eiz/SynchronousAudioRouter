@@ -337,7 +337,7 @@ NTSTATUS SarWaveFilterDescriptor::getPhysicalConnection(PIRP irp, PKSIDENTIFIER 
 
     pinData->Size = symlink->Length + sizeof(KSPIN_PHYSICALCONNECTION);
     RtlCopyMemory(pinData->SymbolicLinkName, symlink->Buffer, symlink->Length);
-    pinData->SymbolicLinkName[symlink->Length / 2];
+    pinData->SymbolicLinkName[symlink->Length / sizeof(WCHAR)] = UNICODE_NULL;
     pinData->Pin = 0;
 
     SarReleaseEndpointAndContext(endpoint);

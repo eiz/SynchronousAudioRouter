@@ -107,8 +107,13 @@ VOID SarDeleteControlContext(SarControlContext *controlContext)
         controlContext->workItem = nullptr;
     }
 
+    // The section view is unmapped in SarOrphanControlContext, which runs in
+    // the context of the process that mapped it. This function can run in an
+    // arbitrary process context (e.g. a client releasing the last reference to
+    // an orphaned context), so it must not try to unmap it here.
     if (controlContext->sectionViewBaseAddress) {
-        ZwUnmapViewOfSection(ZwCurrentProcess(), controlContext->sectionViewBaseAddress);
+        SAR_WARNING("Section view %p still mapped when deleting controlContext %p",
+            controlContext->sectionViewBaseAddress, controlContext);
         controlContext->sectionViewBaseAddress = nullptr;
     }
 
@@ -130,6 +135,7 @@ BOOLEAN SarOrphanControlContext(SarDriverExtension *extension, PIRP irp)
     PIO_STACK_LOCATION irpStack = IoGetCurrentIrpStackLocation(irp);
     SarControlContext *controlContext;
     LIST_ENTRY orphanEndpoints;
+    PVOID sectionViewBaseAddress = nullptr;
 
     ExAcquireFastMutex(&extension->mutex);
     controlContext = (SarControlContext *)SarGetTableEntry(
@@ -152,6 +158,8 @@ BOOLEAN SarOrphanControlContext(SarDriverExtension *extension, PIRP irp)
 
     ExAcquireFastMutex(&controlContext->mutex);
     controlContext->orphan = TRUE;
+    sectionViewBaseAddress = controlContext->sectionViewBaseAddress;
+    controlContext->sectionViewBaseAddress = nullptr;
     InitializeListHead(&orphanEndpoints);
 
     if (!IsListEmpty(&controlContext->endpointList)) {
@@ -173,6 +181,19 @@ BOOLEAN SarOrphanControlContext(SarDriverExtension *extension, PIRP irp)
     }
 
     SarCancelAllHandleQueueIrps(&controlContext->handleQueue);
+
+    // IRP_MJ_CLEANUP runs in the context of the process that mapped the view
+    // in SarSetBufferLayout, so this is the only place it can safely be
+    // unmapped via ZwCurrentProcess().
+    if (sectionViewBaseAddress) {
+        NTSTATUS status = ZwUnmapViewOfSection(
+            ZwCurrentProcess(), sectionViewBaseAddress);
+
+        if (!NT_SUCCESS(status)) {
+            SAR_WARNING("Couldn't unmap section view %p: %08X",
+                sectionViewBaseAddress, status);
+        }
+    }
 
     if (SarReleaseControlContext(controlContext) == FALSE) {
         SAR_TRACE("controlContext orphaned but not deleted: %p, refs: %d", controlContext, controlContext->refs);

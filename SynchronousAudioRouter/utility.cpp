@@ -431,9 +431,9 @@ NTSTATUS SarWaitHandleQueue(SarHandleQueue *queue, PIRP irp)
     irp->IoStatus.Information = 0;
 
     if (maxItems == 0) {
+        // SarIrpDeviceControl completes the IRP for any non-pending status,
+        // so it must not be completed here as well.
         irp->IoStatus.Information = sizeof(SarHandleQueueResponse);
-        irp->IoStatus.Status = STATUS_BUFFER_TOO_SMALL;
-        IoCompleteRequest(irp, IO_NO_INCREMENT);
         return STATUS_BUFFER_TOO_SMALL;
     }
 
@@ -484,17 +484,21 @@ NTSTATUS SarWaitHandleQueue(SarHandleQueue *queue, PIRP irp)
             SarHandleQueueItem *queueItem =
                 CONTAINING_RECORD(entry, SarHandleQueueItem, listEntry);
 
-            status = SarTransferQueuedHandle(
-                irp, kernelProcessHandle, nextItem++,
-                queueItem->kernelProcessHandle, queueItem->userHandle,
-                queueItem->associatedData);
+            // Keep draining the list after a failure so the remaining items
+            // and their process handles aren't leaked.
+            if (NT_SUCCESS(status)) {
+                status = SarTransferQueuedHandle(
+                    irp, kernelProcessHandle, nextItem++,
+                    queueItem->kernelProcessHandle, queueItem->userHandle,
+                    queueItem->associatedData);
+
+                if (NT_SUCCESS(status)) {
+                    irp->IoStatus.Information += sizeof(SarHandleQueueResponse);
+                }
+            }
+
             ZwClose(queueItem->kernelProcessHandle);
             ExFreePoolWithTag(queueItem, SAR_TAG);
-            irp->IoStatus.Information += sizeof(SarHandleQueueResponse);
-
-            if (!NT_SUCCESS(status)) {
-                break;
-            }
         }
 
         ZwClose(kernelProcessHandle);
