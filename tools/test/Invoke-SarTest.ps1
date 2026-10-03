@@ -352,6 +352,20 @@ if ($Scenarios -contains 'issues') {
     $summary.scenarios += Invoke-Scenario 'long-endpoint-name' (
         @('host', '--endpoints', 1, '--duration', 2, '--id-prefix', 'SarTest-long',
           '--prefix', ('SarTestLongEndpointName' * 4)) + $common) -Timeout 120
+    # Issue #2: after the host's sample rate or channel count changes, the
+    # audio engine kept the endpoint's old format. The driver encodes the
+    # format in each endpoint's interface name, so the same endpoint IDs in a
+    # new format are new endpoints to Windows. Same IDs at 48 kHz, 96 kHz,
+    # 48 kHz again, then mono; each must stream with the engine format
+    # matching. (Mono, because Windows gives SAR endpoints with more than two
+    # channels a stereo shared-mode format, so four channels can't be told
+    # apart from a stale two.)
+    $fmt = @('run', '--endpoints', 2, '--iterations', 1, '--duration', 3, '--prefix', 'SarTestFormat',
+        '--expect-format', '--sarasio', "`"$sarAsio`"")
+    $summary.scenarios += Invoke-Scenario 'format-48k' ($fmt + @('--rate', 48000, '--channels', 2))
+    $summary.scenarios += Invoke-Scenario 'format-96k' ($fmt + @('--rate', 96000, '--channels', 2))
+    $summary.scenarios += Invoke-Scenario 'format-48k-again' ($fmt + @('--rate', 48000, '--channels', 2))
+    $summary.scenarios += Invoke-Scenario 'format-mono' ($fmt + @('--rate', 48000, '--channels', 1))
     # Application routing on: from then on the driver's registry filter sees
     # every registry value query on the machine. With SarAsio's COM classes
     # registered, the harness's own WASAPI client also goes through SarAsio's
