@@ -151,6 +151,8 @@ if ($Scenarios -contains 'issues') {
         @('control-panel', '--endpoints', 1) + $common) -Timeout 120
     $summary.scenarios += Invoke-Scenario 'issue-54-no-interface' (
         @('no-interface') + $common) -Timeout 120
+    $summary.scenarios += Invoke-Scenario 'issue-15-endpoint-names' (
+        @('endpoint-names') + $common) -Timeout 300
 }
 
 if ($Scenarios -contains 'matrix') {
