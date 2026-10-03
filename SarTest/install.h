@@ -28,10 +28,12 @@ std::wstring configurationPath();
 std::wstring loggingPath();
 
 // Writes a SarAsio default.json describing the layout, with the given ASIO
-// driver CLSID as the physical interface and application routing disabled.
+// driver CLSID as the physical interface. Application routing (no rules, so
+// only the redirection of the audio device enumerator) is off unless asked.
 bool writeDriverConfig(
     const EndpointLayout& layout, const std::wstring& driverClsid,
-    int waveRtMinimumFrames, const std::wstring& path);
+    int waveRtMinimumFrames, const std::wstring& path,
+    bool applicationRouting = false);
 
 // Software device node for the SAR driver, matching the INF's hardware ID.
 bool deviceNodeExists();
