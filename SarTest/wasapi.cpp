@@ -408,6 +408,7 @@ private:
 
         _kind = classifyFormat(mix, &_stats.format);
         _stats.channels = mix->nChannels;
+        _stats.sampleRate = mix->nSamplesPerSec;
         _rate = mix->nSamplesPerSec ? (double)mix->nSamplesPerSec : 48000.0;
 
         if (_kind == SampleKind::Unsupported) {
@@ -1076,6 +1077,7 @@ std::string StreamStats::toJson() const
 
     o.setString("name", name)
         .setString("direction", isCapture ? "capture" : "render")
+        .setInt("sampleRate", sampleRate)
         .setBool("started", started)
         .setBool("deviceInvalidated", deviceInvalidated)
         .setString("error", lastError == S_OK ? "" : hresultText(lastError))
@@ -1145,6 +1147,16 @@ static void evaluate(StreamStats *s, const WasapiOptions& options)
 
     if (s->lastError != S_OK) {
         s->failure = "error in " + s->errorStage;
+        return;
+    }
+
+    if ((options.expectedRate && s->sampleRate != options.expectedRate) ||
+        (options.expectedChannels && s->channels != options.expectedChannels)) {
+        char buf[128];
+
+        sprintf_s(buf, "engine format is %lu Hz, %d ch; expected %lu Hz, %d ch",
+            s->sampleRate, s->channels, options.expectedRate, options.expectedChannels);
+        s->failure = buf;
         return;
     }
 

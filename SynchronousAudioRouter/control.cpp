@@ -405,7 +405,6 @@ NTSTATUS SarCreateEndpoint(
     NTSTATUS status = STATUS_SUCCESS;
     PKSDEVICE ksDevice = KsGetDeviceForDeviceObject(device);
     BOOLEAN deviceNameAllocated = FALSE, deviceIdAllocated = FALSE;
-    RTL_OSVERSIONINFOW versionInfo = {};
     SarEndpoint *endpoint;
 
     if (request->type != SAR_ENDPOINT_TYPE_RECORDING &&
@@ -472,17 +471,15 @@ NTSTATUS SarCreateEndpoint(
 
     deviceIdAllocated = TRUE;
 
-    // Windows 10 introduces a 'format cache' which at this time appears to
-    // not fully invalidate itself when KSEVENT_PINCAPS_FORMATCHANGE is
-    // sent. Work around this by encoding information about the sample rate,
-    // channel count and sample resolution into the endpoint ID. This means
-    // that WASAPI endpoints won't be stable across changes to these
-    // parameters on Windows 10 and e.g. applications that store them as
-    // configuration may lose track of them, but that seems better than "it
-    // fully stops working until you reinstall the driver".
-    RtlGetVersion(&versionInfo);
-
-    if (versionInfo.dwMajorVersion >= 10) {
+    // Windows 10's audio engine caches each endpoint's format and doesn't
+    // fully invalidate that cache when KSEVENT_PINCAPS_FORMATCHANGE is sent.
+    // Encode the sample rate, channel count and sample resolution into the
+    // endpoint ID instead, so an endpoint in a new format is a new endpoint to
+    // Windows. WASAPI endpoints then aren't stable across changes to these
+    // parameters, and e.g. applications that store them as configuration may
+    // lose track of them, but that seems better than "it fully stops working
+    // until you reinstall the driver".
+    {
         DECLARE_UNICODE_STRING_SIZE(deviceIdBuffer, 256);
 
         RtlUnicodeStringPrintf(&deviceIdBuffer,
@@ -490,13 +487,6 @@ NTSTATUS SarCreateEndpoint(
             controlContext->sampleRate, controlContext->sampleSize);
         status = SarStringDuplicate(
             &endpoint->deviceIdMangled, &deviceIdBuffer);
-
-        if (!NT_SUCCESS(status)) {
-            goto err_out;
-        }
-    } else {
-        status = SarStringDuplicate(
-            &endpoint->deviceIdMangled, &endpoint->deviceId);
 
         if (!NT_SUCCESS(status)) {
             goto err_out;
@@ -642,56 +632,4 @@ VOID SarOrphanEndpoint(SarEndpoint *endpoint)
     if (SarReleaseEndpoint(endpoint) == FALSE) {
         SAR_TRACE("Endpoint orphaned but not deleted: %p, refs: %d", endpoint, endpoint->refs);
     }
-}
-
-NTSTATUS SarSendFormatChangeEvent(PDEVICE_OBJECT deviceObject, SarDriverExtension *extension)
-{
-    PVOID restartKey = nullptr;
-    PKSDEVICE ksDevice = KsGetDeviceForDeviceObject(deviceObject);
-
-    // Always acquire ksDevice before extension->mutex, else deadlocks can occurs with a concurrent SarKsFilterCreate for example
-    KsAcquireDevice(ksDevice);
-
-    KeEnterCriticalRegion();
-    ExAcquireFastMutexUnsafe(&extension->mutex);
-
-    FOR_EACH_GENERIC(
-        &extension->controlContextTable, SarTableEntry,
-        tableEntry, restartKey) {
-
-        SarControlContext *controlContext =
-            (SarControlContext *)tableEntry->value;
-
-        ExAcquireFastMutexUnsafe(&controlContext->mutex);
-
-        PLIST_ENTRY entry = controlContext->endpointList.Flink;
-
-        while (entry != &controlContext->endpointList) {
-            SarEndpoint *endpoint =
-                CONTAINING_RECORD(entry, SarEndpoint, listEntry);
-
-            entry = entry->Flink;
-
-            for (PKSFILTER filter =
-                    KsFilterFactoryGetFirstChildFilter(endpoint->filterFactory);
-                 filter;
-                 filter = KsFilterGetNextSiblingFilter(filter)) {
-
-                KsFilterGenerateEvents(filter,
-                    &KSEVENTSETID_PinCapsChange,
-                    KSEVENT_PINCAPS_FORMATCHANGE,
-                    0, nullptr,
-                    nullptr, nullptr);
-            }
-        }
-
-        ExReleaseFastMutexUnsafe(&controlContext->mutex);
-    }
-
-    ExReleaseFastMutexUnsafe(&extension->mutex);
-    KeLeaveCriticalRegion();
-
-    KsReleaseDevice(ksDevice);
-
-    return STATUS_SUCCESS;
 }

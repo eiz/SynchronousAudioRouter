@@ -697,9 +697,6 @@ NTSTATUS SarIrpDeviceControl(PDEVICE_OBJECT deviceObject, PIRP irp)
             KeLeaveCriticalRegion();
             break;
         }
-        case SAR_SEND_FORMAT_CHANGE_EVENT:
-            ntStatus = SarSendFormatChangeEvent(deviceObject, extension);
-            break;
         default:
             SAR_ERROR("Unknown ioctl %lu", ioControlCode);
             break;

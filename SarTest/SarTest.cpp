@@ -79,6 +79,8 @@ int usage()
         "Other options:  --results <file.json> --phase-timeout S --no-sarasio-log\n"
         "                --keep-config (host/run: do not rewrite default.json)\n"
         "                --app-routing (turn on application routing in default.json)\n"
+        "                --expect-format (fail streams whose engine format isn't --rate\n"
+        "                and --channels)\n"
         "                --registered (use the COM-registered SarAsio instead of a path)\n"
         "                --wait S --wait-gone S --restart-delay MS --rate HZ\n"
         "                --min-valid RATIO --max-discontinuities N\n"
@@ -132,6 +134,12 @@ WasapiOptions wasapiOptions(const Args& args, const EndpointLayout& layout)
     options.settleSeconds = args.getDouble(L"settle", 2.0);
     options.maxReopens = args.getInt(L"max-reopens", 20);
     options.maxTransitionFrames = args.getInt(L"max-transition", 4800);
+
+    if (args.has(L"expect-format")) {
+        options.expectedRate = (unsigned long)args.getDouble(L"rate", 48000.0);
+        options.expectedChannels = layout.channels;
+    }
+
     return options;
 }
 
