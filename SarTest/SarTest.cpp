@@ -55,6 +55,10 @@ int usage()
         "      Open SAR's control panel on a running host, press the hardware\n"
         "      interface's Configure button and close it again; fail if a second\n"
         "      clock instance was created (issue #133).\n"
+        "  SarTest no-interface\n"
+        "      Open SAR with no hardware interface configured, the way a DAW sees\n"
+        "      it before first-time setup; fail unless it offers a stereo input\n"
+        "      and output (issues #31, #54).\n"
         "\n"
         "Layout options: --endpoints N (playback/recording pairs, default 2)\n"
         "                --channels C (per endpoint, default 2) --prefix <name>\n"
@@ -117,8 +121,10 @@ WasapiOptions wasapiOptions(const Args& args, const EndpointLayout& layout)
 }
 
 // Writes default.json for the layout unless --keep-config, backing up an
-// existing configuration the first time.
-bool prepareConfig(const Args& args, const EndpointLayout& layout)
+// existing configuration the first time. An empty driverClsid leaves SAR
+// without a hardware interface.
+bool prepareConfig(const Args& args, const EndpointLayout& layout,
+    const std::wstring& driverClsid = SAR_TEST_CLOCK_CLSID_STR)
 {
     if (args.has(L"keep-config")) {
         return true;
@@ -134,7 +140,7 @@ bool prepareConfig(const Args& args, const EndpointLayout& layout)
         }
     }
 
-    if (!writeDriverConfig(layout, SAR_TEST_CLOCK_CLSID_STR,
+    if (!writeDriverConfig(layout, driverClsid,
         args.getInt(L"wavert-min-frames", 0), path)) {
         return false;
     }
@@ -651,6 +657,60 @@ int cmdControlPanel(const Args& args)
     return rc;
 }
 
+// Issues #31 and #54: before a hardware interface is chosen, SAR offered one
+// mono input and one mono output, and DAWs that need a stereo output (Live,
+// Reason) refused to load it, so its control panel couldn't be reached.
+int cmdNoInterface(const Args& args)
+{
+    EndpointLayout layout = EndpointLayout::fromArgs(args);
+
+    layout.pairs = 0;
+
+    if (!prepareConfig(args, layout, L"")) {
+        return 1;
+    }
+
+    AsioHost host(hostOptions(args, layout));
+    int rc = 0;
+    std::string failure;
+
+    if (!host.load()) {
+        return 1;
+    }
+
+    if (!host.open()) {
+        rc = 2;
+        failure = "open failed";
+    } else if (!host.start() || !host.stop()) {
+        rc = 2;
+        failure = "start/stop failed";
+    } else if (host.stats().physicalInputs < 2 || host.stats().physicalOutputs < 2) {
+        rc = 2;
+        failure = "no stereo pair without a hardware interface";
+    }
+
+    host.close();
+
+    if (rc != 0) {
+        logf("%s", failure.c_str());
+    }
+
+    JsonObject result;
+
+    result.setString("command", "no-interface")
+        .setBool("passed", rc == 0)
+        .setInt("exitCode", rc)
+        .setRaw("host", host.toJson());
+
+    if (!failure.empty()) {
+        result.setString("failure", failure);
+    }
+
+    writeResults(args, result.str());
+    logf("%s", rc == 0 ? "PASSED" : "FAILED");
+    return rc;
+}
+
 } // namespace
 
 int wmain(int argc, wchar_t **argv)
@@ -686,6 +746,8 @@ int wmain(int argc, wchar_t **argv)
         rc = cmdRace(args);
     } else if (args.command == L"control-panel") {
         rc = cmdControlPanel(args);
+    } else if (args.command == L"no-interface") {
+        rc = cmdNoInterface(args);
     } else {
         rc = usage();
     }

@@ -86,6 +86,8 @@ The `issue-*` scenarios are regression checks for specific GitHub issues.
 `SarTest.exe control-panel` (#133) opens SAR's control panel on a running
 host, presses the hardware interface's Configure button and checks that the
 clock never had a second instance alive. It needs an interactive desktop.
+`SarTest.exe no-interface` (#31, #54) opens SAR with no hardware interface
+configured and checks that it still offers a stereo input and output.
 `Invoke-SarTest.ps1 -Scenarios` selects any of `issues`, `matrix`, `race`
 and `kill`.
 
@@ -100,6 +102,7 @@ SarTest wasapi [--duration S] [--wait S] [--expect-invalidation]
 SarTest run [--iterations K] [--duration S]
 SarTest race [--cycles K] [--up S] [--down MS] [--openers T] [--hold MS]
 SarTest control-panel
+SarTest no-interface
 ```
 
 `install` creates the SAR software device node if needed, installs the

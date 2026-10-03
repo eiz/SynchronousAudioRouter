@@ -149,6 +149,8 @@ if ($Scenarios -contains 'issues') {
     # Regression checks for specific GitHub issues, one short host each.
     $summary.scenarios += Invoke-Scenario 'issue-133-control-panel' (
         @('control-panel', '--endpoints', 1) + $common) -Timeout 120
+    $summary.scenarios += Invoke-Scenario 'issue-54-no-interface' (
+        @('no-interface') + $common) -Timeout 120
 }
 
 if ($Scenarios -contains 'matrix') {
