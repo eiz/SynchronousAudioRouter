@@ -1,11 +1,16 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <?define bitness = "(64 bit)" ?>
+<!-- Build outputs; CI overrides these to point at its staged artifacts. -->
+<?ifndef ProductVersion ?><?define ProductVersion = "0.13.99.1" ?><?endif ?>
+<?ifndef Bin64 ?><?define Bin64 = "..\x64\Release" ?><?endif ?>
+<?ifndef Bin32 ?><?define Bin32 = "..\Release" ?><?endif ?>
+<?ifndef DriverDir ?><?define DriverDir = "$(var.Bin64)\SynchronousAudioRouter" ?><?endif ?>
 
 <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi"
      xmlns:difx="http://schemas.microsoft.com/wix/DifxAppExtension">
 	<Product Id="*"
            Name="Synchronous Audio Router $(var.bitness)"
-           Language="1033" Version="0.13.99.1"
+           Language="1033" Version="$(var.ProductVersion)"
            Manufacturer="Many Worlds"
            UpgradeCode="8cae7fd4-4469-4cc1-ba9a-76c00fbb5e05">
 		<Package InstallerVersion="200" Compressed="yes"
@@ -31,7 +36,7 @@
 	</Feature>
 
     <Binary Id="SarInstallerActions"
-            SourceFile="..\x64\Release\SarInstallerActions.dll"/>
+            SourceFile="$(var.Bin64)\SarInstallerActions.dll"/>
 
     <CustomAction Id="CreateDeviceNode.SetProperty"
                   Return="check"
@@ -80,15 +85,15 @@
                  Win64="yes">
         <File Id="SynchronousAudioRouter.sys"
               Name="SynchronousAudioRouter.sys"
-              Source="..\x64\Release\SynchronousAudioRouter.sys"
+              Source="$(var.DriverDir)\SynchronousAudioRouter.sys"
               KeyPath="yes"/>
         <File Id="SynchronousAudioRouter.cat"
               Name="SynchronousAudioRouter.cat"
-              Source="..\x64\Release\SynchronousAudioRouter\SynchronousAudioRouter.cat"
+              Source="$(var.DriverDir)\SynchronousAudioRouter.cat"
               KeyPath="no"/>
         <File Id="SynchronousAudioRouter.inf"
               Name="SynchronousAudioRouter.inf"
-              Source="..\x64\Release\SynchronousAudioRouter\SynchronousAudioRouter.inf"
+              Source="$(var.DriverDir)\SynchronousAudioRouter.inf"
               KeyPath="no"/>
         <difx:Driver PlugAndPlayPrompt="no"/>
       </Component>
@@ -98,7 +103,7 @@
                  Win64="yes">
         <File Id="SarAsio_x64.dll"
               Name="SarAsio_x64.dll"
-              Source="..\x64\Release\SarAsio.dll"
+              Source="$(var.Bin64)\SarAsio.dll"
               KeyPath="yes"/>
         <!--<File Id="SarCtl.exe" Source="..\x64\Release\SarCtl.exe" KeyPath="no"/>-->
         <RegistryValue Root="HKCR"
@@ -161,7 +166,7 @@
                  Win64="yes">
         <File Id="SarAsio_x64_32.dll"
               Name="SarAsio.dll"
-              Source="..\Release\SarAsio.dll"
+              Source="$(var.Bin32)\SarAsio.dll"
               KeyPath="yes"/>
         <RegistryValue Root="HKLM"
                        Key="SOFTWARE\Wow6432Node\Classes\CLSID\{0569D852-1F6A-44A7-B7B5-EFB78B66BE21}\InProcServer32"
@@ -222,7 +227,7 @@
                  Win64="yes">
         <File Id="SarConfigure.exe"
               Name="SarConfigure.exe"
-              Source="..\x64\Release\SarConfigure.exe"
+              Source="$(var.Bin64)\SarConfigure.exe"
               KeyPath="yes"/>
       </Component>
     </DirectoryRef>

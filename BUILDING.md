@@ -71,9 +71,11 @@ These are tracked here so nothing is silently missing:
 - **`DriverVer` in source.** The committed INF still has the placeholder
   `DriverVer=0.1`; the pipeline stamps a valid value at build time but the source
   value should eventually be fixed too.
-- **Installer (MSI).** The WiX `SarInstaller` project is not built by this
-  pipeline yet (needs the WiX 3.x toolset on the runner). The driver package is
-  sufficient for signing; the MSI is a packaging convenience to add back later.
+- **Release installer (MSI).** The `installer` job builds the WiX
+  `SarInstaller` project (pinned WiX 3.14 binaries) around the *test-signed*
+  driver, as artifact `sar-installer-x64-testsigned`, for manual testing on
+  machines with test signing on (see the README.txt inside). A redistributable
+  MSI needs the attestation-signed driver, so it has to be built after signing.
 - **EWDK alternative.** For maximum reproducibility you can swap the
   `Install-WdkBuildEnv.ps1` step for a pinned **Enterprise WDK** ISO (a fully
   self-contained, version-locked build environment). That removes the dependency

@@ -11,10 +11,10 @@ name: build-and-package
 on:
   workflow_dispatch:
   push:
-    branches: [master]
+    branches: [master, vnext]
     tags: ["v*"]
+  # Every PR, including ones stacked on other PR branches or on vnext.
   pull_request:
-    branches: [master]
 
 permissions:
   contents: read
@@ -241,4 +241,109 @@ jobs:
         with:
           name: sar-asio-${{ matrix.platform }}
           path: artifacts/${{ matrix.platform }}/
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------------
+  # MSI installer around the TEST-SIGNED driver, for manual testing on machines
+  # with test signing enabled. A release MSI needs the attestation-signed
+  # driver instead; that comes after signing, not from this job.
+  # ---------------------------------------------------------------------------
+  installer:
+    name: installer (x64, test-signed)
+    needs: [driver, usermode]
+    runs-on: windows-2022
+    env:
+      WIX_URL: https://github.com/wixtoolset/wix3/releases/download/wix3141rtm/wix314-binaries.zip
+      WIX_SHA256: 6ac824e1642d6f7277d0ed7ea09411a508f6116ba6fae0aa5f2c7daa2ff43d31
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Add MSBuild to PATH
+        uses: microsoft/setup-msbuild@v2
+        with:
+          vs-version: "[17.0,18.0)"
+
+      - name: Install WiX 3.14
+        shell: pwsh
+        run: |
+          # Pinned binaries zip rather than whatever the runner image carries.
+          $zip = "$env:RUNNER_TEMP\wix.zip"
+          Invoke-WebRequest $env:WIX_URL -OutFile $zip
+          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash
+          if ($hash -ne $env:WIX_SHA256) { throw "WiX zip hash mismatch: $hash" }
+          $wix = "$env:RUNNER_TEMP\wix314"
+          Expand-Archive $zip $wix
+          # SarInstallerActions.vcxproj expects $(WIX) with a trailing slash.
+          "WIX=$wix\" | Out-File $env:GITHUB_ENV -Append
+
+      - name: Build custom actions
+        shell: pwsh
+        run: |
+          & msbuild SynchronousAudioRouter.sln /t:SarInstallerActions `
+              /p:Configuration=Release /p:Platform=x64 /m /verbosity:minimal /nologo
+          if ($LASTEXITCODE -ne 0) { throw "msbuild failed (exit $LASTEXITCODE)" }
+
+      - name: Download test-signed driver
+        uses: actions/download-artifact@v4
+        with:
+          name: sar-driver-x64-testsigned
+          path: stage/driver
+
+      - name: Download SarAsio (x64)
+        uses: actions/download-artifact@v4
+        with:
+          name: sar-asio-x64
+          path: stage/x64
+
+      - name: Download SarAsio (x86)
+        uses: actions/download-artifact@v4
+        with:
+          name: sar-asio-x86
+          path: stage/x86
+
+      - name: Build MSI
+        shell: pwsh
+        run: |
+          $stage = (Resolve-Path stage).Path
+          Copy-Item x64/Release/SarInstallerActions.dll "$stage/x64" -Force
+          # MSI versions compare major.minor.build only; the run number in the
+          # fourth field just labels the build (same-version upgrades are on).
+          $version = "0.13.99.$env:GITHUB_RUN_NUMBER"
+          # A response file keeps the semicolons in DefineConstants away from
+          # PowerShell's argument quoting; msbuild splits them into -d defines.
+          @(
+            "/p:Configuration=Release"
+            "/p:Platform=x64"
+            "/p:WixInstallPath=$env:WIX"
+            "/p:WixTargetsPath=$env:WIX\wix.targets"
+            "/p:DefineConstants=`"ProductVersion=$version;Bin64=$stage\x64;Bin32=$stage\x86;DriverDir=$stage\driver`""
+          ) | Out-File "$env:RUNNER_TEMP\installer.rsp" -Encoding ascii
+          & msbuild SarInstaller/SarInstaller.wixproj "@$env:RUNNER_TEMP\installer.rsp" /verbosity:minimal /nologo
+          if ($LASTEXITCODE -ne 0) { throw "msbuild failed (exit $LASTEXITCODE)" }
+
+          $out = 'artifacts/installer-x64-testsigned'
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          Copy-Item SarInstaller/bin/x64/Release/SynchronousAudioRouter.msi "$out/SynchronousAudioRouter-$version-x64-testsigned.msi"
+          Copy-Item "$stage/driver/testsign.cer" $out
+          $lines = Get-ChildItem $out -File | Get-FileHash -Algorithm SHA256 |
+                   ForEach-Object { '{0}  {1}' -f $_.Hash, (Split-Path $_.Path -Leaf) }
+          $lines | Out-File "$out/SHA256SUMS.txt" -Encoding ascii
+          @"
+          TEST-SIGNED installer: the driver inside only loads with test signing on.
+          Not for distribution. On the test machine, as administrator:
+
+            bcdedit /set testsigning on      (then reboot; Secure Boot must be off)
+            certutil -addstore Root testsign.cer
+            certutil -addstore TrustedPublisher testsign.cer
+            msiexec /i SynchronousAudioRouter-$version-x64-testsigned.msi
+
+          Every CI run signs with a fresh certificate, so trust this run's
+          testsign.cer before installing this run's MSI.
+          "@ | Out-File "$out/README.txt" -Encoding ascii
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: sar-installer-x64-testsigned
+          path: artifacts/installer-x64-testsigned/
           if-no-files-found: error

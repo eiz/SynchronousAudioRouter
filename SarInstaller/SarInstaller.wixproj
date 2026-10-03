@@ -55,13 +55,13 @@
   </ItemGroup>
   <ItemGroup Condition="'$(Platform)' == 'x64'">
     <WixLibrary Include="difxapp_x64">
-      <HintPath>..\..\..\..\..\Program Files (x86)\WiX Toolset v3.10\bin\difxapp_x64.wixlib</HintPath>
+      <HintPath>$(WixExtDir)\difxapp_x64.wixlib</HintPath>
       <Name>difxapp_x64</Name>
     </WixLibrary>
   </ItemGroup>
   <ItemGroup Condition="'$(Platform)' == 'x86'">
     <WixLibrary Include="difxapp_x86">
-      <HintPath>..\..\..\..\..\Program Files (x86)\WiX Toolset v3.10\bin\difxapp_x86.wixlib</HintPath>
+      <HintPath>$(WixExtDir)\difxapp_x86.wixlib</HintPath>
       <Name>difxapp_x86</Name>
     </WixLibrary>
   </ItemGroup>
