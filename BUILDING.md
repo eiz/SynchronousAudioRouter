@@ -41,12 +41,14 @@ MSI's product version. A `v*` tag has to match `VERSION` (`v0.14.0`, or
 ## Local build
 
 ```powershell
-# One-time: install the WDK + its VS extension (needs VS2022 already present)
+# One-time: install the WDK + its VS extension (needs VS2022 already present,
+# with the "MSVC v143 Spectre-mitigated libs" component:
+# Microsoft.VisualStudio.Component.VC.Runtimes.x86.x64.Spectre)
 ./tools/Install-WdkBuildEnv.ps1
 
 # Build the driver (unsigned)
 msbuild SynchronousAudioRouter.sln /t:SynchronousAudioRouter `
-    /p:Configuration=Release /p:Platform=x64 /p:SignMode=Off /p:SpectreMitigation=false
+    /p:Configuration=Release /p:Platform=x64 /p:SignMode=Off
 
 # Stage, version-stamp, catalog, cab and hash it
 ./tools/Package-SarDriver.ps1 -Platform x64 -DriverVersion 0.14.0.0 -Describe local
@@ -74,11 +76,6 @@ These are tracked here so nothing is silently missing:
   so `Inf2Cat` cannot package ARM64. Add `[Standard.NTARM64]` (and the matching
   install/service sections) before enabling an ARM64 matrix entry. This is the
   step that matters for the Windows-on-Arm direction.
-- **Spectre mitigation.** The build passes `/p:SpectreMitigation=false` to stay
-  green without the Spectre-mitigated runtime libs. For a production/attestation
-  driver, install those libs (VS component
-  `Microsoft.VisualStudio.Component.VC.Runtimes.x86.x64.Spectre`) and drop the
-  flag so it builds with `Spectre`.
 - **`DriverVer` in source.** The committed INF still has the placeholder
   `DriverVer=0.1`; the pipeline stamps a valid value at build time but the source
   value should eventually be fixed too.

@@ -99,15 +99,14 @@ jobs:
           Write-Host "Using Windows SDK+WDK: $sdk"
 
           # SignMode=Off: leave the binary unsigned for attestation/OSSign to sign.
-          # SpectreMitigation=false: keep iteration-1 green without the Spectre libs;
-          #   flip to Spectre + install the libs for production security (BUILDING.md).
+          # Spectre mitigations stay at the WDK default (on), which needs the
+          # Spectre-mitigated libraries on the build machine (BUILDING.md).
           & msbuild SynchronousAudioRouter.sln `
               /t:SynchronousAudioRouter `
               /p:Configuration=Release `
               /p:Platform=${{ matrix.platform }} `
               /p:WindowsTargetPlatformVersion=$sdk `
               /p:SignMode=Off `
-              /p:SpectreMitigation=false `
               /m /verbosity:minimal /nologo
           if ($LASTEXITCODE -ne 0) { throw "msbuild failed (exit $LASTEXITCODE)" }
 
