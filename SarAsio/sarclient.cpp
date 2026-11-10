@@ -75,11 +75,21 @@ void SarClient::tick(long bufferIndex)
             hasUpdatedNotificationHandles = true;
         }
 
-        // If endpoint is not active (no audio client), generate silence
+        // If endpoint is not active (no audio client), generate silence.
+        //
+        // The registers are shared with every process that has a stream on
+        // one of the endpoints, and any of them can write anything there. So
+        // nothing read from them is used before it has been checked against
+        // the buffer, with comparisons that can't wrap: sizes that only look
+        // consistent would send the copies below outside the buffer.
         if (!GENERATION_IS_ACTIVE(generation) ||
             !endpointBufferSize ||
-            positionRegister > endpointBufferSize ||
-            endpointBufferOffset + endpointBufferSize > _sharedBufferSize) {
+            activeChannelCount == 0 ||
+            activeChannelCount > SAR_MAX_CHANNEL_COUNT ||
+            frameChunkSize > endpointBufferSize ||
+            positionRegister >= endpointBufferSize ||
+            endpointBufferOffset > _sharedBufferSize ||
+            endpointBufferSize > _sharedBufferSize - endpointBufferOffset) {
             for (int ti = 0; ti < ntargets; ++ti) {
                 if (asioBuffers[ti]) {
                     ZeroMemory(asioBuffers[ti], asioBufferSize);
@@ -323,7 +333,9 @@ bool SarClient::setBufferLayout()
     }
 
     _sharedBuffer = response.virtualAddress;
-    _sharedBufferSize = response.actualSize;
+    // The part endpoints' audio lives in. The registers follow it in the
+    // same view, and no endpoint's buffer may reach into them.
+    _sharedBufferSize = response.registerBase;
     _registers = (SarEndpointRegisters *)
         ((char *)response.virtualAddress + response.registerBase);
     return true;
