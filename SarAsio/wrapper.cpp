@@ -45,8 +45,11 @@ AsioBool SarAsioWrapper::init(void *sysHandle)
     _userTickWithTime = nullptr;
     _hwnd = (HWND)sysHandle;
 
+    // A hardware interface that didn't open keeps its place in the
+    // configuration. It may only be unplugged or in use, and clearing it here
+    // made the control panel save the empty selection.
     if (!initInnerDriver()) {
-        _config.driverClsid = "";
+        LOG(INFO) << "Running without a hardware interface.";
     }
 
     initVirtualChannels();
