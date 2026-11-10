@@ -117,6 +117,8 @@ NTSTATUS SarSetBufferLayout(
     bufferMap = nullptr;
 
     controlContext->sectionViewBaseAddress = baseAddress;
+    controlContext->sectionViewProcess = PsGetCurrentProcess();
+    ObReferenceObject(controlContext->sectionViewProcess);
     baseAddress = nullptr;
 
     controlContext->bufferSection = section;

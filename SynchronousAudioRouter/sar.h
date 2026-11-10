@@ -239,6 +239,9 @@ typedef struct SarControlContext
     LIST_ENTRY pendingEndpointList;  // List<SarEndpoint> Endpoints created but not configured
     HANDLE bufferSection;
     PVOID sectionViewBaseAddress;
+    // The process sectionViewBaseAddress is an address in. Referenced while
+    // the view is mapped.
+    PEPROCESS sectionViewProcess;
     SarHandleQueue handleQueue;
     RTL_BITMAP bufferMap;
     PULONG bufferMapStorage;

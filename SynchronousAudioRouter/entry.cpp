@@ -108,14 +108,19 @@ VOID SarDeleteControlContext(SarControlContext *controlContext)
         controlContext->workItem = nullptr;
     }
 
-    // The section view is unmapped in SarOrphanControlContext, which runs in
-    // the context of the process that mapped it. This function can run in an
-    // arbitrary process context (e.g. a client releasing the last reference to
-    // an orphaned context), so it must not try to unmap it here.
+    // The section view is unmapped in SarOrphanControlContext. This function
+    // can run in an arbitrary process context (e.g. a client releasing the
+    // last reference to an orphaned context), so it must not try to unmap it
+    // here.
     if (controlContext->sectionViewBaseAddress) {
         SAR_WARNING("Section view %p still mapped when deleting controlContext %p",
             controlContext->sectionViewBaseAddress, controlContext);
         controlContext->sectionViewBaseAddress = nullptr;
+    }
+
+    if (controlContext->sectionViewProcess) {
+        ObDereferenceObject(controlContext->sectionViewProcess);
+        controlContext->sectionViewProcess = nullptr;
     }
 
     if (controlContext->bufferSection) {
@@ -137,6 +142,7 @@ BOOLEAN SarOrphanControlContext(SarDriverExtension *extension, PIRP irp)
     SarControlContext *controlContext;
     LIST_ENTRY orphanEndpoints;
     PVOID sectionViewBaseAddress = nullptr;
+    PEPROCESS sectionViewProcess = nullptr;
 
     ExAcquireFastMutex(&extension->mutex);
     controlContext = (SarControlContext *)SarGetTableEntry(
@@ -161,6 +167,8 @@ BOOLEAN SarOrphanControlContext(SarDriverExtension *extension, PIRP irp)
     controlContext->orphan = TRUE;
     sectionViewBaseAddress = controlContext->sectionViewBaseAddress;
     controlContext->sectionViewBaseAddress = nullptr;
+    sectionViewProcess = controlContext->sectionViewProcess;
+    controlContext->sectionViewProcess = nullptr;
     InitializeListHead(&orphanEndpoints);
 
     if (!IsListEmpty(&controlContext->endpointList)) {
@@ -183,17 +191,29 @@ BOOLEAN SarOrphanControlContext(SarDriverExtension *extension, PIRP irp)
 
     SarCloseHandleQueue(&controlContext->handleQueue);
 
-    // IRP_MJ_CLEANUP runs in the context of the process that mapped the view
-    // in SarSetBufferLayout, so this is the only place it can safely be
-    // unmapped via ZwCurrentProcess().
+    // IRP_MJ_CLEANUP runs in the process that closes the last handle. That
+    // is the process that mapped the view in SarSetBufferLayout unless the
+    // handle was duplicated into or inherited by another one. The address
+    // means nothing in any other process, and unmapping it there would tear
+    // down whatever that process has at it, so in that case the view is left
+    // to go away with the process it belongs to.
     if (sectionViewBaseAddress) {
-        NTSTATUS status = ZwUnmapViewOfSection(
-            ZwCurrentProcess(), sectionViewBaseAddress);
+        if (sectionViewProcess == PsGetCurrentProcess()) {
+            NTSTATUS status = ZwUnmapViewOfSection(
+                ZwCurrentProcess(), sectionViewBaseAddress);
 
-        if (!NT_SUCCESS(status)) {
-            SAR_WARNING("Couldn't unmap section view %p: %08X",
-                sectionViewBaseAddress, status);
+            if (!NT_SUCCESS(status)) {
+                SAR_WARNING("Couldn't unmap section view %p: %08X",
+                    sectionViewBaseAddress, status);
+            }
+        } else {
+            SAR_WARNING("Section view %p left mapped: the control handle "
+                "was closed from another process", sectionViewBaseAddress);
         }
+    }
+
+    if (sectionViewProcess) {
+        ObDereferenceObject(sectionViewProcess);
     }
 
     if (SarReleaseControlContext(controlContext) == FALSE) {
