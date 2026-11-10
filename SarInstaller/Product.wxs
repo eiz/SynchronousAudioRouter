@@ -42,7 +42,45 @@
       <![CDATA[Installed OR (WINDOWS10ORLATER AND WINDOWSBUILDNUMBER >= 19041)]]>
     </Condition>
 
-    <Property Id="REQUIREADMINUSER" Value="Any"/>
+    <!-- Who may open SAR's control device: "Any" or "Admin".
+         - Secure, so that the choice made in the dialog reaches the elevated
+           part of an install that a non-administrator started.
+         - Remembered in the registry, so that an upgrade keeps it. A value
+           given on the command line wins over the remembered one, which
+           takes two custom actions around AppSearch.
+         It has no default in the Property table, because a default would
+         look like a command-line value to those two actions. A third action
+         sets "Any" when nothing else did. ICE34 wants a table default for a
+         radio button group's property and is suppressed in the project. -->
+    <Property Id="REQUIREADMINUSER" Secure="yes">
+      <RegistrySearch Id="RememberedRequireAdminUser"
+                      Root="HKLM"
+                      Key="SOFTWARE\Synchronous Audio Router"
+                      Name="RequireAdminUser"
+                      Type="raw"
+                      Win64="yes"/>
+    </Property>
+    <CustomAction Id="SaveCmdLineRequireAdminUser"
+                  Property="CMDLINE_REQUIREADMINUSER"
+                  Value="[REQUIREADMINUSER]"
+                  Execute="firstSequence"/>
+    <CustomAction Id="SetFromCmdLineRequireAdminUser"
+                  Property="REQUIREADMINUSER"
+                  Value="[CMDLINE_REQUIREADMINUSER]"
+                  Execute="firstSequence"/>
+    <CustomAction Id="DefaultRequireAdminUser"
+                  Property="REQUIREADMINUSER"
+                  Value="Any"
+                  Execute="firstSequence"/>
+    <InstallUISequence>
+      <Custom Action="SaveCmdLineRequireAdminUser" Before="AppSearch"/>
+      <Custom Action="SetFromCmdLineRequireAdminUser" After="AppSearch">
+        CMDLINE_REQUIREADMINUSER
+      </Custom>
+      <Custom Action="DefaultRequireAdminUser" After="SetFromCmdLineRequireAdminUser">
+        NOT REQUIREADMINUSER
+      </Custom>
+    </InstallUISequence>
     <WixVariable Id="WixUILicenseRtf" Value="license.rtf" />
     <MajorUpgrade
       AllowSameVersionUpgrades="yes"
@@ -58,6 +96,7 @@
         <ComponentRef Id="AsioDriver64"/>
         <ComponentRef Id="AsioDriver64_32"/>
         <ComponentRef Id="SarConfigure64"/>
+        <ComponentRef Id="RememberRequireAdminUser"/>
         <ComponentRef Id="ApplicationShortcut"/>
 	</Feature>
 
@@ -81,11 +120,39 @@
                   Impersonate="no"
                   Return="check"/>
 
+    <!-- A failed install takes its device node away again. A rollback action
+         has to be sequenced before the action it undoes.
+
+         RemoveDeviceNode has no rollback, because there is nothing to put a
+         device back on: DIFxApp removes the driver package as soon as an
+         uninstall reaches it and doesn't restore it or its own records when
+         the uninstall is rolled back. -->
+    <CustomAction Id="CreateDeviceNode.Rollback"
+                  BinaryKey="SarInstallerActions"
+                  DllEntry="RemoveDeviceNode"
+                  Execute="rollback"
+                  Impersonate="no"
+                  Return="ignore"/>
+
+    <!-- Fails the install on purpose when WIXFAILWHENDEFERRED=1 is passed, to
+         test rollback. Does nothing otherwise. -->
+    <CustomActionRef Id="WixFailWhenDeferred"/>
+
     <InstallExecuteSequence>
+      <Custom Action="SaveCmdLineRequireAdminUser" Before="AppSearch"/>
+      <Custom Action="SetFromCmdLineRequireAdminUser" After="AppSearch">
+        CMDLINE_REQUIREADMINUSER
+      </Custom>
+      <Custom Action="DefaultRequireAdminUser" After="SetFromCmdLineRequireAdminUser">
+        NOT REQUIREADMINUSER
+      </Custom>
       <Custom Action="CreateDeviceNode.SetProperty" After="InstallFiles">
         NOT Installed AND NOT REMOVE
       </Custom>
-      <Custom Action="CreateDeviceNode" After="CreateDeviceNode.SetProperty">
+      <Custom Action="CreateDeviceNode.Rollback" After="CreateDeviceNode.SetProperty">
+        NOT Installed AND NOT REMOVE
+      </Custom>
+      <Custom Action="CreateDeviceNode" After="CreateDeviceNode.Rollback">
         NOT Installed AND NOT REMOVE
       </Custom>
       <Custom Action="RemoveDeviceNode" Before="RemoveFiles">
@@ -255,6 +322,16 @@
               Name="SarConfigure.exe"
               Source="$(var.Bin64)\SarConfigure.exe"
               KeyPath="yes"/>
+      </Component>
+      <Component Id="RememberRequireAdminUser"
+                 Guid="{8AA2BAA3-EFD4-4D56-9AC7-72CC7F567F76}"
+                 Win64="yes">
+        <RegistryValue Root="HKLM"
+                       Key="SOFTWARE\Synchronous Audio Router"
+                       Name="RequireAdminUser"
+                       Value="[REQUIREADMINUSER]"
+                       Type="string"
+                       KeyPath="yes"/>
       </Component>
     </DirectoryRef>
     
