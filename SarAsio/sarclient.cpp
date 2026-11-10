@@ -296,6 +296,20 @@ bool SarClient::openControlDevice()
 
     _completionPort = CreateIoCompletionPort(_device, nullptr, 0, 0);
 
+    // updateNotificationHandles handles a request that completes at once
+    // right where it made it. Without this mode Windows also queues a
+    // completion packet for such a request, and collecting that packet later
+    // would run the same responses a second time: the handles they carry
+    // would be closed and then kept.
+    if (_completionPort && !SetFileCompletionNotificationModes(
+            _device, FILE_SKIP_COMPLETION_PORT_ON_SUCCESS)) {
+
+        LOG(ERROR) << "SetFileCompletionNotificationModes failed: "
+            << GetLastError();
+        CloseHandle(_completionPort);
+        _completionPort = nullptr;
+    }
+
     if (!_completionPort) {
         CloseHandle(_device);
         _device = nullptr;

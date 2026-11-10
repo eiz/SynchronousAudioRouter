@@ -176,8 +176,7 @@ typedef struct SarHandleQueue
     BOOLEAN closed;
     LIST_ENTRY pendingItems; // List<SarHandleQueueItem>
     // List<IRP>, linked through Tail.Overlay.ListEntry. A waiting request
-    // keeps a referenced pointer to the process that issued it in
-    // Tail.Overlay.DriverContext[0], and the lock in DriverContext[1].
+    // keeps the lock in Tail.Overlay.DriverContext[0].
     LIST_ENTRY pendingIrps;
 } SarHandleQueue;
 
@@ -503,9 +502,9 @@ void SarInitializeHandleQueue(SarHandleQueue *queue, PKSPIN_LOCK lock);
 // Completes every waiting request as cancelled, drops every event that was
 // never collected, and makes the queue refuse anything further.
 void SarCloseHandleQueue(SarHandleQueue *queue);
-// Queues a notification event for the host, or hands it to a request that is
-// already waiting. Takes over the caller's reference to the event, whatever
-// the result.
+// Queues a notification event for the host and, if a request of the host's
+// is waiting, completes that request empty so that the host comes to collect.
+// Takes over the caller's reference to the event, whatever the result.
 NTSTATUS SarPostHandleQueue(
     SarHandleQueue *queue, PKEVENT event, ULONG64 associatedData);
 NTSTATUS SarWaitHandleQueue(SarHandleQueue *queue, PIRP irp);
