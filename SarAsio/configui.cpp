@@ -206,7 +206,15 @@ void EndpointsPropertySheetPage::onConfigureHardwareInterface()
             // crash when a second one is created next to a running one. Use
             // the instance the host already has when it is the selected one.
             if (_runningDriver && driver.clsid == _runningDriverClsid) {
-                _runningDriver->controlPanel();
+                // The running driver was initialized with the host's window,
+                // not this page, so a modal panel of its own doesn't disable
+                // the button. Don't call into it again while it is open.
+                if (!_inRunningDriverPanel) {
+                    _inRunningDriverPanel = true;
+                    _runningDriver->controlPanel();
+                    _inRunningDriverPanel = false;
+                }
+
                 break;
             }
 

@@ -93,6 +93,7 @@ private:
     std::vector<AsioDriver> _drivers;
     IASIO *_runningDriver;
     std::string _runningDriverClsid;
+    bool _inRunningDriverPanel = false;
     HWND _hardwareInterfaceDropdown;
     HWND _hardwareInterfaceConfigButton;
     HWND _listView;
