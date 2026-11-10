@@ -42,9 +42,13 @@ silence before it, and the raw values recorded in the results show the
 scaling. Other undecodable frames are corruption, except right next to
 silence where the gain is too small for the scaling to survive rounding. A
 run longer than `--max-transition` frames (100 ms) is corruption regardless. A capture stream
-passes when it received the signal, saw no corruption, and at least half of
-the frames after the initial silence were valid (`--min-valid`;
-`--max-discontinuities` optionally bounds sequence gaps). Dropouts,
+passes when it received the signal, saw no corruption, at least half of
+the frames after the initial silence were valid (`--min-valid`), and the valid
+frames add up to at least a quarter of the stream's duration (`--min-duration`).
+The second ratio is what catches a stream that delivered a little good audio
+and then stalled. It is low because the duration includes stream setup, which
+a busy test VM can stretch to a second or more. `--max-discontinuities`
+optionally bounds sequence gaps. Dropouts,
 discontinuities, ramps, invalidations and reopens are reported for every
 stream; on a VM they vary from run to run, so compare them with a baseline
 run rather than reading one run's numbers as absolute.

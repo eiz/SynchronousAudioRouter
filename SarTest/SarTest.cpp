@@ -83,7 +83,8 @@ int usage()
         "                and --channels)\n"
         "                --registered (use the COM-registered SarAsio instead of a path)\n"
         "                --wait S --wait-gone S --restart-delay MS --rate HZ\n"
-        "                --min-valid RATIO --max-discontinuities N\n"
+        "                --min-valid RATIO --min-duration RATIO\n"
+        "                --max-discontinuities N\n"
         "                --settle S --max-reopens N --max-transition FRAMES\n"
         "\n"
         "Exit codes: 0 pass, 1 setup or usage error, 2 test failure.\n");
@@ -130,6 +131,7 @@ WasapiOptions wasapiOptions(const Args& args, const EndpointLayout& layout)
     options.durationSeconds = args.getDouble(L"duration", 5.0);
     options.expectInvalidation = args.has(L"expect-invalidation");
     options.minValidRatio = args.getDouble(L"min-valid", 0.5);
+    options.minDurationRatio = args.getDouble(L"min-duration", 0.25);
     options.maxDiscontinuities = args.getInt(L"max-discontinuities", -1);
     options.settleSeconds = args.getDouble(L"settle", 2.0);
     options.maxReopens = args.getInt(L"max-reopens", 20);

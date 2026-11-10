@@ -1194,6 +1194,19 @@ static void evaluate(StreamStats *s, const WasapiOptions& options)
             return;
         }
 
+        // The ratio above is taken over what the stream delivered, and the
+        // silence before the signal doesn't count against it. So it can't
+        // see a stream that delivered very little: one buffer and then no
+        // more events, or silence that only ended at the last moment. Hold
+        // what was verified against how long the stream had. Not when the
+        // host is killed under it, which ends the signal on purpose.
+        if (!options.expectInvalidation &&
+            (double)s->validFrames < options.minDurationRatio *
+                options.durationSeconds * (double)s->sampleRate) {
+            s->failure = "signal verified for too little of the duration";
+            return;
+        }
+
         if (options.maxDiscontinuities >= 0 &&
             s->discontinuities > options.maxDiscontinuities) {
             s->failure = "too many discontinuities";
