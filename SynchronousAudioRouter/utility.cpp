@@ -233,16 +233,20 @@ NTSTATUS SarWriteUserBuffer(PVOID src, PIRP irp, ULONG size)
     }
 }
 
-void SarInitializeHandleQueue(SarHandleQueue *queue)
+void SarInitializeHandleQueue(SarHandleQueue *queue, PKSPIN_LOCK lock)
 {
-    KeInitializeSpinLock(&queue->lock);
+    queue->lock = lock;
+    queue->closed = FALSE;
     InitializeListHead(&queue->pendingIrps);
     InitializeListHead(&queue->pendingItems);
 }
 
-NTSTATUS SarTransferQueuedHandle(
-    PIRP irp, HANDLE kernelTargetProcessHandle, ULONG responseIndex,
-    HANDLE kernelProcessHandle, HANDLE userHandle, ULONG64 associatedData)
+// Opens a handle to a notification event in the process that collects it and
+// writes the handle, with its associated data, into response slot
+// responseIndex of that process's SAR_WAIT_HANDLE_QUEUE request.
+static NTSTATUS SarTransferQueuedEvent(
+    PIRP irp, PEPROCESS targetProcess, ULONG responseIndex,
+    PKEVENT event, ULONG64 associatedData)
 {
     PIO_STACK_LOCATION irpStack = IoGetCurrentIrpStackLocation(irp);
 
@@ -252,168 +256,189 @@ NTSTATUS SarTransferQueuedHandle(
         return STATUS_BUFFER_TOO_SMALL;
     }
 
+    HANDLE handle = nullptr;
+    KAPC_STATE apcState = {};
+    BOOLEAN attached = FALSE;
+    NTSTATUS status;
+
+    // The handle has to go into the collecting process's handle table. A
+    // request that had to wait is completed from the registering process, so
+    // this isn't always the current process.
+    if (targetProcess != PsGetCurrentProcess()) {
+        KeStackAttachProcess((PRKPROCESS)targetProcess, &apcState);
+        attached = TRUE;
+    }
+
+    // The host only ever signals the event.
+    status = ObOpenObjectByPointer(
+        event, 0, nullptr, EVENT_MODIFY_STATE | SYNCHRONIZE,
+        *ExEventObjectType, KernelMode, &handle);
+
+    if (attached) {
+        KeUnstackDetachProcess(&apcState);
+    }
+
+    if (!NT_SUCCESS(status)) {
+        return status;
+    }
+
     SarHandleQueueResponse *response =
         &((SarHandleQueueResponse *)irp->AssociatedIrp.SystemBuffer)
             [responseIndex];
 
     response->associatedData = associatedData;
-    response->handle = nullptr;
-
-    HANDLE result = nullptr;
-    NTSTATUS status;
-
-    status = ZwDuplicateObject(
-        kernelProcessHandle, userHandle,
-        kernelTargetProcessHandle, &result, 0, 0,
-        DUPLICATE_SAME_ACCESS);
-    response->handle = result;
-    return status;
+    response->handle = handle;
+    return STATUS_SUCCESS;
 }
 
-void SarCancelAllHandleQueueIrps(SarHandleQueue *handleQueue)
+// Takes the next waiting request off a queue. Call with the queue lock held.
+//
+// Whoever clears a request's cancel routine owns the request and completes
+// it. If the routine is already gone, IoCancelIrp has taken it and is about
+// to call it, or already has: that request is unlinked here and left to
+// SarCancelHandleQueueIrp.
+static PIRP SarDequeueWaitingIrp(SarHandleQueue *queue)
 {
-    KIRQL irql;
-    LIST_ENTRY pendingIrqsToCancel;
+    while (!IsListEmpty(&queue->pendingIrps)) {
+        PLIST_ENTRY entry = RemoveHeadList(&queue->pendingIrps);
+        PIRP irp = CONTAINING_RECORD(entry, IRP, Tail.Overlay.ListEntry);
 
-    InitializeListHead(&pendingIrqsToCancel);
+        if (IoSetCancelRoutine(irp, nullptr)) {
+            return irp;
+        }
 
-    KeAcquireSpinLock(&handleQueue->lock, &irql);
-
-    if (!IsListEmpty(&handleQueue->pendingIrps)) {
-        PLIST_ENTRY entry = handleQueue->pendingIrps.Flink;
-
-        RemoveEntryList(&handleQueue->pendingIrps);
-        InitializeListHead(&handleQueue->pendingIrps);
-        AppendTailList(&pendingIrqsToCancel, entry);
+        // The cancel routine removes the entry again; make that harmless.
+        InitializeListHead(entry);
     }
 
-    KeReleaseSpinLock(&handleQueue->lock, irql);
+    return nullptr;
+}
 
-    while (!IsListEmpty(&pendingIrqsToCancel)) {
-        SarHandleQueueIrp *pendingIrp =
-            CONTAINING_RECORD(pendingIrqsToCancel.Flink, SarHandleQueueIrp, listEntry);
-        PIRP irp = pendingIrp->irp;
+// Completes a request that was waiting on a queue and drops its reference to
+// the process that issued it. The caller must own the request.
+static void SarCompleteWaitingIrp(
+    PIRP irp, NTSTATUS status, ULONG_PTR information)
+{
+    PEPROCESS process = (PEPROCESS)irp->Tail.Overlay.DriverContext[0];
 
-        RemoveEntryList(&pendingIrp->listEntry);
+    irp->IoStatus.Status = status;
+    irp->IoStatus.Information = information;
+    IoCompleteRequest(irp, IO_NO_INCREMENT);
+    ObDereferenceObject(process);
+}
 
-        ZwClose(pendingIrp->kernelProcessHandle);
-        ExFreePoolWithTag(pendingIrp, SAR_TAG);
+void SarCloseHandleQueue(SarHandleQueue *queue)
+{
+    LIST_ENTRY irps, items;
+    PIRP irp;
+    KIRQL irql;
 
+    InitializeListHead(&irps);
+    InitializeListHead(&items);
+    KeAcquireSpinLock(queue->lock, &irql);
+    queue->closed = TRUE;
+
+    while ((irp = SarDequeueWaitingIrp(queue)) != nullptr) {
+        InsertTailList(&irps, &irp->Tail.Overlay.ListEntry);
+    }
+
+    while (!IsListEmpty(&queue->pendingItems)) {
+        PLIST_ENTRY entry = RemoveHeadList(&queue->pendingItems);
+
+        InsertTailList(&items, entry);
+    }
+
+    KeReleaseSpinLock(queue->lock, irql);
+
+    while (!IsListEmpty(&irps)) {
+        PLIST_ENTRY entry = RemoveHeadList(&irps);
+
+        irp = CONTAINING_RECORD(entry, IRP, Tail.Overlay.ListEntry);
         SAR_INFO("Cancelling IRP %p", irp);
+        SarCompleteWaitingIrp(irp, STATUS_CANCELLED, 0);
+    }
 
-        irp->IoStatus.Information = 0;
-        irp->IoStatus.Status = STATUS_CANCELLED;
-        IoSetCancelRoutine(irp, nullptr);
-        IoCompleteRequest(irp, IO_NO_INCREMENT);
+    while (!IsListEmpty(&items)) {
+        PLIST_ENTRY entry = RemoveHeadList(&items);
+        SarHandleQueueItem *item =
+            CONTAINING_RECORD(entry, SarHandleQueueItem, listEntry);
+
+        ObDereferenceObject(item->event);
+        ExFreePoolWithTag(item, SAR_TAG);
     }
 }
 
 void SarCancelHandleQueueIrp(PDEVICE_OBJECT deviceObject, PIRP irp)
 {
     UNREFERENCED_PARAMETER(deviceObject);
-    IoReleaseCancelSpinLock(irp->CancelIrql);
-
-    PIO_STACK_LOCATION irpStack = IoGetCurrentIrpStackLocation(irp);
-    SarDriverExtension *extension = SarGetDriverExtensionFromIrp(irp);
-    SarControlContext *controlContext =
-        SarGetControlContextFromFileObject(extension, irpStack->FileObject);
-    PLIST_ENTRY entry;
-    SarHandleQueueIrp *toCancel = nullptr;
     KIRQL irql;
 
-    if (!controlContext) {
-        SAR_WARNING("Received Cancel IRP without control context");
-        return;
-    }
+    IoReleaseCancelSpinLock(irp->CancelIrql);
 
-    KeAcquireSpinLock(&controlContext->handleQueue.lock,  &irql);
-    entry = controlContext->handleQueue.pendingIrps.Flink;
+    // IoCancelIrp cleared the cancel routine before calling it, so this
+    // routine owns the request: nobody else completes it, and it is safe to
+    // touch. It is either still linked on its queue, or a dequeuer has
+    // unlinked it and left its entry pointing at itself. Removing it is
+    // right in both cases and needs only the lock, which the request
+    // carries and which outlives every queue.
+    PKSPIN_LOCK lock = (PKSPIN_LOCK)irp->Tail.Overlay.DriverContext[1];
 
-    while (entry != &controlContext->handleQueue.pendingIrps) {
-        SarHandleQueueIrp *pendingIrp =
-            CONTAINING_RECORD(entry, SarHandleQueueIrp, listEntry);
-
-        entry = entry->Flink;
-
-        if (pendingIrp->irp == irp) {
-            RemoveEntryList(&pendingIrp->listEntry);
-            toCancel = pendingIrp;
-            break;
-        }
-    }
-
-    KeReleaseSpinLock(&controlContext->handleQueue.lock, irql);
-
-    if (toCancel) {
-        ZwClose(toCancel->kernelProcessHandle);
-        ExFreePoolWithTag(toCancel, SAR_TAG);
-        irp->IoStatus.Information = 0;
-        irp->IoStatus.Status = STATUS_CANCELLED;
-        IoCompleteRequest(irp, IO_NO_INCREMENT);
-    }
+    KeAcquireSpinLock(lock, &irql);
+    RemoveEntryList(&irp->Tail.Overlay.ListEntry);
+    KeReleaseSpinLock(lock, irql);
+    SarCompleteWaitingIrp(irp, STATUS_CANCELLED, 0);
 }
 
 NTSTATUS SarPostHandleQueue(
-    SarHandleQueue *queue, HANDLE userHandle, ULONG64 associatedData)
+    SarHandleQueue *queue, PKEVENT event, ULONG64 associatedData)
 {
     NTSTATUS status = STATUS_SUCCESS;
-    HANDLE kernelProcessHandle = nullptr;
-    SarHandleQueueIrp *queuedIrp = nullptr;
+    PIRP waitingIrp = nullptr;
+    BOOLEAN closed;
     KIRQL irql;
 
-    status = ObOpenObjectByPointerWithTag(
-        PsGetCurrentProcess(), OBJ_KERNEL_HANDLE,
-        nullptr, GENERIC_ALL, nullptr,
-        KernelMode, SAR_TAG, &kernelProcessHandle);
+    // Allocated before the lock is taken; it is only needed if nobody is
+    // waiting.
+    SarHandleQueueItem *item = (SarHandleQueueItem *)ExAllocatePool2(
+        POOL_FLAG_NON_PAGED, sizeof(SarHandleQueueItem), SAR_TAG);
 
-    if (!NT_SUCCESS(status)) {
-        return status;
+    if (!item) {
+        ObDereferenceObject(event);
+        return STATUS_INSUFFICIENT_RESOURCES;
     }
 
-    KeAcquireSpinLock(&queue->lock, &irql);
+    item->event = event;
+    item->associatedData = associatedData;
+    KeAcquireSpinLock(queue->lock, &irql);
+    closed = queue->closed;
 
-    if (!IsListEmpty(&queue->pendingIrps)) {
-        PLIST_ENTRY entry = queue->pendingIrps.Flink;
+    if (!closed) {
+        waitingIrp = SarDequeueWaitingIrp(queue);
 
-        queuedIrp =
-            CONTAINING_RECORD(entry, SarHandleQueueIrp, listEntry);
-        RemoveEntryList(entry);
-    }
-
-    if (!queuedIrp) {
-        SarHandleQueueItem *item = (SarHandleQueueItem *)ExAllocatePool2(
-            POOL_FLAG_NON_PAGED, sizeof(SarHandleQueueItem), SAR_TAG);
-
-        if (!item) {
-            KeReleaseSpinLock(&queue->lock, irql);
-            ZwClose(kernelProcessHandle);
-            return STATUS_INSUFFICIENT_RESOURCES;
+        if (!waitingIrp) {
+            InsertTailList(&queue->pendingItems, &item->listEntry);
         }
-
-        item->associatedData = associatedData;
-        item->userHandle = userHandle;
-        item->kernelProcessHandle = kernelProcessHandle;
-        InsertTailList(&queue->pendingItems, &item->listEntry);
     }
 
-    KeReleaseSpinLock(&queue->lock, irql);
+    KeReleaseSpinLock(queue->lock, irql);
 
-    if (queuedIrp) {
-        status = SarTransferQueuedHandle(
-            queuedIrp->irp, queuedIrp->kernelProcessHandle,
-            0, kernelProcessHandle, userHandle, associatedData);
+    if (closed) {
+        // The host closed its control handle; nobody will collect this.
+        ObDereferenceObject(event);
+        ExFreePoolWithTag(item, SAR_TAG);
+        return STATUS_CANCELLED;
+    }
+
+    if (waitingIrp) {
+        status = SarTransferQueuedEvent(
+            waitingIrp, (PEPROCESS)waitingIrp->Tail.Overlay.DriverContext[0],
+            0, event, associatedData);
 
         SAR_DEBUG("complete handle queue");
-
-        queuedIrp->irp->IoStatus.Status = status;
-        queuedIrp->irp->IoStatus.Information = sizeof(SarHandleQueueResponse);
-        IoSetCancelRoutine(queuedIrp->irp, nullptr);
-        IoCompleteRequest(queuedIrp->irp, IO_NO_INCREMENT);
-        ZwClose(kernelProcessHandle);
-        // The waiting request opened this handle to its own process, to
-        // receive the transfer. The cancel paths close it; so must this one.
-        ZwClose(queuedIrp->kernelProcessHandle);
-        ExFreePoolWithTag(queuedIrp, SAR_TAG);
+        SarCompleteWaitingIrp(waitingIrp, status,
+            NT_SUCCESS(status) ? sizeof(SarHandleQueueResponse) : 0);
+        ObDereferenceObject(event);
+        ExFreePoolWithTag(item, SAR_TAG);
     }
 
     return status;
@@ -422,11 +447,12 @@ NTSTATUS SarPostHandleQueue(
 NTSTATUS SarWaitHandleQueue(SarHandleQueue *queue, PIRP irp)
 {
     NTSTATUS status = STATUS_SUCCESS;
-    HANDLE kernelProcessHandle = nullptr;
     PIO_STACK_LOCATION irpStack = IoGetCurrentIrpStackLocation(irp);
     DWORD maxItems = irpStack->Parameters.DeviceIoControl.OutputBufferLength /
         sizeof(SarHandleQueueResponse);
     DWORD nextItem = 0;
+    PEPROCESS process = PsGetCurrentProcess();
+    BOOLEAN cancelled = FALSE;
     LIST_ENTRY toComplete;
     KIRQL irql;
 
@@ -440,16 +466,7 @@ NTSTATUS SarWaitHandleQueue(SarHandleQueue *queue, PIRP irp)
         return STATUS_BUFFER_TOO_SMALL;
     }
 
-    status = ObOpenObjectByPointerWithTag(
-        PsGetCurrentProcess(), OBJ_KERNEL_HANDLE,
-        nullptr, GENERIC_ALL, nullptr,
-        KernelMode, SAR_TAG, &kernelProcessHandle);
-
-    if (!NT_SUCCESS(status)) {
-        return status;
-    }
-
-    KeAcquireSpinLock(&queue->lock, &irql);
+    KeAcquireSpinLock(queue->lock, &irql);
 
     while (!IsListEmpty(&queue->pendingItems) && nextItem < maxItems) {
         PLIST_ENTRY entry = RemoveHeadList(&queue->pendingItems);
@@ -458,58 +475,64 @@ NTSTATUS SarWaitHandleQueue(SarHandleQueue *queue, PIRP irp)
         nextItem++;
     }
 
-    if (IsListEmpty(&toComplete)) {
-        SarHandleQueueIrp *queuedIrp = (SarHandleQueueIrp *)
-            ExAllocatePool2(
-                POOL_FLAG_NON_PAGED, sizeof(SarHandleQueueIrp), SAR_TAG);
+    if (!IsListEmpty(&toComplete)) {
+        // Transferred below, once the lock is released.
+    } else if (queue->closed) {
+        status = STATUS_CANCELLED;
+    } else {
+        ObReferenceObject(process);
+        irp->Tail.Overlay.DriverContext[0] = process;
+        irp->Tail.Overlay.DriverContext[1] = queue->lock;
+        IoMarkIrpPending(irp);
+        InsertTailList(&queue->pendingIrps, &irp->Tail.Overlay.ListEntry);
+        IoSetCancelRoutine(irp, SarCancelHandleQueueIrp);
 
-        if (!queuedIrp) {
-            KeReleaseSpinLock(&queue->lock, irql);
-            ZwClose(kernelProcessHandle);
-            return STATUS_INSUFFICIENT_RESOURCES;
+        // If the request was cancelled before the routine was set, nothing
+        // is going to call it. Taking the routine back means it never ran
+        // and never will, so the request is this function's to complete.
+        if (irp->Cancel && IoSetCancelRoutine(irp, nullptr)) {
+            RemoveEntryList(&irp->Tail.Overlay.ListEntry);
+            cancelled = TRUE;
         }
 
-        IoMarkIrpPending(irp);
-        IoSetCancelRoutine(irp, SarCancelHandleQueueIrp);
-        queuedIrp->irp = irp;
-        queuedIrp->kernelProcessHandle = kernelProcessHandle;
-        InsertTailList(&queue->pendingIrps, &queuedIrp->listEntry);
+        // From here on a waiting request may be completed by someone else
+        // the moment the lock is released, and must not be touched.
         status = STATUS_PENDING;
     }
 
-    KeReleaseSpinLock(&queue->lock, irql);
+    KeReleaseSpinLock(queue->lock, irql);
 
-    if (!IsListEmpty(&toComplete)) {
-        nextItem = 0;
+    if (cancelled) {
+        // Marked pending above, so pending is what the dispatch routine has
+        // to return even though the request is finished.
+        SarCompleteWaitingIrp(irp, STATUS_CANCELLED, 0);
+        return STATUS_PENDING;
+    }
 
-        while (!IsListEmpty(&toComplete)) {
-            PLIST_ENTRY entry = RemoveHeadList(&toComplete);
-            SarHandleQueueItem *queueItem =
-                CONTAINING_RECORD(entry, SarHandleQueueItem, listEntry);
+    nextItem = 0;
 
-            // A handle that can't be transferred, for example because its
-            // process closed it or exited before the host got here, only
-            // loses that one item. Failing the request would drop the other
-            // endpoints' handles in this batch along with it. The next item
-            // reuses the response slot.
-            NTSTATUS transferStatus = SarTransferQueuedHandle(
-                irp, kernelProcessHandle, nextItem,
-                queueItem->kernelProcessHandle, queueItem->userHandle,
-                queueItem->associatedData);
+    while (!IsListEmpty(&toComplete)) {
+        PLIST_ENTRY entry = RemoveHeadList(&toComplete);
+        SarHandleQueueItem *queueItem =
+            CONTAINING_RECORD(entry, SarHandleQueueItem, listEntry);
 
-            if (NT_SUCCESS(transferStatus)) {
-                nextItem++;
-                irp->IoStatus.Information += sizeof(SarHandleQueueResponse);
-            } else {
-                SAR_WARNING("Couldn't transfer a queued handle: %08X",
-                    transferStatus);
-            }
+        // An event that can't be handed over only loses that one item.
+        // Failing the request would drop the other endpoints' events in
+        // this batch along with it. The next item reuses the response slot.
+        NTSTATUS transferStatus = SarTransferQueuedEvent(
+            irp, process, nextItem, queueItem->event,
+            queueItem->associatedData);
 
-            ZwClose(queueItem->kernelProcessHandle);
-            ExFreePoolWithTag(queueItem, SAR_TAG);
+        if (NT_SUCCESS(transferStatus)) {
+            nextItem++;
+            irp->IoStatus.Information += sizeof(SarHandleQueueResponse);
+        } else {
+            SAR_WARNING("Couldn't transfer a queued event: %08X",
+                transferStatus);
         }
 
-        ZwClose(kernelProcessHandle);
+        ObDereferenceObject(queueItem->event);
+        ExFreePoolWithTag(queueItem, SAR_TAG);
     }
 
     return status;

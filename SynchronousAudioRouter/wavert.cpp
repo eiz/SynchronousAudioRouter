@@ -296,10 +296,28 @@ NTSTATUS SarKsPinRtRegisterNotificationEvent(
         return status;
     }
 
+    // The handle value comes from the caller. Resolve it now, in the
+    // caller's handle table and with the caller's access, to the event it
+    // names, and hold on to the event itself. Keeping the value and
+    // duplicating it later, from kernel mode, would hand the host whatever
+    // that value named by then, and let a caller name kernel handles.
+    PKEVENT event = nullptr;
+
+    status = ObReferenceObjectByHandle(
+        prop->NotificationEvent, EVENT_MODIFY_STATE, *ExEventObjectType,
+        irp->RequestorMode, (PVOID *)&event, nullptr);
+
+    if (!NT_SUCCESS(status)) {
+        SAR_ERROR("Notification event handle isn't usable: %08X", status);
+        SarReleaseEndpointAndContext(endpoint);
+        return status;
+    }
+
     ULONG64 associatedData = regs.generation | ((ULONG64)endpoint->index << 32);
 
-    status = SarPostHandleQueue(&endpoint->owner->handleQueue,
-        prop->NotificationEvent, associatedData);
+    // The queue takes over the reference to the event.
+    status = SarPostHandleQueue(
+        &endpoint->owner->handleQueue, event, associatedData);
     SarReleaseEndpointAndContext(endpoint);
     return status;
 }

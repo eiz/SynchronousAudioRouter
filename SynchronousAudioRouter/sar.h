@@ -162,27 +162,31 @@ typedef struct SarNdisEnumerateResponse
     DbgPrintEx(DPFLTR_DEFAULT_ID, DPFLTR_TRACE_LEVEL, __FUNCTION__ " (SAR) " fmt "\n", __VA_ARGS__)
 #endif
 
+// Notification events that audio clients registered and the host has yet to
+// collect, and the host's SAR_WAIT_HANDLE_QUEUE requests waiting for them.
 typedef struct SarHandleQueue
 {
-    KSPIN_LOCK lock;
-    LIST_ENTRY pendingItems;
+    // Guards everything below. It is the driver-wide
+    // SarDriverExtension::handleQueueLock, not a lock of the queue's own: the
+    // cancel routine of a waiting request has to unlink it without touching
+    // a queue that may already have been freed.
+    PKSPIN_LOCK lock;
+    // Set when the control handle that owns the queue is closed. Nothing is
+    // queued after that.
+    BOOLEAN closed;
+    LIST_ENTRY pendingItems; // List<SarHandleQueueItem>
+    // List<IRP>, linked through Tail.Overlay.ListEntry. A waiting request
+    // keeps a referenced pointer to the process that issued it in
+    // Tail.Overlay.DriverContext[0], and the lock in DriverContext[1].
     LIST_ENTRY pendingIrps;
 } SarHandleQueue;
 
 typedef struct SarHandleQueueItem
 {
     LIST_ENTRY listEntry;
-    HANDLE kernelProcessHandle;
-    HANDLE userHandle;
+    PKEVENT event; // referenced
     ULONG64 associatedData;
 } SarHandleQueueItem;
-
-typedef struct SarHandleQueueIrp
-{
-    LIST_ENTRY listEntry;
-    HANDLE kernelProcessHandle;
-    PIRP irp;
-} SarHandleQueueIrp;
 
 typedef struct SarTableEntry
 {
@@ -219,6 +223,7 @@ typedef struct SarDriverExtension
     RTL_AVL_TABLE registryRedirectTable;
     LARGE_INTEGER filterCookie;
     PTOKEN_USER filterUser;
+    KSPIN_LOCK handleQueueLock; // see SarHandleQueue
 } SarDriverExtension;
 
 typedef struct SarControlContext
@@ -401,7 +406,11 @@ NTSTATUS SarDeleteEndpointProcessContext(SarEndpointProcessContext *context);
 
 // Entry
 DRIVER_INITIALIZE DriverEntry;
-SarControlContext *SarCreateControlContext(PFILE_OBJECT fileObject);
+// handleQueueLock is SarDriverExtension::handleQueueLock. It is passed in
+// because the file object's device object is the bottom of the device stack,
+// which isn't this driver's and has no SarDriverExtension to find it by.
+SarControlContext *SarCreateControlContext(
+    PFILE_OBJECT fileObject, PKSPIN_LOCK handleQueueLock);
 VOID SarDeleteControlContext(SarControlContext *controlContext);
 BOOLEAN SarOrphanControlContext(SarDriverExtension *extension, PIRP irp);
 
@@ -487,13 +496,15 @@ NTSTATUS SarWriteEndpointRegisters(
 
 NTSTATUS SarStringDuplicate(PUNICODE_STRING str, PCUNICODE_STRING src);
 
-void SarInitializeHandleQueue(SarHandleQueue *queue);
-NTSTATUS SarTransferQueuedHandle(
-    PIRP irp, HANDLE kernelTargetProcessHandle, ULONG responseIndex,
-    HANDLE kernelProcessHandle, HANDLE userHandle, ULONG64 associatedData);
-void SarCancelAllHandleQueueIrps(SarHandleQueue *handleQueue);
+void SarInitializeHandleQueue(SarHandleQueue *queue, PKSPIN_LOCK lock);
+// Completes every waiting request as cancelled, drops every event that was
+// never collected, and makes the queue refuse anything further.
+void SarCloseHandleQueue(SarHandleQueue *queue);
+// Queues a notification event for the host, or hands it to a request that is
+// already waiting. Takes over the caller's reference to the event, whatever
+// the result.
 NTSTATUS SarPostHandleQueue(
-    SarHandleQueue *queue, HANDLE userHandle, ULONG64 associatedData);
+    SarHandleQueue *queue, PKEVENT event, ULONG64 associatedData);
 NTSTATUS SarWaitHandleQueue(SarHandleQueue *queue, PIRP irp);
 VOID SarStringFree(PUNICODE_STRING str);
 

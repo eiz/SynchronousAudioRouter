@@ -49,7 +49,8 @@ static const KSDEVICE_DESCRIPTOR gDeviceDescriptor = {
     KSDEVICE_DESCRIPTOR_VERSION
 };
 
-SarControlContext *SarCreateControlContext(PFILE_OBJECT fileObject)
+SarControlContext *SarCreateControlContext(
+    PFILE_OBJECT fileObject, PKSPIN_LOCK handleQueueLock)
 {
     SarControlContext *controlContext;
 
@@ -66,7 +67,7 @@ SarControlContext *SarCreateControlContext(PFILE_OBJECT fileObject)
     ExInitializeFastMutex(&controlContext->mutex);
     InitializeListHead(&controlContext->endpointList);
     InitializeListHead(&controlContext->pendingEndpointList);
-    SarInitializeHandleQueue(&controlContext->handleQueue);
+    SarInitializeHandleQueue(&controlContext->handleQueue, handleQueueLock);
     controlContext->workItem = IoAllocateWorkItem(
         controlContext->fileObject->DeviceObject);
 
@@ -180,7 +181,7 @@ BOOLEAN SarOrphanControlContext(SarDriverExtension *extension, PIRP irp)
         SarOrphanEndpoint(endpoint);
     }
 
-    SarCancelAllHandleQueueIrps(&controlContext->handleQueue);
+    SarCloseHandleQueue(&controlContext->handleQueue);
 
     // IRP_MJ_CLEANUP runs in the context of the process that mapped the view
     // in SarSetBufferLayout, so this is the only place it can safely be
@@ -520,7 +521,8 @@ NTSTATUS SarIrpCreate(PDEVICE_OBJECT deviceObject, PIRP irp)
         return result;
     }
 
-    controlContext = SarCreateControlContext(irpStack->FileObject);
+    controlContext = SarCreateControlContext(
+        irpStack->FileObject, &extension->handleQueueLock);
 
     if (!controlContext) {
         status = STATUS_INSUFFICIENT_RESOURCES;
@@ -1176,6 +1178,7 @@ extern "C" NTSTATUS DriverEntry(
 
     RtlZeroMemory(extension, sizeof(SarDriverExtension));
     ExInitializeFastMutex(&extension->mutex);
+    KeInitializeSpinLock(&extension->handleQueueLock);
     ExInitializeResourceLite(&extension->registryRedirectLock);
     SarInitializeTable(&extension->controlContextTable);
     SarInitializeStringTable(&extension->registryRedirectTableWow64);
