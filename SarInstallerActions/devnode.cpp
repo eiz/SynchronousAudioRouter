@@ -36,7 +36,8 @@ UINT __stdcall CreateDeviceNode(MSIHANDLE hInstall)
     SP_DEVINFO_DATA deviceInfoData = {};
     WCHAR *hardwareId = HARDWARE_ID;
     TCHAR requireAdminBuf[32] = {};
-    DWORD requireAdminBufSz = sizeof(requireAdminBuf);
+    // A count of characters, not bytes.
+    DWORD requireAdminBufSz = ARRAYSIZE(requireAdminBuf);
 
     hr = WcaInitialize(hInstall, "CreateDeviceNode");
 
