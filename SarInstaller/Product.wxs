@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <?define bitness = "(64 bit)" ?>
 <!-- Build outputs; CI overrides these to point at its staged artifacts. -->
-<?ifndef ProductVersion ?><?define ProductVersion = "0.13.99.1" ?><?endif ?>
+<?ifndef ProductVersion ?><?define ProductVersion = "0.14.0.0" ?><?endif ?>
 <?ifndef Bin64 ?><?define Bin64 = "..\x64\Release" ?><?endif ?>
 <?ifndef Bin32 ?><?define Bin32 = "..\Release" ?><?endif ?>
 <?ifndef DriverDir ?><?define DriverDir = "$(var.Bin64)\SynchronousAudioRouter" ?><?endif ?>

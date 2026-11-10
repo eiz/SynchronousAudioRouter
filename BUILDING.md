@@ -27,6 +27,13 @@ workflow run and source commit. Hashes + provenance are precisely the
 The `usermode` job builds the `SarAsio.dll` ASIO plugin for x64 and x86 (32-bit
 DAWs need the 32-bit DLL).
 
+## Version
+
+`VERSION` at the repository root holds the release version (`major.minor.patch`).
+CI stamps `<VERSION>.<run number>` into the driver's `DriverVer` and into the
+MSI's product version. A `v*` tag has to match `VERSION` (`v0.14.0`, or
+`v0.14.0-rc1` for a pre-release), or the build fails.
+
 ## Local build
 
 ```powershell
@@ -38,7 +45,7 @@ msbuild SynchronousAudioRouter.sln /t:SynchronousAudioRouter `
     /p:Configuration=Release /p:Platform=x64 /p:SignMode=Off /p:SpectreMitigation=false
 
 # Stage, version-stamp, catalog, cab and hash it
-./tools/Package-SarDriver.ps1 -Platform x64 -DriverVersion 0.13.2.0 -Describe local
+./tools/Package-SarDriver.ps1 -Platform x64 -DriverVersion 0.14.0.0 -Describe local
 ```
 
 ## Signing (the part the build deliberately skips)

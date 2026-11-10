@@ -49,7 +49,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0   # tags needed for version stamping
+          fetch-depth: 0   # tags, for the git describe build label
 
       - name: Add MSBuild to PATH
         uses: microsoft/setup-msbuild@v2
@@ -65,14 +65,17 @@ jobs:
         id: ver
         shell: pwsh
         run: |
-          $desc = (& git describe --tags --always --dirty 2>$null)
-          if (-not $desc) { $desc = "0.0.0-$(& git rev-parse --short HEAD)" }
-          $tag = (& git describe --tags --abbrev=0 2>$null)
-          if ($tag -match '(\d+)\.(\d+)\.(\d+)') {
-            $numeric = "$($Matches[1]).$($Matches[2]).$($Matches[3]).$env:GITHUB_RUN_NUMBER"
-          } else {
-            $numeric = "0.0.0.$env:GITHUB_RUN_NUMBER"
+          # VERSION holds the release version (major.minor.patch). The run
+          # number in the fourth field tells builds of one version apart.
+          $base = (Get-Content VERSION -Raw).Trim()
+          if ($base -notmatch '^\d+\.\d+\.\d+$') { throw "VERSION must be major.minor.patch, got '$base'" }
+          if ($env:GITHUB_REF -like 'refs/tags/v*' -and
+              $env:GITHUB_REF_NAME -notmatch "^v$([regex]::Escape($base))(-.+)?$") {
+            throw "tag $env:GITHUB_REF_NAME doesn't match VERSION ($base)"
           }
+          $desc = (& git describe --tags --always --dirty 2>$null)
+          if (-not $desc) { $desc = "$base-$(& git rev-parse --short HEAD)" }
+          $numeric = "$base.$env:GITHUB_RUN_NUMBER"
           "describe=$desc"   | Out-File $env:GITHUB_OUTPUT -Append
           "numeric=$numeric" | Out-File $env:GITHUB_OUTPUT -Append
           Write-Host "version: $desc  (DriverVer numeric: $numeric)"
@@ -308,7 +311,7 @@ jobs:
           Copy-Item x64/Release/SarInstallerActions.dll "$stage/x64" -Force
           # MSI versions compare major.minor.build only; the run number in the
           # fourth field just labels the build (same-version upgrades are on).
-          $version = "0.13.99.$env:GITHUB_RUN_NUMBER"
+          $version = "$((Get-Content VERSION -Raw).Trim()).$env:GITHUB_RUN_NUMBER"
           # A response file keeps the semicolons in DefineConstants away from
           # PowerShell's argument quoting; msbuild splits them into -d defines.
           @(

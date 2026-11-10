@@ -28,7 +28,7 @@ param(
     [Parameter(Mandatory)] [ValidateSet('x64', 'ARM64')] [string]$Platform,
     [string]$Configuration = 'Release',
 
-    # Four-field DriverVer version (x.y.z.w), e.g. 0.13.2.137
+    # Four-field DriverVer version (x.y.z.w), e.g. 0.14.0.137
     [Parameter(Mandatory)] [string]$DriverVersion,
 
     # Human-readable build label (e.g. `git describe` output), recorded in BUILD-INFO.
