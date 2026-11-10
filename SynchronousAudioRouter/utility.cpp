@@ -410,6 +410,9 @@ NTSTATUS SarPostHandleQueue(
         IoSetCancelRoutine(queuedIrp->irp, nullptr);
         IoCompleteRequest(queuedIrp->irp, IO_NO_INCREMENT);
         ZwClose(kernelProcessHandle);
+        // The waiting request opened this handle to its own process, to
+        // receive the transfer. The cancel paths close it; so must this one.
+        ZwClose(queuedIrp->kernelProcessHandle);
         ExFreePoolWithTag(queuedIrp, SAR_TAG);
     }
 
