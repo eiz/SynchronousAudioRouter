@@ -1,4 +1,4 @@
-[![Build status](https://ci.appveyor.com/api/projects/status/e24tb7g9j9drkyuh/branch/master?svg=true)](https://ci.appveyor.com/project/eiz/synchronousaudiorouter/branch/master)
+[![build-and-package](https://github.com/eiz/SynchronousAudioRouter/actions/workflows/build.yml/badge.svg?branch=master)](https://github.com/eiz/SynchronousAudioRouter/actions/workflows/build.yml)
 
 # Synchronous Audio Router
 
@@ -33,7 +33,8 @@ Discord server at [https://discord.gg/9rwFdMW](https://discord.gg/9rwFdMW).
 
 ## System Requirements
 
-* Windows 10 or later. Secure Boot is not supported.
+* 64-bit Windows 10 version 2004 or later, or Windows 11. The installer
+  refuses to run on anything older.
 * An audio interface which supports ASIO. If your hardware doesn't come with a
   native ASIO driver, you may be able to use ASIO4ALL instead.
 * Digital audio workstation software. SAR is mainly tested using [REAPER](http://www.reaper.fm/).
@@ -84,10 +85,17 @@ ASIO driver is closed. If you're using REAPER, make sure "Close audio device
 when stopped and application is inactive" in the Audio preferences is
 disabled.
 
-## Unsigned prereleased drivers note
+## Driver signing
 
-Prereleases of SAR are unsigned. That means that it is required to enable
-`testsigning` boot option to make Windows load the driver. Else the driver
-won't be loaded.
-For more information about `testsigning` option, see here:
+Releases from 0.14.0 on carry a driver signed by Microsoft. They install on
+stock Windows and work with Secure Boot on.
+
+The following do not, and Windows only loads their driver with the
+`testsigning` boot option enabled, which in turn needs Secure Boot off:
+
+* the 0.13.2 prerelease, which is unsigned;
+* the test-signed builds that CI produces for every change (see
+  [BUILDING.md](BUILDING.md)).
+
+For more information about the `testsigning` option, see here:
 https://docs.microsoft.com/en-us/windows-hardware/drivers/install/the-testsigning-boot-configuration-option#enable-or-disable-use-of-test-signed-code
