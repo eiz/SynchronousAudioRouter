@@ -31,7 +31,7 @@ NTSTATUS SarWaveFilterDescriptor::initWaveFilter(const SarControlContext *contro
             DEFINE_KSPROPERTY_GETTER(
                 KSPROPERTY_RTAUDIO_BUFFER_WITH_NOTIFICATION,
                 SarKsPinRtGetBufferWithNotification,
-                KSRTAUDIO_BUFFER_PROPERTY, KSRTAUDIO_BUFFER),
+                KSRTAUDIO_BUFFER_PROPERTY_WITH_NOTIFICATION, KSRTAUDIO_BUFFER),
             DEFINE_KSPROPERTY_GETTER(
                 KSPROPERTY_RTAUDIO_CLOCKREGISTER, SarKsPinRtGetClockRegister,
                 KSRTAUDIO_HWREGISTER_PROPERTY, KSRTAUDIO_HWREGISTER),

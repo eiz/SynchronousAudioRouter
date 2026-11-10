@@ -77,13 +77,38 @@ NTSTATUS SarKsPinRtGetBufferCore(
         return status;
     }
 
-    ULONG actualSize = ROUND_UP(
-        max(requestedBufferSize,
-            controlContext->minimumFrameCount *
-            controlContext->periodSizeBytes *
-            endpoint->activeChannelCount),
-        controlContext->sampleSize * endpoint->activeChannelCount);
-    SIZE_T viewSize = ROUND_UP(actualSize, SAR_BUFFER_CELL_SIZE);
+    // The requested size comes from the caller and the minimum frame count
+    // from the host. Both are sized in 64 bits and checked against the buffer
+    // before anything is narrowed: in 32 bits a request near 4 GiB wrapped to
+    // a size of zero, and a view of size zero maps the whole section, every
+    // endpoint's audio and the registers included.
+    ULONG64 frameSize =
+        (ULONG64)controlContext->sampleSize * endpoint->activeChannelCount;
+    ULONG64 wantedSize = max(
+        (ULONG64)requestedBufferSize,
+        (ULONG64)controlContext->minimumFrameCount *
+        controlContext->periodSizeBytes *
+        endpoint->activeChannelCount);
+
+    wantedSize = ROUND_UP(wantedSize, frameSize);
+
+    ULONG64 wantedViewSize =
+        ROUND_UP(wantedSize, (ULONG64)SAR_BUFFER_CELL_SIZE);
+
+    if (wantedSize == 0) {
+        SAR_ERROR("Buffer request of size zero");
+        SarReleaseEndpointAndContext(endpoint);
+        return STATUS_INVALID_PARAMETER;
+    }
+
+    if (wantedViewSize > controlContext->bufferSize) {
+        SAR_ERROR("Buffer request of %lu bytes doesn't fit", requestedBufferSize);
+        SarReleaseEndpointAndContext(endpoint);
+        return STATUS_INSUFFICIENT_RESOURCES;
+    }
+
+    ULONG actualSize = (ULONG)wantedSize;
+    SIZE_T viewSize = (SIZE_T)wantedViewSize;
     ULONG cellCount = (ULONG)(viewSize / SAR_BUFFER_CELL_SIZE);
 
     ExAcquireFastMutex(&controlContext->mutex);
