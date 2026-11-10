@@ -484,17 +484,22 @@ NTSTATUS SarWaitHandleQueue(SarHandleQueue *queue, PIRP irp)
             SarHandleQueueItem *queueItem =
                 CONTAINING_RECORD(entry, SarHandleQueueItem, listEntry);
 
-            // Keep draining the list after a failure so the remaining items
-            // and their process handles aren't leaked.
-            if (NT_SUCCESS(status)) {
-                status = SarTransferQueuedHandle(
-                    irp, kernelProcessHandle, nextItem++,
-                    queueItem->kernelProcessHandle, queueItem->userHandle,
-                    queueItem->associatedData);
+            // A handle that can't be transferred, for example because its
+            // process closed it or exited before the host got here, only
+            // loses that one item. Failing the request would drop the other
+            // endpoints' handles in this batch along with it. The next item
+            // reuses the response slot.
+            NTSTATUS transferStatus = SarTransferQueuedHandle(
+                irp, kernelProcessHandle, nextItem,
+                queueItem->kernelProcessHandle, queueItem->userHandle,
+                queueItem->associatedData);
 
-                if (NT_SUCCESS(status)) {
-                    irp->IoStatus.Information += sizeof(SarHandleQueueResponse);
-                }
+            if (NT_SUCCESS(transferStatus)) {
+                nextItem++;
+                irp->IoStatus.Information += sizeof(SarHandleQueueResponse);
+            } else {
+                SAR_WARNING("Couldn't transfer a queued handle: %08X",
+                    transferStatus);
             }
 
             ZwClose(queueItem->kernelProcessHandle);
