@@ -52,12 +52,12 @@ jobs:
       matrix:
         platform: [x64]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0   # the whole history, for the version and build label
 
       - name: Add MSBuild to PATH
-        uses: microsoft/setup-msbuild@v2
+        uses: microsoft/setup-msbuild@6fb02220983dee41ce7ae257b6f4d8f9bf5ed4ce # v2.0.0
         with:
           vs-version: "[17.0,18.0)"
           msbuild-architecture: x64
@@ -166,7 +166,7 @@ jobs:
           "@ | Out-File "$signed/README.txt" -Encoding ascii
 
       - name: Upload test-signed package
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: sar-driver-${{ matrix.platform }}-testsigned
           path: artifacts/${{ matrix.platform }}-testsigned/
@@ -174,12 +174,12 @@ jobs:
 
       - name: Attest build provenance
         if: github.event_name != 'pull_request'   # OIDC token isn't writable on fork PRs
-        uses: actions/attest-build-provenance@v1
+        uses: actions/attest-build-provenance@ef244123eb79f2f7a7e75d99086184180e6d0018 # v1.4.4
         with:
           subject-path: artifacts/${{ matrix.platform }}/SynchronousAudioRouter.sys
 
       - name: Upload driver package
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: sar-driver-${{ matrix.platform }}
           path: artifacts/${{ matrix.platform }}/
@@ -197,10 +197,10 @@ jobs:
       matrix:
         platform: [x64, x86]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Add MSBuild to PATH
-        uses: microsoft/setup-msbuild@v2
+        uses: microsoft/setup-msbuild@6fb02220983dee41ce7ae257b6f4d8f9bf5ed4ce # v2.0.0
         with:
           vs-version: "[17.0,18.0)"
 
@@ -246,7 +246,7 @@ jobs:
           $lines | Out-File "$stage/SHA256SUMS.txt" -Encoding ascii
 
       - name: Upload SarAsio
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: sar-asio-${{ matrix.platform }}
           path: artifacts/${{ matrix.platform }}/
@@ -262,27 +262,27 @@ jobs:
     needs: [driver, usermode]
     runs-on: windows-2022
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Add MSBuild to PATH
-        uses: microsoft/setup-msbuild@v2
+        uses: microsoft/setup-msbuild@6fb02220983dee41ce7ae257b6f4d8f9bf5ed4ce # v2.0.0
         with:
           vs-version: "[17.0,18.0)"
 
       - name: Download test-signed driver
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: sar-driver-x64-testsigned
           path: stage/driver
 
       - name: Download SarAsio (x64)
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: sar-asio-x64
           path: stage/x64
 
       - name: Download SarAsio (x86)
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: sar-asio-x86
           path: stage/x86
@@ -316,7 +316,7 @@ jobs:
           "@ | Out-File "$out/README.txt" -Encoding ascii
 
       - name: Upload installer
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: sar-installer-x64-testsigned
           path: artifacts/installer-x64-testsigned/

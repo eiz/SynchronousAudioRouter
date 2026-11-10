@@ -121,6 +121,27 @@ to get a driver that loads:
   | variable | `SM_HOST` | `https://clientauth.one.digicert.com` |
   | variable | `SM_CODE_SIGNING_CERT_SHA1_HASH` | the certificate's SHA-1 thumbprint |
 
+### Repository settings the release relies on
+
+The workflow only keeps the signing key safe if the repository is set up to
+match. These are settings, not files, so they have to be made by hand:
+
+- **Rulesets.** `.github/rulesets/branches.json` and `release-tags.json` can be
+  imported under Settings > Rules > Rulesets. The first requires a pull
+  request, the code owner's approval and the four CI jobs for `master` and
+  `vnext`. The second lets only the owner create, move or delete `v*` tags.
+- **The `signing` environment** should allow deployments from `master` and
+  `v*` tags only, besides requiring a reviewer. Otherwise anyone who can push
+  a branch can ask for a signature on whatever that branch's workflow does,
+  and the reviewer's approval is the only thing in the way.
+- **Actions.** Allow only GitHub's own actions and `microsoft/setup-msbuild`,
+  require actions to be pinned to a full commit SHA, give `GITHUB_TOKEN` read
+  access by default, and require approval before workflows run for outside
+  contributors' pull requests.
+- **Collaborators** can do everything short of changing settings, including
+  starting the release workflow. Keep the list to people who should be able
+  to.
+
 ### Signing by hand
 
 `tools/Sign-SarFiles.ps1 -Files <file> -Thumbprint <sha1>` signs with the same
