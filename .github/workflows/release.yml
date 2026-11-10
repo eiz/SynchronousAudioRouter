@@ -1,0 +1,222 @@
+name: release
+
+# Builds a signed release in two manual stages. Between them sits the one step
+# CI can't do, which is submitting the driver to Microsoft.
+#
+#   stage: submission
+#     Builds everything through build.yml and signs the driver's .cab with the
+#     code signing certificate. The result is the artifact
+#     "sar-attestation-submission". Submit that .cab for attestation signing
+#     in Partner Center, download the signed zip, and attach the zip to a
+#     draft GitHub release.
+#
+#   stage: release
+#     Takes the binaries of that submission run and the Microsoft-signed
+#     driver from the draft release, checks that the driver is the one the
+#     run built, signs the user-mode files and the MSI, and attaches the MSI
+#     to the draft release. Publishing the release stays a manual step.
+#
+# Both signing jobs run in the "signing" environment, which holds the KeyLocker
+# credentials and should require a reviewer. BUILDING.md has the setup.
+
+on:
+  workflow_dispatch:
+    inputs:
+      stage:
+        description: "submission: sign the driver .cab for Partner Center. release: package and sign the MSI."
+        type: choice
+        options: [submission, release]
+        required: true
+      submission_run:
+        description: "release only: ID of the submission run whose binaries to release"
+        type: string
+      tag:
+        description: "release only: tag of the draft release holding the Partner Center zip, e.g. v0.14.0"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Stage "submission"
+  # ---------------------------------------------------------------------------
+  build:
+    if: inputs.stage == 'submission'
+    uses: ./.github/workflows/build.yml
+    permissions:
+      contents: read
+      id-token: write      # build provenance for the driver
+      attestations: write
+
+  sign-submission:
+    name: sign the attestation submission
+    if: inputs.stage == 'submission'
+    needs: build
+    runs-on: windows-2022
+    environment: signing
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download the driver package
+        uses: actions/download-artifact@v4
+        with:
+          name: sar-driver-x64
+          path: driver
+
+      - name: Sign the cabinet
+        shell: pwsh
+        env:
+          SM_HOST: ${{ vars.SM_HOST }}
+          SM_CODE_SIGNING_CERT_SHA1_HASH: ${{ vars.SM_CODE_SIGNING_CERT_SHA1_HASH }}
+          SM_API_KEY: ${{ secrets.SM_API_KEY }}
+          SM_CLIENT_CERT_FILE_B64: ${{ secrets.SM_CLIENT_CERT_FILE_B64 }}
+          SM_CLIENT_CERT_PASSWORD: ${{ secrets.SM_CLIENT_CERT_PASSWORD }}
+        run: |
+          New-Item -ItemType Directory -Force -Path submission | Out-Null
+          Copy-Item driver/SynchronousAudioRouter_x64.cab, driver/BUILD-INFO.txt submission
+          ./tools/Sign-SarFiles.ps1 -Files submission/SynchronousAudioRouter_x64.cab
+          @"
+          Attestation submission for the driver in BUILD-INFO.txt.
+
+          1. Partner Center > Hardware > Submit new hardware
+             (https://partner.microsoft.com/dashboard/hardware/Search).
+          2. Upload SynchronousAudioRouter_x64.cab. Leave both test-signing
+             options unchecked and pick the Windows versions to sign for.
+          3. When it has been processed, download the signed zip.
+          4. Attach the zip, as downloaded, to a draft GitHub release.
+          5. Run the "release" workflow with stage "release", that release's
+             tag, and submission_run $env:GITHUB_RUN_ID, from the same commit
+             as this run ($env:GITHUB_SHA).
+          "@ | Out-File submission/README.txt -Encoding ascii
+
+      - name: Upload the submission
+        uses: actions/upload-artifact@v4
+        with:
+          name: sar-attestation-submission
+          path: submission/
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------------
+  # Stage "release"
+  # ---------------------------------------------------------------------------
+  package:
+    name: package and sign the release
+    if: inputs.stage == 'release'
+    runs-on: windows-2022
+    environment: signing
+    permissions:
+      contents: write   # read the draft release and attach the MSI to it
+      actions: read     # download the submission run's artifacts
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SUBMISSION_RUN: ${{ inputs.submission_run }}
+      TAG: ${{ inputs.tag }}
+      SM_HOST: ${{ vars.SM_HOST }}
+      SM_CODE_SIGNING_CERT_SHA1_HASH: ${{ vars.SM_CODE_SIGNING_CERT_SHA1_HASH }}
+      SM_API_KEY: ${{ secrets.SM_API_KEY }}
+      SM_CLIENT_CERT_FILE_B64: ${{ secrets.SM_CLIENT_CERT_FILE_B64 }}
+      SM_CLIENT_CERT_PASSWORD: ${{ secrets.SM_CLIENT_CERT_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Add MSBuild to PATH
+        uses: microsoft/setup-msbuild@v2
+        with:
+          vs-version: "[17.0,18.0)"
+
+      - name: Check the inputs
+        shell: pwsh
+        run: |
+          if ($env:SUBMISSION_RUN -notmatch '^\d+$') { throw "submission_run must be a run ID." }
+          if ($env:TAG -notmatch '^v[0-9A-Za-z.\-]+$') { throw "tag must look like v0.14.0." }
+
+          # The installer sources and these scripts have to be the ones the
+          # submitted binaries were built with.
+          $run = gh run view $env:SUBMISSION_RUN --json headSha,conclusion,workflowName | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0) { throw "Couldn't read run $env:SUBMISSION_RUN." }
+          if ($run.workflowName -ne 'release' -or $run.conclusion -ne 'success') {
+            throw "Run $env:SUBMISSION_RUN isn't a successful run of the release workflow."
+          }
+          if ($run.headSha -ne $env:GITHUB_SHA) {
+            throw "Run $env:SUBMISSION_RUN built $($run.headSha), but this run is at $env:GITHUB_SHA. Start this stage from the same commit."
+          }
+
+      - name: Collect the binaries
+        shell: pwsh
+        run: |
+          gh run download $env:SUBMISSION_RUN -n sar-driver-x64 -D stage/unsigned
+          if ($LASTEXITCODE -ne 0) { throw "Couldn't download sar-driver-x64." }
+          gh run download $env:SUBMISSION_RUN -n sar-asio-x64 -D stage/x64
+          if ($LASTEXITCODE -ne 0) { throw "Couldn't download sar-asio-x64." }
+          gh run download $env:SUBMISSION_RUN -n sar-asio-x86 -D stage/x86
+          if ($LASTEXITCODE -ne 0) { throw "Couldn't download sar-asio-x86." }
+
+          gh release download $env:TAG --pattern '*.zip' -D stage/partner-center
+          if ($LASTEXITCODE -ne 0) { throw "Couldn't download the Partner Center zip from release $env:TAG." }
+          $zips = @(Get-ChildItem stage/partner-center -Filter *.zip)
+          if ($zips.Count -ne 1) { throw "Release $env:TAG has $($zips.Count) zip assets; expected only the Partner Center zip." }
+          "PARTNER_CENTER_ZIP=$($zips[0].Name)" | Out-File $env:GITHUB_ENV -Append
+
+          Expand-Archive $zips[0].FullName stage/partner-center/extracted
+          $sys = @(Get-ChildItem stage/partner-center/extracted -Recurse -Filter SynchronousAudioRouter.sys)
+          if ($sys.Count -ne 1) { throw "Expected one SynchronousAudioRouter.sys in the Partner Center zip, found $($sys.Count)." }
+          New-Item -ItemType Directory -Force -Path stage/driver | Out-Null
+          foreach ($ext in 'sys', 'inf', 'cat') {
+            Copy-Item (Join-Path $sys[0].DirectoryName "SynchronousAudioRouter.$ext") stage/driver
+          }
+
+      - name: Check the signed driver
+        shell: pwsh
+        run: |
+          ./tools/Test-SarSignedDriver.ps1 -RequireMicrosoftSignature `
+            -Unsigned stage/unsigned/SynchronousAudioRouter.sys -Signed stage/driver/SynchronousAudioRouter.sys
+
+          # Windows checks the INF against Microsoft's catalog when the
+          # package is installed, so a difference here isn't fatal. It should
+          # still be looked at before the release is published.
+          $submitted = (Get-FileHash stage/unsigned/SynchronousAudioRouter.inf -Algorithm SHA256).Hash
+          $returned = (Get-FileHash stage/driver/SynchronousAudioRouter.inf -Algorithm SHA256).Hash
+          if ($submitted -ne $returned) {
+            Write-Host "::warning::The INF from Partner Center differs from the one that was submitted."
+            Compare-Object (Get-Content stage/unsigned/SynchronousAudioRouter.inf) `
+                           (Get-Content stage/driver/SynchronousAudioRouter.inf) | Format-Table -AutoSize | Out-String | Write-Host
+          }
+
+      - name: Build and sign the installer
+        shell: pwsh
+        run: |
+          # The MSI takes the version the driver was stamped with.
+          $info = Get-Content stage/unsigned/BUILD-INFO.txt -Raw
+          if ($info -notmatch '(?m)^DriverVer\s*:\s*[\d/]+,(\d+\.\d+\.\d+\.\d+)\s*$') { throw "No DriverVer in BUILD-INFO.txt." }
+          $version = $Matches[1]
+
+          ./tools/Build-SarInstaller.ps1 -Actions -Bin64 stage/x64
+          ./tools/Sign-SarFiles.ps1 -Files `
+            stage/x64/SarAsio.dll, stage/x64/SarConfigure.exe, stage/x64/SarInstallerActions.dll, stage/x86/SarAsio.dll
+
+          $msi = "release/SynchronousAudioRouter-$version-x64.msi"
+          ./tools/Build-SarInstaller.ps1 -Msi `
+            -DriverDir stage/driver -Bin64 stage/x64 -Bin32 stage/x86 -Version $version -OutFile $msi
+          ./tools/Sign-SarFiles.ps1 -Files $msi
+
+          $lines = Get-ChildItem release -File | Get-FileHash -Algorithm SHA256 |
+                   ForEach-Object { '{0}  {1}' -f $_.Hash, (Split-Path $_.Path -Leaf) }
+          $lines | Out-File release/SHA256SUMS.txt -Encoding ascii
+
+      - name: Upload the release files
+        uses: actions/upload-artifact@v4
+        with:
+          name: sar-release-x64
+          path: release/
+          if-no-files-found: error
+
+      - name: Attach to the draft release
+        shell: pwsh
+        run: |
+          gh release upload $env:TAG (Get-ChildItem release -File).FullName --clobber
+          if ($LASTEXITCODE -ne 0) { throw "Couldn't attach the release files to $env:TAG." }
+          # The MSI carries the signed driver; the raw Partner Center zip
+          # shouldn't be published next to it.
+          gh release delete-asset $env:TAG $env:PARTNER_CENTER_ZIP --yes
+          if ($LASTEXITCODE -ne 0) { throw "Couldn't remove $env:PARTNER_CENTER_ZIP from $env:TAG." }

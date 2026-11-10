@@ -10,6 +10,9 @@ name: build-and-package
 
 on:
   workflow_dispatch:
+  # release.yml builds through this workflow, so a release is made of exactly
+  # what a normal CI run produces.
+  workflow_call:
   push:
     branches: [master, vnext]
     tags: ["v*"]
@@ -38,6 +41,8 @@ jobs:
   driver:
     name: driver (${{ matrix.platform }})
     runs-on: windows-2022
+    outputs:
+      version: ${{ steps.ver.outputs.numeric }}
     permissions:
       contents: read
       id-token: write      # required by attest-build-provenance
@@ -49,7 +54,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0   # tags, for the git describe build label
+          fetch-depth: 0   # the whole history, for the version and build label
 
       - name: Add MSBuild to PATH
         uses: microsoft/setup-msbuild@v2
@@ -65,8 +70,10 @@ jobs:
         id: ver
         shell: pwsh
         run: |
-          # VERSION holds the release version (major.minor.patch). The run
-          # number in the fourth field tells builds of one version apart.
+          # VERSION holds the release version (major.minor.patch). The fourth
+          # field is the number of commits in the history, which tells builds
+          # of one version apart and is the same whichever workflow builds a
+          # commit.
           $base = (Get-Content VERSION -Raw).Trim()
           if ($base -notmatch '^\d+\.\d+\.\d+$') { throw "VERSION must be major.minor.patch, got '$base'" }
           if ($env:GITHUB_REF -like 'refs/tags/v*' -and
@@ -75,7 +82,7 @@ jobs:
           }
           $desc = (& git describe --tags --always --dirty 2>$null)
           if (-not $desc) { $desc = "$base-$(& git rev-parse --short HEAD)" }
-          $numeric = "$base.$env:GITHUB_RUN_NUMBER"
+          $numeric = "$base.$(& git rev-list --count HEAD)"
           "describe=$desc"   | Out-File $env:GITHUB_OUTPUT -Append
           "numeric=$numeric" | Out-File $env:GITHUB_OUTPUT -Append
           Write-Host "version: $desc  (DriverVer numeric: $numeric)"
@@ -144,6 +151,10 @@ jobs:
             "$signed/SynchronousAudioRouter.sys" "$signed/SynchronousAudioRouter.cat"
           if ($LASTEXITCODE -ne 0) { throw "signtool failed (exit $LASTEXITCODE)" }
           Remove-Item "Cert:\CurrentUser\My\$($cert.Thumbprint)" -Force
+          # The check the release workflow makes on the driver Microsoft
+          # signs, run here on the test-signed copy so it is exercised.
+          ./tools/Test-SarSignedDriver.ps1 `
+            -Unsigned "$stage/SynchronousAudioRouter.sys" -Signed "$signed/SynchronousAudioRouter.sys"
           $lines = Get-ChildItem $signed -File | Where-Object { $_.Name -ne 'SHA256SUMS.txt' } |
                    Get-FileHash -Algorithm SHA256 |
                    ForEach-Object { '{0}  {1}' -f $_.Hash, (Split-Path $_.Path -Leaf) }
@@ -162,7 +173,7 @@ jobs:
           if-no-files-found: error
 
       - name: Attest build provenance
-        if: github.event_name == 'push'   # OIDC token isn't writable on fork PRs
+        if: github.event_name != 'pull_request'   # OIDC token isn't writable on fork PRs
         uses: actions/attest-build-provenance@v1
         with:
           subject-path: artifacts/${{ matrix.platform }}/SynchronousAudioRouter.sys
@@ -250,9 +261,6 @@ jobs:
     name: installer (x64, test-signed)
     needs: [driver, usermode]
     runs-on: windows-2022
-    env:
-      WIX_URL: https://github.com/wixtoolset/wix3/releases/download/wix3141rtm/wix314-binaries.zip
-      WIX_SHA256: 6ac824e1642d6f7277d0ed7ea09411a508f6116ba6fae0aa5f2c7daa2ff43d31
     steps:
       - uses: actions/checkout@v4
 
@@ -260,26 +268,6 @@ jobs:
         uses: microsoft/setup-msbuild@v2
         with:
           vs-version: "[17.0,18.0)"
-
-      - name: Install WiX 3.14
-        shell: pwsh
-        run: |
-          # Pinned binaries zip rather than whatever the runner image carries.
-          $zip = "$env:RUNNER_TEMP\wix.zip"
-          Invoke-WebRequest $env:WIX_URL -OutFile $zip
-          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash
-          if ($hash -ne $env:WIX_SHA256) { throw "WiX zip hash mismatch: $hash" }
-          $wix = "$env:RUNNER_TEMP\wix314"
-          Expand-Archive $zip $wix
-          # SarInstallerActions.vcxproj expects $(WIX) with a trailing slash.
-          "WIX=$wix\" | Out-File $env:GITHUB_ENV -Append
-
-      - name: Build custom actions
-        shell: pwsh
-        run: |
-          & msbuild SynchronousAudioRouter.sln /t:SarInstallerActions `
-              /p:Configuration=Release /p:Platform=x64 /m /verbosity:minimal /nologo
-          if ($LASTEXITCODE -ne 0) { throw "msbuild failed (exit $LASTEXITCODE)" }
 
       - name: Download test-signed driver
         uses: actions/download-artifact@v4
@@ -302,27 +290,15 @@ jobs:
       - name: Build MSI
         shell: pwsh
         run: |
-          $stage = (Resolve-Path stage).Path
-          Copy-Item x64/Release/SarInstallerActions.dll "$stage/x64" -Force
-          # MSI versions compare major.minor.build only; the run number in the
-          # fourth field just labels the build (same-version upgrades are on).
-          $version = "$((Get-Content VERSION -Raw).Trim()).$env:GITHUB_RUN_NUMBER"
-          # A response file keeps the semicolons in DefineConstants away from
-          # PowerShell's argument quoting; msbuild splits them into -d defines.
-          @(
-            "/p:Configuration=Release"
-            "/p:Platform=x64"
-            "/p:WixInstallPath=$env:WIX"
-            "/p:WixTargetsPath=$env:WIX\wix.targets"
-            "/p:DefineConstants=`"ProductVersion=$version;Bin64=$stage\x64;Bin32=$stage\x86;DriverDir=$stage\driver`""
-          ) | Out-File "$env:RUNNER_TEMP\installer.rsp" -Encoding ascii
-          & msbuild SarInstaller/SarInstaller.wixproj "@$env:RUNNER_TEMP\installer.rsp" /verbosity:minimal /nologo
-          if ($LASTEXITCODE -ne 0) { throw "msbuild failed (exit $LASTEXITCODE)" }
-
+          # The driver's version. MSI versions compare major.minor.build
+          # only; the fourth field just labels the build (same-version
+          # upgrades are on).
+          $version = "${{ needs.driver.outputs.version }}"
           $out = 'artifacts/installer-x64-testsigned'
-          New-Item -ItemType Directory -Force -Path $out | Out-Null
-          Copy-Item SarInstaller/bin/x64/Release/SynchronousAudioRouter.msi "$out/SynchronousAudioRouter-$version-x64-testsigned.msi"
-          Copy-Item "$stage/driver/testsign.cer" $out
+          ./tools/Build-SarInstaller.ps1 -Actions -Msi `
+            -DriverDir stage/driver -Bin64 stage/x64 -Bin32 stage/x86 -Version $version `
+            -OutFile "$out/SynchronousAudioRouter-$version-x64-testsigned.msi"
+          Copy-Item stage/driver/testsign.cer $out
           $lines = Get-ChildItem $out -File | Get-FileHash -Algorithm SHA256 |
                    ForEach-Object { '{0}  {1}' -f $_.Hash, (Split-Path $_.Path -Leaf) }
           $lines | Out-File "$out/SHA256SUMS.txt" -Encoding ascii
