@@ -16,11 +16,12 @@
 		<Package InstallerVersion="200" Compressed="yes"
              InstallScope="perMachine" />
 
-    <!-- The driver is built for Windows 10 and later. On anything older the
-         upgrade would remove a working 0.13 and then fail to install or load
-         this one. Windows Installer reports Windows 8.1's version number on
-         Windows 10 as well, so the check uses a registry value that only
-         exists from Windows 10 on. -->
+    <!-- The driver needs Windows 10 version 2004 (build 19041) or later. On
+         anything older the upgrade would remove a working 0.13 and then fail
+         to install or load this one. Windows Installer reports Windows 8.1's
+         version number on Windows 10 as well, so the check uses registry
+         values: one that only exists from Windows 10 on, and the build
+         number. -->
     <Property Id="WINDOWS10ORLATER">
       <RegistrySearch Id="CurrentMajorVersionNumber"
                       Root="HKLM"
@@ -29,8 +30,16 @@
                       Type="raw"
                       Win64="yes"/>
     </Property>
-    <Condition Message="[ProductName] requires Windows 10 or later.">
-      Installed OR WINDOWS10ORLATER
+    <Property Id="WINDOWSBUILDNUMBER">
+      <RegistrySearch Id="CurrentBuildNumber"
+                      Root="HKLM"
+                      Key="SOFTWARE\Microsoft\Windows NT\CurrentVersion"
+                      Name="CurrentBuildNumber"
+                      Type="raw"
+                      Win64="yes"/>
+    </Property>
+    <Condition Message="[ProductName] requires Windows 10 version 2004 or later.">
+      <![CDATA[Installed OR (WINDOWS10ORLATER AND WINDOWSBUILDNUMBER >= 19041)]]>
     </Condition>
 
     <Property Id="REQUIREADMINUSER" Value="Any"/>
