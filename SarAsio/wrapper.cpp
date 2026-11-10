@@ -251,6 +251,7 @@ AsioStatus SarAsioWrapper::getClockSources(AsioClockSource *clocks, long *count)
         clocks->group = 0;
         clocks->isCurrentSource = AsioBool::True;
         strcpy_s(clocks->name, 32, kNoInterfaceSelected);
+        *count = 1;
         return AsioStatus::OK;
     }
 
