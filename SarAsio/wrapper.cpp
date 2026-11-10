@@ -365,6 +365,9 @@ AsioStatus SarAsioWrapper::createBuffers(
             _fakeBuffers.push_back(infos[i].asioBuffers[1]);
         }
 
+        // Nothing ticks without a hardware interface, but controlPanel needs
+        // this one to ask the host for a reset once an interface is chosen.
+        _callbacks.asioMessage = callbacks->asioMessage;
         return AsioStatus::OK;
     }
 
@@ -523,6 +526,7 @@ AsioStatus SarAsioWrapper::disposeBuffers()
         _fakeBuffers.clear();
         _isFakeChannelStarted[0] = AsioBool::False;
         _isFakeChannelStarted[1] = AsioBool::False;
+        _callbacks = {};
         return AsioStatus::OK;
     }
 
