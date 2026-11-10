@@ -99,7 +99,12 @@ private:
     int getSampleSize(AsioSampleType sampleType);
 
     HWND _hwnd;
+    // The configuration the channels and buffers are built from.
     DriverConfig _config;
+    // The configuration last saved from the control panel, until the next
+    // init applies it.
+    DriverConfig _pendingConfig;
+    bool _hasPendingConfig = false;
     BufferConfig _bufferConfig;
     std::shared_ptr<SarClient> _sar;
     std::shared_ptr<SarCastMaster> _castMaster;
