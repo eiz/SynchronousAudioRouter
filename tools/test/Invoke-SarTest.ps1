@@ -59,6 +59,17 @@ if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administra
     throw 'Invoke-SarTest.ps1 must run elevated.'
 }
 
+# A misspelled group would otherwise be skipped without a word, and the run
+# would pass having tested nothing. Accept "a,b" as one argument too, which
+# is how the list arrives through powershell -File.
+$knownScenarios = 'issues', 'matrix', 'race', 'kill', 'browser'
+$Scenarios = @($Scenarios | ForEach-Object { $_ -split ',' } |
+    ForEach-Object { $_.Trim() } | Where-Object { $_ })
+$unknownScenarios = @($Scenarios | Where-Object { $knownScenarios -notcontains $_ })
+if ($unknownScenarios) {
+    throw "Unknown scenario group(s): $($unknownScenarios -join ', '). Known: $($knownScenarios -join ', ')."
+}
+
 $sarTest = Join-Path $ToolsDir 'SarTest.exe'
 $sarAsio = Join-Path $ToolsDir 'SarAsio.dll'
 $clock = Join-Path $ToolsDir 'SarTestClock.dll'
@@ -70,6 +81,8 @@ if (-not $SkipInstall -and -not (Test-Path $inf)) { throw "Missing: $inf" }
 
 New-Item -ItemType Directory -Force -Path $ResultsDir | Out-Null
 $ResultsDir = (Resolve-Path $ResultsDir).Path
+# A run that dies before the end must not leave an earlier run's verdict.
+Remove-Item (Join-Path $ResultsDir 'summary.json') -ErrorAction SilentlyContinue
 $summary = [ordered]@{
     started = (Get-Date).ToString('o')
     machine = $env:COMPUTERNAME
@@ -85,6 +98,9 @@ function Invoke-Scenario {
     $json = Join-Path $ResultsDir "$Name.json"
     $argList = @($Arguments) + @('--results', "`"$json`"")
     Write-Host "==> $Name : SarTest $($argList -join ' ')"
+    # So that a SarTest that dies without writing results isn't given the
+    # results of an earlier run.
+    Remove-Item $json -ErrorAction SilentlyContinue
 
     $proc = Start-Process -FilePath $sarTest -ArgumentList $argList -NoNewWindow -PassThru `
         -RedirectStandardOutput $log
@@ -119,7 +135,92 @@ function Set-SarAsioRegistered {
 
     $regArgs = @('/s') + $(if ($Registered) { @() } else { @('/u') }) + @("`"$sarAsio`"")
     $proc = Start-Process regsvr32.exe -ArgumentList $regArgs -Wait -PassThru
-    if ($proc.ExitCode -ne 0) { Write-Warning "regsvr32 $($regArgs -join ' ') exited with $($proc.ExitCode)" }
+    if ($proc.ExitCode -ne 0) {
+        $message = "regsvr32 $($regArgs -join ' ') exited with $($proc.ExitCode)"
+        # Without the classes registered, application routing redirects
+        # nothing, and a scenario that relies on it would test nothing.
+        if ($Registered) { throw $message }
+        Write-Warning $message
+    }
+}
+
+# Runs a host with application routing on and a WASAPI client in a process of
+# its own. Passes when the loopback verifies and the client loaded
+# SarAsio.dll. The client has no other reason to load it: it only does when
+# the driver's registry filter redirected its device enumerator. A loopback
+# alone also passes with routing off.
+function Invoke-AppRoutingScenario {
+    $name = 'app-routing'
+    $record = [ordered]@{ name = $name }
+
+    try { Set-SarAsioRegistered $true } catch {
+        $record.outcome = 'error'
+        $record.error = "$_"
+        Write-Host "==> $name : $($record.error)"
+        return $record
+    }
+
+    $hostLog = Join-Path $ResultsDir "$name-host.log"
+    $hostJson = Join-Path $ResultsDir "$name-host.json"
+    Write-Host "==> $name : host with application routing, client in its own process"
+    $hostProc = Start-Process -FilePath $sarTest -NoNewWindow -PassThru -RedirectStandardOutput $hostLog `
+        -ArgumentList (@('host', '--endpoints', 1, '--duration', 120, '--app-routing',
+            '--results', "`"$hostJson`"") + $common)
+    $null = $hostProc.Handle
+    Start-Sleep -Seconds 5
+
+    $log = Join-Path $ResultsDir "$name.log"
+    $json = Join-Path $ResultsDir "$name.json"
+    Remove-Item $json -ErrorAction SilentlyContinue
+    $client = Start-Process -FilePath $sarTest -NoNewWindow -PassThru -RedirectStandardOutput $log `
+        -ArgumentList @('wasapi', '--endpoints', 1, '--channels', $Channels, '--duration', $Duration,
+            '--results', "`"$json`"")
+    $null = $client.Handle
+
+    # Look while the client runs; its module list is gone once it exits.
+    $record.sarAsioLoaded = $false
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    while (-not $client.HasExited -and (Get-Date) -lt $deadline) {
+        if (-not $record.sarAsioLoaded) {
+            try {
+                $record.sarAsioLoaded = [bool]((Get-Process -Id $client.Id).Modules |
+                    Where-Object ModuleName -eq 'SarAsio.dll')
+            } catch { }
+        }
+        Start-Sleep -Milliseconds 500
+    }
+
+    $exited = $client.HasExited
+    if (-not $exited) { try { $client.Kill() } catch { } }
+    $record.hostRunning = -not $hostProc.HasExited
+    try { Stop-Process -Id $hostProc.Id -Force } catch { }
+    $null = $hostProc.WaitForExit(60000)
+    Set-SarAsioRegistered $false
+
+    $record.exitCode = if ($exited) { $client.ExitCode } else { $null }
+    $record.log = $log
+    $record.results = $json
+    $record.hostLog = $hostLog
+    if (Test-Path $json) {
+        try { $record.summary = (Get-Content $json -Raw | ConvertFrom-Json) } catch { }
+    }
+
+    if (-not $exited) {
+        $record.outcome = 'hung'
+    } elseif ($client.ExitCode -ne 0) {
+        $record.outcome = 'failed'
+    } elseif (-not $record.hostRunning) {
+        $record.outcome = 'failed'
+        $record.error = 'the host exited before the client finished'
+    } elseif (-not $record.sarAsioLoaded) {
+        $record.outcome = 'failed'
+        $record.error = 'the client never loaded SarAsio.dll, so application routing was not in effect'
+    } else {
+        $record.outcome = 'passed'
+    }
+
+    Write-Host "    -> $($record.outcome)$(if ($record.error) { ': ' + $record.error })"
+    return $record
 }
 
 # Plays tools\test\tone.html in Edge with application routing on and Edge's
@@ -161,7 +262,11 @@ function Invoke-BrowserScenario {
     if ($installers) { $record.edgeInstallers = @($installers | ForEach-Object { $_.Path }) }
     $started = Get-Date
 
-    Set-SarAsioRegistered $true
+    try { Set-SarAsioRegistered $true } catch {
+        $record.outcome = 'error'
+        $record.error = "$_"
+        return $record
+    }
 
     $hostLog = Join-Path $ResultsDir "$Name-host.log"
     $hostJson = Join-Path $ResultsDir "$Name-host.json"
@@ -255,6 +360,21 @@ function Invoke-BrowserScenario {
     $record.audioProcesses | ForEach-Object { Write-Host "    audio service: $($_ | ConvertTo-Json -Compress)" }
     Write-Host "    SarAsio.dll loaded in msedge pids: $($record.sarAsioLoadedIn -join ', ')"
     $record.codeIntegrityEvents | ForEach-Object { Write-Host "    CI: $_" }
+
+    # The meter only says that Edge was heard, and Edge is heard just as
+    # well when application routing never came on. So also require signs
+    # that it was on: the host still running, and, where Edge's audio
+    # service is allowed to load it, SarAsio.dll inside Edge.
+    $record.hostRunning = -not $hostProc.HasExited
+    if ($record.outcome -eq 'passed') {
+        if (-not $record.hostRunning) {
+            $record.outcome = 'failed'
+            $record.error = 'the host with application routing exited before the check finished'
+        } elseif (-not $Sandbox -and -not $record.sarAsioLoadedIn) {
+            $record.outcome = 'failed'
+            $record.error = 'SarAsio.dll was not loaded in Edge, so application routing was not in effect'
+        }
+    }
 
     Stop-ScheduledTask -TaskName 'SarTestEdge' -ErrorAction SilentlyContinue
     Unregister-ScheduledTask -TaskName 'SarTestEdge' -Confirm:$false -ErrorAction SilentlyContinue
@@ -370,10 +490,7 @@ if ($Scenarios -contains 'issues') {
     # every registry value query on the machine. With SarAsio's COM classes
     # registered, the harness's own WASAPI client also goes through SarAsio's
     # device enumerator wrapper.
-    Set-SarAsioRegistered $true
-    $summary.scenarios += Invoke-Scenario 'app-routing' (
-        @('run', '--endpoints', 1, '--iterations', 1, '--duration', $Duration, '--app-routing') + $common)
-    Set-SarAsioRegistered $false
+    $summary.scenarios += Invoke-AppRoutingScenario
 }
 
 if ($Scenarios -contains 'matrix') {
@@ -441,27 +558,64 @@ if (-not $SkipKillTest -and $Scenarios -contains 'kill') {
 
     $wasapiLog = Join-Path $ResultsDir 'kill-host-wasapi.log'
     $wasapiJson = Join-Path $ResultsDir 'kill-host-wasapi.json'
+    Remove-Item $wasapiJson -ErrorAction SilentlyContinue
     $wasapiProc = Start-Process -FilePath $sarTest -NoNewWindow -PassThru -RedirectStandardOutput $wasapiLog `
         -ArgumentList @('wasapi', '--endpoints', $count, '--channels', $Channels, '--duration', 15,
             '--expect-invalidation', '--results', "`"$wasapiJson`"")
     $null = $wasapiProc.Handle
     Start-Sleep -Seconds 5
 
+    # A host that already died on its own isn't killed mid-stream.
+    $hostAliveAtKill = -not $hostProc.HasExited
     Write-Host "==> kill-host : killing the host mid-stream"
     try { Stop-Process -Id $hostProc.Id -Force } catch { }
     $hostExited = $hostProc.WaitForExit(60000)
     $wasapiExited = $wasapiProc.WaitForExit(60000)
     if (-not $wasapiExited) { try { $wasapiProc.Kill() } catch { } }
 
-    $summary.scenarios += [ordered]@{
+    # Both processes exiting only shows that nothing hung. The scenario is
+    # about streams that were running when the host went away, so also
+    # require that: every stream started, every recording stream got the
+    # signal first, and every stream noticed the host going.
+    $killStreams = @()
+    if (Test-Path $wasapiJson) {
+        try { $killStreams = @((Get-Content $wasapiJson -Raw | ConvertFrom-Json).wasapi.streams) } catch { }
+    }
+    $kill = [ordered]@{
         name = 'kill-host'
-        outcome = if ($hostExited -and $wasapiExited) { 'passed' } else { 'hung' }
+        hostAliveAtKill = $hostAliveAtKill
         hostExited = $hostExited
         wasapiExited = $wasapiExited
         wasapiExitCode = if ($wasapiExited) { $wasapiProc.ExitCode } else { $null }
+        streams = $killStreams.Count
+        streamsStarted = @($killStreams | Where-Object started).Count
+        streamsInvalidated = @($killStreams | Where-Object deviceInvalidated).Count
+        capturesWithSignal = @($killStreams |
+            Where-Object { $_.direction -eq 'capture' -and $_.validFrames -gt 0 }).Count
         log = $hostLog
         wasapiLog = $wasapiLog
     }
+
+    if (-not ($hostExited -and $wasapiExited)) {
+        $kill.outcome = 'hung'
+    } elseif (-not $hostAliveAtKill) {
+        $kill.outcome = 'failed'
+        $kill.error = 'the host had already exited when it was to be killed'
+    } elseif ($wasapiProc.ExitCode -ne 0) {
+        $kill.outcome = 'failed'
+        $kill.error = "the WASAPI client exited with $($wasapiProc.ExitCode)"
+    } elseif ($kill.streamsStarted -ne 2 * $count -or $kill.capturesWithSignal -ne $count) {
+        $kill.outcome = 'failed'
+        $kill.error = 'not every stream was running when the host was killed'
+    } elseif ($kill.streamsInvalidated -ne 2 * $count) {
+        $kill.outcome = 'failed'
+        $kill.error = 'not every stream noticed the host going away'
+    } else {
+        $kill.outcome = 'passed'
+    }
+
+    Write-Host "    -> $($kill.outcome)$(if ($kill.error) { ': ' + $kill.error })"
+    $summary.scenarios += $kill
 
     $summary.scenarios += Invoke-Scenario 'recovery-after-kill' (
         @('run', '--endpoints', $count, '--iterations', 1, '--duration', $Duration) + $common)
