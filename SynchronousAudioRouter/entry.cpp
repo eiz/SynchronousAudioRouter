@@ -619,7 +619,24 @@ NTSTATUS SarIrpDeviceControl(PDEVICE_OBJECT deviceObject, PIRP irp)
     ExAcquireFastMutex(&extension->mutex);
     SarControlContext * controlContext = (SarControlContext *)SarGetTableEntry(
         &extension->controlContextTable, irpStack->FileObject);
+
+    // Another thread can close the handle while this request is in progress.
+    // Cleanup then drops the table's reference, so hold one for as long as
+    // the request uses the context.
+    if (controlContext) {
+        SarRetainControlContext(controlContext);
+    }
+
     ExReleaseFastMutex(&extension->mutex);
+
+    if (!controlContext) {
+        // Cleanup got here first.
+        ntStatus = STATUS_FILE_CLOSED;
+        irp->IoStatus.Status = ntStatus;
+        irp->IoStatus.Information = 0;
+        IoCompleteRequest(irp, IO_NO_INCREMENT);
+        return ntStatus;
+    }
 
     switch (ioControlCode) {
         case SAR_SET_BUFFER_LAYOUT: {
@@ -710,7 +727,7 @@ NTSTATUS SarIrpDeviceControl(PDEVICE_OBJECT deviceObject, PIRP irp)
     }
 
     SAR_INFO("device_control result: 0x%x", ntStatus);
-
+    SarReleaseControlContext(controlContext);
     return ntStatus;
 }
 

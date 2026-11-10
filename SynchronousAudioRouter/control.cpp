@@ -90,6 +90,14 @@ NTSTATUS SarSetBufferLayout(
     
     ExAcquireFastMutex(&controlContext->mutex);
 
+    // The control handle can be closed while this request is in progress.
+    // Cleanup has already looked for a view to unmap by then.
+    if (controlContext->orphan) {
+        ExReleaseFastMutex(&controlContext->mutex);
+        status = STATUS_FILE_CLOSED;
+        goto err_out;
+    }
+
     if (controlContext->bufferSize) {
         ExReleaseFastMutex(&controlContext->mutex);
         status = STATUS_INVALID_STATE_TRANSITION;
@@ -542,12 +550,21 @@ NTSTATUS SarCreateEndpoint(
         goto err_out;
     }
 
+    ExAcquireFastMutex(&controlContext->mutex);
+
+    // The control handle can be closed while this request is in progress.
+    // Its endpoints have been orphaned by then, and one added now never
+    // would be.
+    if (controlContext->orphan) {
+        ExReleaseFastMutex(&controlContext->mutex);
+        status = STATUS_FILE_CLOSED;
+        goto err_out;
+    }
+
     // Only call IoMarkIrpPending when there is no error and we WILL return STATUS_PENDING
     // but before any chance for the IRP to be completed (in SarProcessPendingEndpoints)
     // So before queuing the endpoint to the pendingEndpointList list
     IoMarkIrpPending(irp);
-
-    ExAcquireFastMutex(&controlContext->mutex);
 
     // Track the work item explicitly instead of inferring it from the list
     // being empty: the work item pops entries one at a time with the mutex
