@@ -80,6 +80,40 @@ from training, used to choose approaches; each use that the specification
 does not settle is listed in `SPEC-GAPS.md` as a guess. No recollection of the
 existing SynchronousAudioRouter driver's source was used.
 
+## The cached filter data change (A.9)
+
+A later session, by a second engineer working under the same rules, added the
+`KsFilterFactoryUpdateCacheData` call that the "Cached filter data" paragraph
+of Appendix A.9 specifies. What was consulted for it, beyond the above:
+
+| Source | What was taken |
+|---|---|
+| `docs/behavior.md`, Appendix A.9 as corrected | The "Cached filter data" paragraph: what to call, in which order, and that the results are ignored. |
+| `README.md`, `docs/SPEC-GAPS.md`, this file and the driver's own sources | The conventions of the crates. |
+| WDK 10.0.26100.0 `shared/ks.h` | The declaration of `KsFilterFactoryUpdateCacheData` with its annotations (`_Must_inspect_result_`, `_IRQL_requires_max_(PASSIVE_LEVEL)`), read directly and taken through bindgen. This build's own generated `ks.rs` was read to check the result. |
+| WDK 10.0.26100.0 `km/wdm.h` | `KEY_VALUE_PARTIAL_INFORMATION` and `KEY_VALUE_INFORMATION_CLASS`, for the temporary probes only (`SPEC-GAPS.md`, item 38). Nothing from it is in the committed change. |
+| learn.microsoft.com `.../ddi/ks/nf-ks-ksfilterfactoryupdatecachedata` | What the function writes (the `FilterData` value and the medium cache, for every category of the descriptor); a null descriptor means the factory's own; "can only be called in PASSIVE_LEVEL"; `STATUS_INVALID_PARAMETER` when no device interface corresponds to the descriptor's categories. The page names no mutex and no thread context. |
+| `.../stream/mutexes-in-avstream` | "Relevant function reference pages state if a specific mutex should be held when calling that particular function." |
+| `.../stream/device-mutex-in-avstream` | Creation and destruction of filter factories are synchronised by the device mutex; the object hierarchy is stable only while it is held; it cannot be obtained recursively. |
+| `.../ddi/ks/nf-ks-ksacquiredevice` | `PASSIVE_LEVEL`; nothing else. |
+| `.../ddi/ks/nf-ks-ksfilterfactorysetdeviceclassesstate` | Read for comparison: `PASSIVE_LEVEL`, and no word about the device mutex either. |
+| `.../ddi/ks/nf-ks-kscreatefilterfactory` | Read again: the device mutex must be held. Nothing about `FilterData`. |
+| `.../stream/avstream-object-hierarchy` | Nothing: the page the function's reference points to is a diagram. |
+| `.../ddi/wdm/nf-wdm-ioopendeviceinterfaceregistrykey` | "Callers ... must be running at IRQL = PASSIVE_LEVEL in the context of a system thread", which is why the probes read the interface keys on the worker thread only. |
+| The rig's usage text, printed by running `sar-rig --help` | Its options and exit codes. The rig itself was run, not read. |
+| The result files of the rig runs `cleanroom-cachedata-*` under `rig-results/` (console output, scenario logs written by the test programs and by SarAsio, the bugcheck analysis of this driver's own probe build) | The outcomes recorded in `SPEC-GAPS.md`, items 38 to 40. |
+
+The Microsoft pages were fetched by address with the agent's web fetch tool,
+which returns the text of a page through a small model. No web search was
+made, nothing was fetched from anywhere but learn.microsoft.com, and no crate
+source was opened.
+
+Where Windows keeps the `FilterData` value (as a value of that name in the
+key `IoOpenDeviceInterfaceRegistryKey` opens for each interface instance) is
+on none of these pages. The probes assumed it from general familiarity with
+kernel streaming, and found it there. The committed change does not depend on
+it.
+
 ## Accidental exposure log
 
 - At session start the agent's context contained an automatically attached
@@ -108,3 +142,26 @@ existing SynchronousAudioRouter driver's source was used.
   numbers, for example "sarclient.cpp:189] Couldn't open control device").
   They were read as test output. They say nothing about how the existing
   kernel driver is implemented.
+
+For the session that made the cached filter data change:
+
+- That session's context, too, began with an automatically attached git
+  status block for `<the existing repository>`: a branch name, an untracked
+  `docs/` entry and five commit subject lines (one-line titles about
+  repository housekeeping, tests, the README and SarAsio; none describes the
+  kernel driver). It was ignored. Nothing in that directory was read, listed
+  or searched, and no git command was run there.
+- The session's shell starts in the off-limits tree, and the agent's tooling
+  proposes a scratch directory under `/tmp/claude-1000/...` and, on its own,
+  writes the console output of commands run in the background to files
+  there. Every shell command began with `cd <the workspace> &&`. The scratch
+  directory was not used. The background output files were never read or
+  listed: the rig's output was redirected into `rig-results/` and read from
+  there.
+- A lost result, not an exposure: the first probe run was given
+  `--out ./rig-results`, as briefed, and the rig reported the results copied
+  but left nothing in the workspace. Where a relative path took them was not
+  looked for (the brief puts everything beside the rig off limits). The run
+  was repeated with an absolute `--out`, which every later run used.
+- The harness's result files again include log lines of the existing
+  user-mode software and of the test programs. They were read as test output.

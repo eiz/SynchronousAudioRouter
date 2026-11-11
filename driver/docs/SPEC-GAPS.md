@@ -311,6 +311,7 @@ pass):
   path (see below), so the path is exercised.
 - Item 5: by the instrumented run described there.
 - Item 20 (ksthunk above the driver): seen in a stack trace.
+- Items 38 and 39: by the instrumented runs described in item 38.
 
 Found by the rig, not by reasoning:
 
@@ -336,3 +337,84 @@ Not exercised by any scenario, so only reasoned about:
 - Driver unload and device stop/removal: the VM is restored from a
   checkpoint after every run, so the unload path, and with it Driver
   Verifier's check for leaked pool, never ran.
+- A failure of `KsFilterFactoryUpdateCacheData` (item 40). The call was
+  never seen to fail, so the code that ignores its result only ever had a
+  success to ignore.
+
+## I. The "Cached filter data" paragraph of A.9
+
+This paragraph was added to the specification after the driver had been
+written. The items continue the numbering of sections A to F.
+
+38. **[A.9] On which thread the cached filter data is written.** "Right
+    after creating the two factories, and before either one's device
+    interfaces are switched on" fits two places: the requesting thread, where
+    the factories are created before the request is answered as pending
+    (A.5), and the worker thread that later writes the values of A.10 and
+    switches the interfaces on. Implemented as written: on the requesting
+    thread, straight after the second `KsCreateFilterFactory` and in the same
+    hold of the device mutex, so that nothing can come between creating the
+    factories and the write. Microsoft's page for
+    `KsFilterFactoryUpdateCacheData` asks for `PASSIVE_LEVEL` and names no
+    thread context. The call site is a device control dispatch on the
+    requesting thread. Of the three locks held there, the control handle's
+    and the publish queue's are kernel mutexes, which leave the IRQL at
+    `PASSIVE_LEVEL`, and the device mutex is the one `KsCreateFilterFactory`,
+    itself a `PASSIVE_LEVEL` routine, has to be called under. [doc] for the
+    IRQL. **[rig]** for the rest, by two instrumented builds, both removed
+    again:
+
+    - Run `cleanroom-cachedata-probe-stop2-20261111-134939` (`issues`). The
+      first endpoint the driver created went without the two calls. The
+      second got them, and when it reached the worker thread the driver
+      stopped the system on purpose and reported what it had seen. Both
+      calls had returned a success status. Each of the five interface
+      instances of the endpoint that got the calls (wave filter: audio,
+      real-time, render or capture; topology filter: audio, topology) had a
+      `FilterData` value; the wave filter's audio instance, the one whose
+      value was also measured, held 160 bytes of `REG_BINARY`. The five
+      instances of the endpoint that went without had none (the query was
+      answered `STATUS_OBJECT_NAME_NOT_FOUND`). In this run, then,
+      `KsCreateFilterFactory` alone left no such value and the call wrote
+      one.
+    - Run `cleanroom-cachedata-probe-fail-20261111-135429` (`issues`). Both
+      calls were made as in the committed code, but a failure of either
+      failed the create request, and so did an interface instance without a
+      `FilterData` value once the endpoint reached the worker thread. Every
+      scenario passed: for every endpoint those scenarios create, both
+      calls succeeded and all five values were there.
+
+    An earlier run of the first build
+    (`cleanroom-cachedata-probe-stop-20261111-134451`) stopped the same way,
+    but the rig did not deliver its results (see `PROVENANCE.md`). The
+    committed code, which ignores both results, passes the whole suite (run
+    `cleanroom-cachedata-final-20261111-135739`: `issues`, `matrix`, `race`,
+    `kill`).
+
+39. **[A.9] Whether the device mutex is held for the call.** The
+    specification does not say, and neither does Microsoft: the function's
+    page mentions no mutex, although "Mutexes in AVStream" says that the
+    reference pages state which mutex a function needs. Two documented facts
+    pull in opposite directions. A factory is only certain to exist while
+    the device mutex is held ("Device Mutex in AVStream": the object
+    hierarchy is stable only under it, and these factories are freed when
+    the device stops). And the device mutex "cannot be obtained
+    recursively", so a routine that took it itself would hang when called
+    with it held. Resolved: called with the device mutex held, as
+    `KsFilterFactorySetDeviceClassesState` always has been here (its page is
+    just as silent). **[rig]** In the runs of item 38 the call returned, and
+    succeeded, with the mutex held.
+
+40. **[A.9] What else "the results are not checked" covers.** Decided as
+    follows. [guess]
+
+    - If the second factory cannot be created, the first is deleted and
+      nothing is written for it: the paragraph begins "after creating the
+      two factories".
+    - The write comes before the driver reads the factories' interface
+      paths (item 8). If reading those fails, the request fails and the
+      factories are deleted; what was written is not taken back.
+    - `ks.h` marks the function's result as one that must be inspected
+      (`_Must_inspect_result_`). The specification wins: the wrapper returns
+      the status and the driver discards it. Nothing is logged or retried,
+      and the request's own status and byte count (A.5) do not change.

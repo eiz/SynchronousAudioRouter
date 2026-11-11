@@ -277,6 +277,20 @@ impl FilterFactory {
         try_vec_from_slice(units)
     }
 
+    /// Has AVStream write the factory's cached filter data (the `FilterData`
+    /// value and the medium cache that Windows keeps with the factory's
+    /// device interfaces) from the factory's own descriptor.
+    pub fn update_cache_data(&self, _guard: &DeviceGuard<'_>) -> Result<(), NtStatus> {
+        if !self.usable() {
+            return Err(NtStatus::NOT_FOUND);
+        }
+        // SAFETY: the factory exists (see `symbolic_link`). A null
+        // descriptor is allowed: AVStream then reads the factory's own,
+        // which lives in the factory's block and so as long as the factory.
+        let status = unsafe { sys::KsFilterFactoryUpdateCacheData(self.raw, core::ptr::null()) };
+        NtStatus(status).into_result()
+    }
+
     /// Switches the factory's device interfaces on or off.
     pub fn set_enabled(&self, _guard: &DeviceGuard<'_>, enabled: bool) -> Result<(), NtStatus> {
         if !self.usable() {

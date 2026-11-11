@@ -154,6 +154,13 @@ impl Endpoint {
                 return Err(status);
             }
         };
+        // "Cached filter data" (A.9): kernel streaming writes each factory's
+        // `FilterData` value and medium cache from the factory's own
+        // descriptor, the wave factory first, before any interface is
+        // switched on. The results are not checked: a failure here does not
+        // fail the request.
+        let _ = wave.update_cache_data(guard);
+        let _ = topology.update_cache_data(guard);
         let links = wave
             .symbolic_link(guard)
             .and_then(|wave_link| Ok((wave_link, topology.symbolic_link(guard)?)));

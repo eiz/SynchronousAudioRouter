@@ -205,6 +205,7 @@ const FUNCTIONS: &[&str] = &[
     "KsFreeObjectCreateItemsByContext",
     "KsFilterFactorySetDeviceClassesState",
     "KsFilterFactoryGetSymbolicLink",
+    "KsFilterFactoryUpdateCacheData",
     "KsAddItemToObjectBag",
     "KsGetParent",
     "KsPinGetParentFilter",
