@@ -2,7 +2,7 @@
 
 # Specification gaps
 
-Questions `spec/driver-behavior.md` did not answer, answered ambiguously, or
+Questions `docs/behavior.md` did not answer, answered ambiguously, or
 answered wrongly, and how each was resolved. "Source" says where the answer
 came from: Microsoft documentation, a WDK header, reasoning, or the rig.
 

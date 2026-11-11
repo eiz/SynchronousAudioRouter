@@ -11,7 +11,7 @@
 //! host with `cargo test`.
 //!
 //! Section references (for example "A.5") are to
-//! `spec/driver-behavior.md`.
+//! `docs/behavior.md`.
 #![cfg_attr(not(test), no_std)]
 #![forbid(unsafe_code)]
 

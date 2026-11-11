@@ -4,7 +4,7 @@
 //! SynchronousAudioRouter.sys
 //!
 //! A clean-room implementation of the SynchronousAudioRouter kernel driver,
-//! written from `spec/driver-behavior.md`. Section references in comments
+//! written from `docs/behavior.md`. Section references in comments
 //! ("section 8", "A.5") are to that document.
 //!
 //! The driver is an AVStream minidriver. It lets a host program create

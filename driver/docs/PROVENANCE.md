@@ -4,13 +4,13 @@
 
 Every external source consulted while writing this driver, and what was taken
 from it. The only description of the existing driver that was used is
-`spec/driver-behavior.md`.
+`docs/behavior.md`.
 
 ## Local, on this machine
 
 | Source | What was taken |
 |---|---|
-| `spec/driver-behavior.md` | All behavior. |
+| `docs/behavior.md` | All behavior. |
 | `ENVIRONMENT.md` | Tool locations, harness command. |
 | Windows SDK/WDK 10.0.26100.0 headers (`km/wdm.h`, `km/ntddk.h`, `km/ntifs.h`, `shared/ks.h`, `shared/ksmedia.h`) | Declarations, structure layouts, constants and GUID values, through bindgen and the header-parsing build script of `ks-sys`. Read directly for: the AVStream descriptor and dispatch structures and the `KsDeleteFilterFactory`, `DEFINE_KSPROPERTY_ITEM_PIN_*` macros (`ks.h`); the WaveRT property ids and structures (`ksmedia.h`); `MmMapViewInSystemSpaceEx`, the process mitigation policy enum (`ntddk.h`); the cancel-safe queue types and comments (`wdm.h`). |
 | `C:\Windows\INF\ks.inf`, `kscaptur.inf` (the system's own) | The names of the sections an INF "needs": `KS.Registration`, `KSCAPTUR.Registration.NT`. |
