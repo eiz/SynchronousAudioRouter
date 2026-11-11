@@ -1,0 +1,33 @@
+# Copyright (c) 2026 Itty Bitty Binaries, Inc.
+# SPDX-License-Identifier: MIT
+
+[package]
+name = "sar-driver"
+description = "SynchronousAudioRouter.sys"
+version.workspace = true
+license.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+build = "build.rs"
+
+[lib]
+# The image and its PDB must be called SynchronousAudioRouter; cargo names
+# both after the library target.
+name = "SynchronousAudioRouter"
+crate-type = ["cdylib"]
+path = "src/lib.rs"
+test = false
+doctest = false
+
+[dependencies]
+ntstatus = { workspace = true }
+wdk-sys = { workspace = true }
+sar-core = { workspace = true }
+ntk = { workspace = true }
+ks = { workspace = true }
+ks-sys = { workspace = true }
+wdk-alloc = { workspace = true }
+
+[build-dependencies]
+wdk-build = { workspace = true }

@@ -4,9 +4,9 @@
     into a submission-ready, verifiable package.
 
 .DESCRIPTION
-    Run AFTER msbuild has produced SynchronousAudioRouter.sys. This script:
+    Run AFTER cargo has built the driver (driver/README.md). This script:
 
-      1. locates the freshly built .sys and its .pdb,
+      1. takes the driver image cargo built and its .pdb,
       2. stamps a valid DriverVer into a staged copy of the INF
          (the committed INF still carries the placeholder "DriverVer=0.1",
          which is illegal for a real package),
@@ -38,7 +38,11 @@ param(
     [string]$Describe = 'dev',
 
     [string]$OutDir = 'artifacts',
-    [string]$InfSource = 'SynchronousAudioRouter/SynchronousAudioRouter.inf'
+    [string]$InfSource = 'driver/inf/SynchronousAudioRouter.inf',
+
+    # Cargo's output directory for the driver, if it isn't the default
+    # driver\target\<target triple>\<profile>.
+    [string]$BuiltDir
 )
 
 $ErrorActionPreference = 'Stop'
@@ -48,21 +52,22 @@ $repo  = (Resolve-Path '.').Path
 $stage = Join-Path $repo (Join-Path $OutDir $Platform)
 New-Item -ItemType Directory -Force -Path $stage | Out-Null
 
-# 1. Locate the freshly built .sys (prefer the linker output under <Platform>\<Config>).
-$candidates = Get-ChildItem -Path $repo -Recurse -Filter 'SynchronousAudioRouter.sys' -ErrorAction SilentlyContinue
-$sys = $candidates | Where-Object { $_.FullName -match "\\$Platform\\$Configuration\\" } |
-       Sort-Object LastWriteTime -Descending | Select-Object -First 1
-if (-not $sys) { $sys = $candidates | Sort-Object LastWriteTime -Descending | Select-Object -First 1 }
-if (-not $sys) { throw "SynchronousAudioRouter.sys not found - did the driver build succeed?" }
-Write-Host "==> Driver binary: $($sys.FullName)"
-Copy-Item $sys.FullName (Join-Path $stage 'SynchronousAudioRouter.sys') -Force
+# 1. The driver image. Cargo builds it as a cdylib, so it is named .dll; a
+#    driver image is the same file with the extension .sys.
+if (-not $BuiltDir) {
+    $triple  = @{ 'x64' = 'x86_64-pc-windows-msvc'; 'ARM64' = 'aarch64-pc-windows-msvc' }[$Platform]
+    $profile = if ($Configuration -eq 'Release') { 'release' } else { 'debug' }
+    $BuiltDir = Join-Path $repo "driver\target\$triple\$profile"
+}
+$built = Join-Path $BuiltDir 'SynchronousAudioRouter.dll'
+if (-not (Test-Path $built)) { throw "$built not found - did the driver build succeed?" }
+Write-Host "==> Driver binary: $built"
+Copy-Item $built (Join-Path $stage 'SynchronousAudioRouter.sys') -Force
 
 # The symbols go into the submission too: Microsoft's crash analysis uses them.
-$pdb = Get-ChildItem -Path $repo -Recurse -Filter 'SynchronousAudioRouter.pdb' -ErrorAction SilentlyContinue |
-       Where-Object { $_.FullName -match "\\$Platform\\$Configuration\\" } |
-       Sort-Object LastWriteTime -Descending | Select-Object -First 1
-if (-not $pdb) { throw "SynchronousAudioRouter.pdb not found - did the driver build succeed?" }
-Copy-Item $pdb.FullName (Join-Path $stage 'SynchronousAudioRouter.pdb') -Force
+$pdb = Join-Path $BuiltDir 'SynchronousAudioRouter.pdb'
+if (-not (Test-Path $pdb)) { throw "$pdb not found - did the driver build succeed?" }
+Copy-Item $pdb (Join-Path $stage 'SynchronousAudioRouter.pdb') -Force
 
 # 2. Stamp a valid DriverVer into a staged copy of the INF.
 $today = (Get-Date).ToString('MM/dd/yyyy')
@@ -123,7 +128,8 @@ $payload | Get-FileHash -Algorithm SHA256 |
     ForEach-Object { '{0}  {1}' -f $_.Hash, (Split-Path $_.Path -Leaf) } |
     Out-File (Join-Path $stage 'SHA256SUMS.txt') -Encoding ascii
 
-$commit = (& git rev-parse HEAD 2>$null)
+$commit = (& cmd.exe /c 'git rev-parse HEAD 2>nul')
+if ($LASTEXITCODE -ne 0) { $commit = '(not a git checkout)' }
 @"
 SynchronousAudioRouter driver package
 =====================================

@@ -1,0 +1,7 @@
+# Copyright (c) 2026 Itty Bitty Binaries, Inc.
+# SPDX-License-Identifier: MIT
+
+# wdk-build refuses to configure a driver binary unless the CRT is linked
+# statically (the driver links no CRT at all, see sar-driver/build.rs).
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]

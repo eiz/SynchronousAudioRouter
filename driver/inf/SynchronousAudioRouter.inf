@@ -1,0 +1,62 @@
+; Copyright (c) 2026 Itty Bitty Binaries, Inc.
+; SPDX-License-Identifier: MIT
+;
+; SynchronousAudioRouter.inf
+;
+; Installs SynchronousAudioRouter.sys for the root-enumerated software device
+; SW\{0BCFFA5C-E754-48CF-A783-A64C0DC0BB2C}. The device node itself is created
+; by the installer.
+;
+
+[Version]
+Signature   = "$WINDOWS NT$"
+Class       = MEDIA
+ClassGuid   = {4d36e96c-e325-11ce-bfc1-08002be10318}
+Provider    = %ProviderName%
+DriverVer   = 11/01/2026,0.14.0.0
+CatalogFile = SynchronousAudioRouter.cat
+PnpLockdown = 1
+
+[SourceDisksNames]
+1 = %DiskName%
+
+[SourceDisksFiles]
+SynchronousAudioRouter.sys = 1
+
+[DestinationDirs]
+DefaultDestDir = 12
+
+[Manufacturer]
+%ManufacturerName% = SynchronousAudioRouter, NTamd64
+
+; 64-bit x64 only. The section is not decorated with a minimum OS build
+; (NTamd64.10.0...19041): the installer's driver install component (DIFxApp)
+; does not understand that form and then finds no device in the package. The
+; installer itself refuses to run on anything older than Windows 10 2004.
+[SynchronousAudioRouter.NTamd64]
+%DeviceName% = SAR_Device, SW\{0BCFFA5C-E754-48CF-A783-A64C0DC0BB2C}
+
+[SAR_Device.NT]
+Include   = ks.inf, kscaptur.inf
+Needs     = KS.Registration, KSCAPTUR.Registration.NT
+CopyFiles = SAR_Device.CopyFiles
+
+[SAR_Device.CopyFiles]
+SynchronousAudioRouter.sys
+
+[SAR_Device.NT.Services]
+AddService = SynchronousAudioRouter, 0x00000002, SAR_Service
+
+[SAR_Service]
+DisplayName   = %ServiceName%
+ServiceType   = 1 ; SERVICE_KERNEL_DRIVER
+StartType     = 3 ; SERVICE_DEMAND_START
+ErrorControl  = 1 ; SERVICE_ERROR_NORMAL
+ServiceBinary = %12%\SynchronousAudioRouter.sys
+
+[Strings]
+ProviderName     = "Itty Bitty Binaries, Inc."
+ManufacturerName = "Itty Bitty Binaries, Inc."
+DiskName         = "Synchronous Audio Router installation disk"
+DeviceName       = "Synchronous Audio Router"
+ServiceName      = "Synchronous Audio Router"
