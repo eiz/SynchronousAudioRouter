@@ -17,6 +17,7 @@
 #include "stdafx.h"
 #include "config.h"
 #include "utility.h"
+#include "sar.h"
 
 #include <fstream>
 
@@ -51,9 +52,21 @@ bool EndpointConfig::load(picojson::object& obj)
         type = EndpointType::Playback;
     }
 
+    // The file can be edited by hand or come from a build whose dialog took
+    // any number. A count the driver can't create is dropped here, where
+    // nothing has been sized by it yet.
+    auto count = poChannelCount->second.get<double>();
+
+    if (!(count >= 1 && count <= SAR_MAX_CHANNEL_COUNT)) {
+        LOG(ERROR) << "Ignoring endpoint " << poId->second.get<std::string>()
+            << ": its channel count must be from 1 to "
+            << SAR_MAX_CHANNEL_COUNT << ".";
+        return false;
+    }
+
     id = poId->second.get<std::string>();
     description = UTF8ToWide(poDescription->second.get<std::string>());
-    channelCount = (int)poChannelCount->second.get<double>();
+    channelCount = (int)count;
 
     if (poAttachPhysical != obj.end() && poAttachPhysical->second.is<bool>()) {
         attachPhysical = poAttachPhysical->second.get<bool>();

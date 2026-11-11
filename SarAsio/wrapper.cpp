@@ -45,8 +45,11 @@ AsioBool SarAsioWrapper::init(void *sysHandle)
     _userTickWithTime = nullptr;
     _hwnd = (HWND)sysHandle;
 
+    // A hardware interface that didn't open keeps its place in the
+    // configuration. It may only be unplugged or in use, and clearing it here
+    // made the control panel save the empty selection.
     if (!initInnerDriver()) {
-        _config.driverClsid = "";
+        LOG(INFO) << "Running without a hardware interface.";
     }
 
     initVirtualChannels();
@@ -365,6 +368,9 @@ AsioStatus SarAsioWrapper::createBuffers(
             _fakeBuffers.push_back(infos[i].asioBuffers[1]);
         }
 
+        // Nothing ticks without a hardware interface, but controlPanel needs
+        // this one to ask the host for a reset once an interface is chosen.
+        _callbacks.asioMessage = callbacks->asioMessage;
         return AsioStatus::OK;
     }
 
@@ -523,6 +529,7 @@ AsioStatus SarAsioWrapper::disposeBuffers()
         _fakeBuffers.clear();
         _isFakeChannelStarted[0] = AsioBool::False;
         _isFakeChannelStarted[1] = AsioBool::False;
+        _callbacks = {};
         return AsioStatus::OK;
     }
 

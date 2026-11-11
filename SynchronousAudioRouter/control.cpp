@@ -373,12 +373,17 @@ retry:
         }
 
 out:
+        // Release a failed endpoint before taking the mutex again. Deleting
+        // it takes the KS device mutex, and KS requests take that one first
+        // and this one second.
+        if (!NT_SUCCESS(status)) {
+            SarReleaseEndpoint(endpoint);
+        }
+
         ExAcquireFastMutex(&controlContext->mutex);
 
         if (NT_SUCCESS(status)) {
             InsertTailList(&controlContext->endpointList, &endpoint->listEntry);
-        } else {
-            SarReleaseEndpoint(endpoint);
         }
 
         pendingIrp->IoStatus.Status = status;
