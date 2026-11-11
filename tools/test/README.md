@@ -134,8 +134,46 @@ streams through one endpoint pair. Driver Verifier checks a driver's pool
 allocations when it unloads and bugchecks on any that are left, so with
 Verifier on this is where memory leaked by the earlier scenarios shows.
 
-`Invoke-SarTest.ps1 -Scenarios` selects any of `issues`, `matrix`, `race`,
-`kill`, `unload` and `browser`.
+`conformance` sends the control device every request of the driver
+specification's appendix A directly, without SarAsio: each refusal with its
+status (short and misplaced buffers, pointers into read-only, inaccessible
+and kernel memory, values out of range, requests out of order), the layout
+arithmetic, the register record and the notification events, and a stream on
+a section whose audio area is not a multiple of 64 KiB, which SarAsio never
+asks for. `-LegacyDriver` makes it expect what releases up to 0.13 did where
+the current driver deliberately differs (specification, section 13).
+
+`formats` streams at sample rates, ASIO periods and channel counts the other
+scenarios never use (44.1 to 192 kHz, 64 to 256 frames, 4, 8 and 32
+channels), and with 64 endpoints. SarAsio refuses a period longer than the
+audio engine's 10 ms, so nothing longer is tried.
+
+`fuzz` sends the driver malformed and badly ordered control and kernel
+streaming requests from several threads for `-FuzzSeconds`, as a user without
+administrator rights, while endpoints come and go underneath. It passes if no
+request is left hanging; `run-after-fuzz` then checks the driver still works.
+Its log names the seed, and `-FuzzSeed` repeats one. It runs before
+`unload`, so that memory its requests made the driver leak shows there.
+
+`device-disable-in-use` asks Plug and Play to disable the SAR device while a
+host and its clients are streaming. Windows refuses to remove a device that
+has a handle open, so the device is expected to stay; the scenario records
+which way it went and requires that nothing hangs and that the driver works
+afterwards (`run-after-device-disable`).
+
+`-ScenarioToolsDir` runs every scenario with another build of the tools after
+the driver is installed: the 32-bit builds, for a 32-bit host and 32-bit
+clients on the 64-bit driver.
+
+`-SurviveOnly` is for runs under Driver Verifier's low resources simulation,
+which fails the driver's allocations at random: scenarios that fail are
+recorded as tolerated, and only a hang (or a bugcheck) fails the run.
+`-StartAfterUptimeMinutes` holds the scenarios back until the simulation has
+started.
+
+`Invoke-SarTest.ps1 -Scenarios` selects any of `issues`, `conformance`,
+`matrix`, `race`, `kill`, `formats`, `fuzz`, `unload`, `device` and
+`browser`.
 
 ## Commands
 
@@ -152,6 +190,8 @@ SarTest no-interface
 SarTest endpoint-names
 SarTest meter [--duration S] [--process <name.exe>] [--min-peak P]
 SarTest watch [--duration S] [--stop-file <path>] [--poll MS] [--probe MS]
+SarTest conformance [--legacy-quirks] [--registry-filter]
+SarTest fuzz [--seconds S] [--seed N] [--restricted]
 ```
 
 `install` creates the SAR software device node if needed, installs the

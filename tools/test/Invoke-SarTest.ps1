@@ -34,13 +34,36 @@ param(
     [int]$TimeoutSeconds = 600,
     [switch]$SkipInstall,
     [switch]$SkipKillTest,
-    # Any of issues, matrix, race, kill, unload, browser. Installation always
-    # runs.
-    [string[]]$Scenarios = @('issues', 'matrix', 'race', 'kill', 'unload', 'browser'),
+    # Any of issues, conformance, matrix, race, kill, formats, fuzz, unload,
+    # device, browser. Installation always runs.
+    [string[]]$Scenarios = @('issues', 'conformance', 'matrix', 'race', 'kill', 'formats', 'fuzz', 'unload', 'device', 'browser'),
     [int]$RaceCycles = 10,
     # Extra idle time between the race and the kill scenario, on top of
     # waiting for the endpoint builder to go idle (diagnostics).
-    [int]$PostRaceDelaySeconds = 0
+    [int]$PostRaceDelaySeconds = 0,
+    # For runs under fault injection (Driver Verifier's low resources
+    # simulation fails the driver's allocations at random): a scenario that
+    # fails is recorded as "tolerated" and does not fail the run. A hang still
+    # does, and a bugcheck ends the run whatever this says.
+    [switch]$SurviveOnly,
+    # Wait after installation until the machine has been up this long before
+    # the first scenario. Fault injection starts a set number of minutes
+    # after boot, so that the driver can be installed without it.
+    [int]$StartAfterUptimeMinutes = 0,
+    # The driver under test is the C++ driver of releases up to 0.13: where
+    # the current driver deliberately differs (section 13 of the driver
+    # specification), expect the old behaviour.
+    [switch]$LegacyDriver,
+    # How long the fuzz scenario sends malformed requests, and its seed (a
+    # new one each run when 0; the scenario's log and results name it).
+    [int]$FuzzSeconds = 60,
+    [long]$FuzzSeed = 0,
+    # A directory with another build of SarTest.exe, SarAsio.dll and
+    # SarTestClock.dll to run every scenario with, once the ones in -ToolsDir
+    # have installed the driver: the 32-bit builds, to put a 32-bit host and
+    # 32-bit clients on the 64-bit driver. (Only a 64-bit program can install
+    # a driver on 64-bit Windows.)
+    [string]$ScenarioToolsDir
 )
 
 $ErrorActionPreference = 'Stop'
@@ -48,9 +71,51 @@ $ErrorActionPreference = 'Stop'
 # Any terminating error ends up in the log with its location, and the
 # script exits non-zero instead of letting the exception escape the caller's
 # output redirection.
+# Windows' own sounds (a device connecting, a notification) play on the
+# default playback endpoint, which is a SAR endpoint whenever one exists. The
+# loopback check then hears them as frames that are not the test signal:
+# always the same run lengths, and only bits 8 and up of each sample
+# disturbed, since the sounds are 16-bit. The user's sound scheme is emptied
+# for the run and put back afterwards.
+$script:soundEvents = @()
+function Disable-SystemSounds {
+    $apps = Get-Item 'HKCU:\AppEvents\Schemes\Apps' -ErrorAction SilentlyContinue
+    if (-not $apps) { return }
+    foreach ($appName in $apps.GetSubKeyNames()) {
+        $app = $apps.OpenSubKey($appName)
+        foreach ($eventName in $app.GetSubKeyNames()) {
+            $current = $app.OpenSubKey("$eventName\.Current", $true)
+            if (-not $current) { continue }
+            $value = $current.GetValue('', $null, 'DoNotExpandEnvironmentNames')
+            if ($value) {
+                $script:soundEvents += [pscustomobject]@{
+                    key = "$appName\$eventName\.Current"; value = $value; kind = $current.GetValueKind('')
+                }
+                $current.SetValue('', '', 'String')
+            }
+            $current.Close()
+        }
+        $app.Close()
+    }
+    Write-Host "==> Silenced $($script:soundEvents.Count) Windows sound events for the run"
+}
+
+function Restore-SystemSounds {
+    $apps = Get-Item 'HKCU:\AppEvents\Schemes\Apps' -ErrorAction SilentlyContinue
+    foreach ($event in $script:soundEvents) {
+        $current = if ($apps) { $apps.OpenSubKey($event.key, $true) }
+        if ($current) {
+            $current.SetValue('', $event.value, $event.kind)
+            $current.Close()
+        }
+    }
+    $script:soundEvents = @()
+}
+
 trap {
     Write-Host "FATAL: $_"
     Write-Host $_.ScriptStackTrace
+    Restore-SystemSounds
     exit 1
 }
 
@@ -63,7 +128,7 @@ if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administra
 # A misspelled group would otherwise be skipped without a word, and the run
 # would pass having tested nothing. Accept "a,b" as one argument too, which
 # is how the list arrives through powershell -File.
-$knownScenarios = 'issues', 'matrix', 'race', 'kill', 'unload', 'browser'
+$knownScenarios = 'issues', 'conformance', 'matrix', 'race', 'kill', 'formats', 'fuzz', 'unload', 'device', 'browser'
 $Scenarios = @($Scenarios | ForEach-Object { $_ -split ',' } |
     ForEach-Object { $_.Trim() } | Where-Object { $_ })
 $unknownScenarios = @($Scenarios | Where-Object { $knownScenarios -notcontains $_ })
@@ -424,6 +489,8 @@ function Wait-EndpointBuilderIdle {
     return [math]::Round(((Get-Date) - $started).TotalSeconds, 1)
 }
 
+Disable-SystemSounds
+
 # Windows Server images ship with the audio stack disabled.
 foreach ($service in 'AudioEndpointBuilder', 'Audiosrv') {
     try {
@@ -456,6 +523,30 @@ if (-not $SkipInstall) {
     # Still make sure the clock is registered and the configuration is ours.
     $summary.scenarios += Invoke-Scenario 'install' @('install', '--clock', "`"$clock`"",
         '--endpoints', $EndpointCounts[0], '--channels', $Channels)
+}
+
+if ($ScenarioToolsDir) {
+    $sarTest = Join-Path $ScenarioToolsDir 'SarTest.exe'
+    $sarAsio = Join-Path $ScenarioToolsDir 'SarAsio.dll'
+    $clock = Join-Path $ScenarioToolsDir 'SarTestClock.dll'
+    foreach ($required in $sarTest, $sarAsio, $clock) {
+        if (-not (Test-Path $required)) { throw "Missing: $required" }
+    }
+    $summary.scenarioTools = $ScenarioToolsDir
+    # Register this build's clock (a 32-bit build registers in the 32-bit
+    # view of the registry) and write the configuration again.
+    $summary.scenarios += Invoke-Scenario 'install-scenario-tools' @('install', '--clock', "`"$clock`"",
+        '--endpoints', $EndpointCounts[0], '--channels', $Channels)
+}
+
+if ($StartAfterUptimeMinutes -gt 0) {
+    $boot = (Get-CimInstance Win32_OperatingSystem).LastBootUpTime
+    $wait = [math]::Ceiling(($boot.AddMinutes($StartAfterUptimeMinutes) - (Get-Date)).TotalSeconds)
+    if ($wait -gt 0) {
+        Write-Host "==> Waiting $wait s for the machine to have been up $StartAfterUptimeMinutes minutes"
+        Start-Sleep -Seconds $wait
+    }
+    $summary.startedScenariosAtUptimeMinutes = [math]::Round(((Get-Date) - $boot).TotalMinutes, 1)
 }
 
 $common = @('--sarasio', "`"$sarAsio`"", '--channels', $Channels)
@@ -492,6 +583,15 @@ if ($Scenarios -contains 'issues') {
     # registered, the harness's own WASAPI client also goes through SarAsio's
     # device enumerator wrapper.
     $summary.scenarios += Invoke-AppRoutingScenario
+}
+
+if ($Scenarios -contains 'conformance') {
+    # Every request of the control interface, the refused ones included, sent
+    # to the driver directly; then a stream on a section whose audio area is
+    # not a multiple of 64 KiB, which SarAsio never asks for.
+    $conformance = @('conformance', '--registry-filter')
+    if ($LegacyDriver) { $conformance += '--legacy-quirks' }
+    $summary.scenarios += Invoke-Scenario 'conformance' $conformance -Timeout 300
 }
 
 if ($Scenarios -contains 'matrix') {
@@ -627,6 +727,53 @@ if ($watchProc) {
     if (-not $watchProc.WaitForExit(30000)) { try { $watchProc.Kill() } catch { } }
 }
 
+if ($Scenarios -contains 'formats') {
+    # The formats and sizes the other scenarios never use. Each one changes
+    # the layout the host asks the driver for, and with it the driver's
+    # buffer arithmetic: sample rates other than 48 and 96 kHz, ASIO periods
+    # shorter than 480 frames, endpoints wider than stereo up to the limit of
+    # 32 channels, and twice as many endpoints as the matrix goes to.
+    $fmt = @('run', '--endpoints', 1, '--iterations', 1, '--duration', 3, '--prefix', 'SarTestFormats',
+        '--sarasio', "`"$sarAsio`"")
+    try {
+        foreach ($rate in 44100, 88200, 176400, 192000) {
+            # SarAsio refuses an ASIO buffer longer than the audio engine's
+            # 10 ms period, so the clock's period follows the rate.
+            $env:SAR_TEST_CLOCK_FRAMES = "$([int]($rate / 100))"
+            $summary.scenarios += Invoke-Scenario "rate-$rate" (
+                $fmt + @('--rate', $rate, '--channels', 2, '--expect-format'))
+        }
+        foreach ($frames in 64, 128, 256) {
+            $env:SAR_TEST_CLOCK_FRAMES = "$frames"
+            $summary.scenarios += Invoke-Scenario "period-$frames" ($fmt + @('--rate', 48000, '--channels', 2))
+        }
+    } finally {
+        Remove-Item Env:SAR_TEST_CLOCK_FRAMES -ErrorAction SilentlyContinue
+    }
+    foreach ($wide in 4, 8, 32) {
+        $summary.scenarios += Invoke-Scenario "channels-$wide" ($fmt + @('--rate', 48000, '--channels', $wide))
+    }
+    $summary.scenarios += Invoke-Scenario 'endpoints-32x2' (
+        @('run', '--endpoints', 32, '--iterations', 1, '--duration', $Duration) + $common)
+    $null = Wait-EndpointBuilderIdle -TimeoutSeconds 180
+}
+
+if ($Scenarios -contains 'fuzz') {
+    # Malformed control and kernel streaming requests from several threads,
+    # sent as a user without administrator rights, while endpoints come and
+    # go. It passes if no request is left hanging; a bugcheck ends the run.
+    # It runs before the unload scenario, so that memory its requests leaked
+    # in the driver shows there.
+    $fuzz = @('fuzz', '--seconds', $FuzzSeconds, '--restricted')
+    if ($FuzzSeed -ne 0) { $fuzz += @('--seed', $FuzzSeed) }
+    $summary.scenarios += Invoke-Scenario 'fuzz' $fuzz -Timeout ($FuzzSeconds + 300)
+    # It leaves Windows' endpoint builder with a few hundred endpoints to
+    # forget; the driver has to work once that has settled.
+    $null = Wait-EndpointBuilderIdle -TimeoutSeconds 180
+    $summary.scenarios += Invoke-Scenario 'run-after-fuzz' (
+        @('run', '--endpoints', $EndpointCounts[0], '--iterations', 1, '--duration', $Duration) + $common)
+}
+
 # Stops the driver after the scenarios before it have used it: disables the
 # SAR device, waits for the driver to unload, enables the device again and
 # waits for the driver to come back. Driver Verifier checks a driver's pool
@@ -703,6 +850,120 @@ if ($Scenarios -contains 'unload') {
         @('run', '--endpoints', $EndpointCounts[0], '--iterations', 1, '--duration', $Duration) + $common)
 }
 
+# Asks Plug and Play to disable the SAR device while a host has endpoints and
+# clients are streaming through them, which takes the driver through the
+# query-remove path with everything open. Windows refuses to remove a device
+# that has a handle open on it, so the expected course is: the audio engine
+# lets go of its streams, the host's control handle vetoes the removal, and
+# the device stays. Whichever way it goes is recorded; what is required is
+# that nothing crashes or hangs and that, once everything is closed and the
+# device enabled again, the driver works (the scenario that follows).
+function Invoke-DeviceDisableScenario {
+    param([string]$Name)
+
+    $record = [ordered]@{ name = $Name }
+    $pairs = 2
+    $hardwareId = 'SW\{0BCFFA5C-E754-48CF-A783-A64C0DC0BB2C}'
+    $driverState = {
+        $driver = Get-CimInstance Win32_SystemDriver -Filter "Name='SynchronousAudioRouter'" `
+            -ErrorAction SilentlyContinue
+        if ($driver) { $driver.State } else { 'absent' }
+    }
+    $deviceState = {
+        $d = Get-PnpDevice -Class MEDIA -ErrorAction SilentlyContinue |
+            Where-Object { $_.HardwareID -contains $hardwareId } | Select-Object -First 1
+        if ($d) { "$($d.Status)/$($d.Problem)" } else { 'absent' }
+    }
+
+    $hostLog = Join-Path $ResultsDir "$Name-host.log"
+    $hostJson = Join-Path $ResultsDir "$Name-host.json"
+    Write-Host "==> $Name : starting a host with $pairs endpoint pairs and streaming through them"
+    $hostProc = Start-Process -FilePath $sarTest -NoNewWindow -PassThru -RedirectStandardOutput $hostLog `
+        -ArgumentList (@('host', '--endpoints', $pairs, '--duration', 120, '--results', "`"$hostJson`"") + $common)
+    $null = $hostProc.Handle
+    Start-Sleep -Seconds 5
+
+    $wasapiLog = Join-Path $ResultsDir "$Name-wasapi.log"
+    $wasapiJson = Join-Path $ResultsDir "$Name-wasapi.json"
+    Remove-Item $wasapiJson -ErrorAction SilentlyContinue
+    $wasapiProc = Start-Process -FilePath $sarTest -NoNewWindow -PassThru -RedirectStandardOutput $wasapiLog `
+        -ArgumentList @('wasapi', '--endpoints', $pairs, '--channels', $Channels, '--duration', 20,
+            '--expect-invalidation', '--results', "`"$wasapiJson`"")
+    $null = $wasapiProc.Handle
+    Start-Sleep -Seconds 5
+
+    $device = Get-PnpDevice -Class MEDIA -PresentOnly -ErrorAction SilentlyContinue |
+        Where-Object { $_.HardwareID -contains $hardwareId } | Select-Object -First 1
+    $record.hostAliveBefore = -not $hostProc.HasExited
+    $record.clientAliveBefore = -not $wasapiProc.HasExited
+    $record.driverBefore = & $driverState
+
+    if (-not $device) {
+        $record.error = 'no SAR device is present'
+    } else {
+        Write-Host "==> $Name : disabling the SAR device with the host and its clients running"
+        $started = Get-Date
+        try {
+            Disable-PnpDevice -InstanceId $device.InstanceId -Confirm:$false -ErrorAction Stop
+            $record.disable = 'returned'
+        } catch {
+            $record.disable = "refused: $_"
+        }
+        $record.disableSeconds = [math]::Round(((Get-Date) - $started).TotalSeconds, 1)
+        Start-Sleep -Seconds 5
+        $record.deviceAfterDisable = & $deviceState
+        $record.driverAfterDisable = & $driverState
+        $record.hostAliveAfterDisable = -not $hostProc.HasExited
+        $record.clientAliveAfterDisable = -not $wasapiProc.HasExited
+    }
+
+    # Close everything: the clients first, then the host.
+    $clientExited = $wasapiProc.WaitForExit(60000)
+    if (-not $clientExited) { try { $wasapiProc.Kill() } catch { } }
+    $record.clientExitedByItself = $clientExited
+    if ($clientExited) { $record.clientExitCode = $wasapiProc.ExitCode }
+    if (-not $hostProc.HasExited) { try { Stop-Process -Id $hostProc.Id -Force } catch { } }
+    $hostExited = $hostProc.WaitForExit(60000)
+    Start-Sleep -Seconds 3
+    $record.deviceAfterClose = & $deviceState
+    $record.driverAfterClose = & $driverState
+    if (Test-Path $wasapiJson) {
+        try {
+            $streams = @((Get-Content $wasapiJson -Raw | ConvertFrom-Json).wasapi.streams)
+            $record.streams = $streams.Count
+            $record.streamsStarted = @($streams | Where-Object started).Count
+            $record.streamsInvalidated = @($streams | Where-Object deviceInvalidated).Count
+        } catch { }
+    }
+
+    if ($device) {
+        try {
+            Enable-PnpDevice -InstanceId $device.InstanceId -Confirm:$false -ErrorAction Stop
+        } catch {
+            $record.enableError = "$_"
+        }
+        $deadline = (Get-Date).AddSeconds(30)
+        while ((Get-Date) -lt $deadline -and (& $driverState) -ne 'Running') { Start-Sleep -Milliseconds 500 }
+        $record.deviceFinal = & $deviceState
+        $record.driverFinal = & $driverState
+        if (-not $hostExited) {
+            $record.error = 'the host process did not exit within 60 s of being killed'
+        } elseif ($record.driverFinal -ne 'Running' -or $record.deviceFinal -notlike 'OK/*') {
+            $record.error = "the device did not come back (driver $($record.driverFinal), device $($record.deviceFinal))"
+        }
+    }
+
+    $record.outcome = if ($record.error) { 'failed' } else { 'passed' }
+    Write-Host "    -> $($record.outcome)$(if ($record.error) { ': ' + $record.error })"
+    return $record
+}
+
+if ($Scenarios -contains 'device') {
+    $summary.scenarios += Invoke-DeviceDisableScenario 'device-disable-in-use'
+    $summary.scenarios += Invoke-Scenario 'run-after-device-disable' (
+        @('run', '--endpoints', $EndpointCounts[0], '--iterations', 1, '--duration', $Duration) + $common)
+}
+
 if ($Scenarios -contains 'browser') {
     # With application routing on, the driver points the audio device
     # enumerator's COM registration at SarAsio.dll for every process of the
@@ -720,9 +981,20 @@ if (Test-Path $sarLogs) {
     Copy-Item (Join-Path $sarLogs '*') $dest -Force -ErrorAction SilentlyContinue
 }
 
+Restore-SystemSounds
+
 $summary.finished = (Get-Date).ToString('o')
+if ($SurviveOnly) {
+    $summary.surviveOnly = $true
+    foreach ($scenario in $summary.scenarios) {
+        if ($scenario.outcome -eq 'failed') {
+            $scenario.strictOutcome = 'failed'
+            $scenario.outcome = 'tolerated'
+        }
+    }
+}
 $outcomes = $summary.scenarios | ForEach-Object { $_.outcome }
-$summary.passed = -not ($outcomes | Where-Object { $_ -ne 'passed' -and $_ -ne 'skipped' })
+$summary.passed = -not ($outcomes | Where-Object { 'passed', 'skipped', 'tolerated' -notcontains $_ })
 $summary | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $ResultsDir 'summary.json')
 
 Write-Host ''
