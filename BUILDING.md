@@ -46,10 +46,11 @@ the MSI's product version. A `v*` tag has to match `VERSION` (`v0.14.0`, or
 ## Local build
 
 The driver is a Rust workspace under `driver/` ([driver/README.md](driver/README.md)).
-It builds on a Windows host with Visual Studio 2022, the WDK, a Rust toolchain
-for `x86_64-pc-windows-msvc`, and a `libclang.dll` for bindgen (Visual
-Studio's "C++ Clang tools" component, or an LLVM install with `LIBCLANG_PATH`
-pointing at it).
+It builds on a Windows host with Visual Studio 2022, the WDK, rustup, and a
+`libclang.dll` for bindgen (Visual Studio's "C++ Clang tools" component, or an
+LLVM install with `LIBCLANG_PATH` pointing at it). The compiler version is
+pinned in `driver/rust-toolchain.toml`; rustup installs it on the first cargo
+command, beside your default toolchain.
 
 ```powershell
 # One-time: install the WDK + its VS extension (needs VS2022 already present)
@@ -174,9 +175,6 @@ These are tracked here so nothing is silently missing:
   endpoint is created and used by later requests, and nothing read through it
   is used as an address. Revisit if a table indexed by a caller's value is
   ever added.
-- **A pinned Rust toolchain.** CI builds with whatever stable Rust the runner
-  image carries, and the Microsoft WDK crates are pinned a release behind
-  (`driver/Cargo.toml` says why).
 - **EWDK alternative.** For maximum reproducibility you can swap the
   `Install-WdkBuildEnv.ps1` step for a pinned **Enterprise WDK** ISO (a fully
   self-contained, version-locked build environment). That removes the dependency

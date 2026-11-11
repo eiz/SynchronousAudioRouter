@@ -80,12 +80,22 @@ jobs:
           "numeric=$numeric" | Out-File $env:GITHUB_OUTPUT -Append
           Write-Host "version: $desc  (DriverVer numeric: $numeric)"
 
+      - name: Install the pinned Rust toolchain
+        shell: pwsh
+        working-directory: driver
+        run: |
+          # driver/rust-toolchain.toml names the compiler. With no arguments
+          # rustup installs the toolchain that file selects.
+          rustup toolchain install
+          if ($LASTEXITCODE -ne 0) { throw "rustup toolchain install failed (exit $LASTEXITCODE)" }
+          rustup show active-toolchain
+          rustc --version
+          cargo --version
+
       - name: Test the driver's kernel-independent logic
         shell: pwsh
         working-directory: driver
         run: |
-          rustc --version
-          cargo --version
           cargo test --locked
           if ($LASTEXITCODE -ne 0) { throw "cargo test failed (exit $LASTEXITCODE)" }
 

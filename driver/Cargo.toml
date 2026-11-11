@@ -19,7 +19,7 @@ default-members = ["crates/ntstatus", "crates/sar-core"]
 [workspace.package]
 version = "0.14.0"
 edition = "2021"
-rust-version = "1.85"
+rust-version = "1.91"
 publish = false
 license = "MIT"
 
@@ -28,12 +28,16 @@ license = "MIT"
 driver-type = "WDM"
 
 [workspace.dependencies]
-# Pinned: wdk-build 0.6.0 needs rustc 1.91, the Windows-side toolchain on the
-# build machine is 1.88 and may not be upgraded.
-wdk-sys = "=0.5.1"
-wdk-build = "=0.5.1"
-wdk-alloc = "=0.4.1"
-bindgen = "0.71.1"
+# Microsoft's driver crates, pinned exactly: they generate the kernel
+# bindings, so a new release is a change to review and retest, not to pick up
+# silently. wdk-build 0.6 needs rustc 1.91; rust-toolchain.toml pins the
+# compiler.
+wdk-sys = "=0.5.2"
+wdk-build = "=0.6.0"
+wdk-alloc = "=0.4.2"
+# Must be the bindgen release wdk-build uses: ks-sys configures its builder
+# through wdk-build's extension of bindgen's `Builder`.
+bindgen = "0.73"
 cc = "1"
 ntstatus = { path = "crates/ntstatus" }
 sar-core = { path = "crates/sar-core" }

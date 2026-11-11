@@ -31,9 +31,10 @@ to user memory, which Rust cannot express.
 ## Building
 
 The kernel crates build on a Windows host only (Microsoft's `wdk-sys` needs
-one), with the Windows Driver Kit, a Rust toolchain for
-`x86_64-pc-windows-msvc`, and a `libclang.dll` for bindgen (Visual Studio's
-"C++ Clang tools" component provides one; otherwise set `LIBCLANG_PATH`).
+one), with the Windows Driver Kit, rustup, and a `libclang.dll` for bindgen
+(Visual Studio's "C++ Clang tools" component provides one; otherwise set
+`LIBCLANG_PATH`). `rust-toolchain.toml` pins the compiler; rustup installs
+it on first use. Microsoft's driver crates are pinned exactly in `Cargo.toml`.
 
 On Windows, from this directory:
 

@@ -40,6 +40,9 @@ Direct dependencies; all MIT OR Apache-2.0.
 Their transitive dependencies are whatever `Cargo.lock` records; none is
 linked into the driver except `wdk-sys`, `wdk-alloc` and `wdk-macros`.
 
+These are the versions the driver was written against. `Cargo.toml` has the
+current ones.
+
 Read from the registry sources of these crates (to use them correctly, no
 code copied except as noted):
 
