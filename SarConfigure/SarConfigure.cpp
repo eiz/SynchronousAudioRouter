@@ -59,89 +59,21 @@ static int openConfigurationDialog(Sar::AsioDriver& driver) {
     }
 }
 
-static bool broadcastPinFormatChange() {
-    HDEVINFO devinfo;
-    SP_DEVICE_INTERFACE_DATA interfaceData;
-    PSP_DEVICE_INTERFACE_DETAIL_DATA interfaceDetail;
-    DWORD requiredSize;
-    HANDLE _device;
-    DWORD dummy;
-
-    interfaceData.cbSize = sizeof(SP_DEVICE_INTERFACE_DATA);
-    devinfo = SetupDiGetClassDevs(
-        &GUID_DEVINTERFACE_SYNCHRONOUSAUDIOROUTER, nullptr, nullptr,
-        DIGCF_DEVICEINTERFACE | DIGCF_PRESENT);
-
-    if (devinfo == INVALID_HANDLE_VALUE) {
-        return false;
-    }
-
-    if (!SetupDiEnumDeviceInterfaces(devinfo, NULL,
-        &GUID_DEVINTERFACE_SYNCHRONOUSAUDIOROUTER, 0, &interfaceData)) {
-
-        return false;
-    }
-
-    SetLastError(0);
-    SetupDiGetDeviceInterfaceDetail(
-        devinfo, &interfaceData, nullptr, 0, &requiredSize, nullptr);
-
-    if (GetLastError() != ERROR_INSUFFICIENT_BUFFER) {
-        return false;
-    }
-
-    interfaceDetail = (PSP_DEVICE_INTERFACE_DETAIL_DATA)malloc(requiredSize);
-    interfaceDetail->cbSize = sizeof(SP_DEVICE_INTERFACE_DETAIL_DATA);
-
-    if (!SetupDiGetDeviceInterfaceDetail(
-        devinfo, &interfaceData, interfaceDetail,
-        requiredSize, nullptr, nullptr)) {
-
-        free(interfaceDetail);
-        return false;
-    }
-
-    _device = CreateFile(interfaceDetail->DevicePath,
-        GENERIC_ALL, 0, nullptr, OPEN_EXISTING,
-        FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OVERLAPPED, nullptr);
-
-    if (_device == INVALID_HANDLE_VALUE) {
-        free(interfaceDetail);
-        return false;
-    }
-
-    free(interfaceDetail);
-
-    DeviceIoControl(_device, SAR_SEND_FORMAT_CHANGE_EVENT,
-        nullptr, 0, nullptr, 0, &dummy, nullptr);
-    printf("Sent SAR_SEND_FORMAT_CHANGE_EVENT\n");
-
-    CloseHandle(_device);
-
-    return true;
-}
-
 int main(int argc, char *argv[])
 {
+    CoInitialize(NULL);
 
-    if (argc >= 2 && !strcmp(argv[1], "-u")) {
-        broadcastPinFormatChange();
-    }
-    else {
-        CoInitialize(NULL);
+    std::vector<Sar::AsioDriver> asioDrivers = Sar::InstalledAsioDrivers();
 
-        std::vector<Sar::AsioDriver> asioDrivers = Sar::InstalledAsioDrivers();
-
-        printf("\n");
-        for (size_t i = 0; i < asioDrivers.size(); i++) {
-            printf("Checking driver: %s == %s\n", asioDrivers[i].clsid.c_str(), CLSID_STR_SynchronousAudioRouter);
-            if (asioDrivers[i].clsid == CLSID_STR_SynchronousAudioRouter) {
-                Sar::AsioDriver& driver = asioDrivers[i];
-                printf("Found SAR ASIO driver: %s\n", driver.name.c_str());
-                return openConfigurationDialog(driver);
-            }
+    printf("\n");
+    for (size_t i = 0; i < asioDrivers.size(); i++) {
+        printf("Checking driver: %s == %s\n", asioDrivers[i].clsid.c_str(), CLSID_STR_SynchronousAudioRouter);
+        if (asioDrivers[i].clsid == CLSID_STR_SynchronousAudioRouter) {
+            Sar::AsioDriver& driver = asioDrivers[i];
+            printf("Found SAR ASIO driver: %s\n", driver.name.c_str());
+            return openConfigurationDialog(driver);
         }
-
-        CoUninitialize();
     }
+
+    CoUninitialize();
 }

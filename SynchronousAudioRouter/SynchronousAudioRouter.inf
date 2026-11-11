@@ -62,6 +62,6 @@ SynchronousAudioRouter.sys=1
 [Strings]
 ServiceName="SynchronousAudioRouter"
 ServiceDesc="Routes audio between applications."
-Provider="Many Worlds"
+Provider="Itty Bitty Binaries, Inc."
 DeviceName="Synchronous Audio Router"
 DiskName="SynchronousAudioRouter Source Disk"

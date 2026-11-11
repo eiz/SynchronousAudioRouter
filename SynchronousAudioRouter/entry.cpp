@@ -697,9 +697,6 @@ NTSTATUS SarIrpDeviceControl(PDEVICE_OBJECT deviceObject, PIRP irp)
             KeLeaveCriticalRegion();
             break;
         }
-        case SAR_SEND_FORMAT_CHANGE_EVENT:
-            ntStatus = SarSendFormatChangeEvent(deviceObject, extension);
-            break;
         default:
             SAR_ERROR("Unknown ioctl %lu", ioControlCode);
             break;
@@ -718,7 +715,6 @@ NTSTATUS SarIrpDeviceControl(PDEVICE_OBJECT deviceObject, PIRP irp)
 VOID SarUnload(PDRIVER_OBJECT driverObject)
 {
     SAR_INFO("SAR is unloading");
-    KIRQL irql;
     SarDriverExtension *extension =
         (SarDriverExtension *)IoGetDriverObjectExtension(
             driverObject, DriverEntry);
@@ -731,12 +727,15 @@ VOID SarUnload(PDRIVER_OBJECT driverObject)
         CmUnRegisterCallback(extension->filterCookie);
     }
 
-    irql = ExAcquireSpinLockExclusive(&extension->registryRedirectLock);
+    KeEnterCriticalRegion();
+    ExAcquireResourceExclusiveLite(&extension->registryRedirectLock, TRUE);
     SarClearStringTable(
         &extension->registryRedirectTableWow64, SarDeleteRegistryRedirect);
     SarClearStringTable(
         &extension->registryRedirectTable, SarDeleteRegistryRedirect);
-    ExReleaseSpinLockExclusive(&extension->registryRedirectLock, irql);
+    ExReleaseResourceLite(&extension->registryRedirectLock);
+    KeLeaveCriticalRegion();
+    ExDeleteResourceLite(&extension->registryRedirectLock);
 
     if (extension->filterUser) {
         // Allocated by SeQueryInformationToken
@@ -744,8 +743,63 @@ VOID SarUnload(PDRIVER_OBJECT driverObject)
     }
 }
 
+// The buffer of a ProcessMitigationPolicy query: the policy to read, then
+// that policy's flags. It is what user mode's GetProcessMitigationPolicy
+// passes down. ntddk.h declares the information class, the policies and each
+// policy's flags, but not this wrapper around them.
+typedef struct SarProcessSignaturePolicyInformation
+{
+    PROCESS_MITIGATION_POLICY policy;
+    PROCESS_MITIGATION_BINARY_SIGNATURE_POLICY signature;
+} SarProcessSignaturePolicyInformation;
+
+// The kernel rejects a buffer of any other size, and a failed query is
+// treated as "not restricted".
+C_ASSERT(sizeof(SarProcessSignaturePolicyInformation) == 8);
+
+// Exported by the kernel and documented, but not declared by the headers
+// this driver includes.
+extern "C" NTSYSAPI NTSTATUS NTAPI ZwQueryInformationProcess(
+    _In_ HANDLE ProcessHandle,
+    _In_ PROCESSINFOCLASS ProcessInformationClass,
+    _Out_writes_bytes_(ProcessInformationLength) PVOID ProcessInformation,
+    _In_ ULONG ProcessInformationLength,
+    _Out_opt_ PULONG ReturnLength);
+
+// Whether the current process may only load images signed by Microsoft (or
+// the Store, or WHQL: MitigationOptIn allows all three). SarAsio.dll is none
+// of those.
+static BOOL SarCurrentProcessRequiresMicrosoftSignedImages()
+{
+    SarProcessSignaturePolicyInformation info = {};
+
+    info.policy = ProcessSignaturePolicy;
+
+    NTSTATUS status = ZwQueryInformationProcess(
+        ZwCurrentProcess(), ProcessMitigationPolicy,
+        &info, sizeof(info), nullptr);
+
+    if (!NT_SUCCESS(status)) {
+        return FALSE;
+    }
+
+    return info.signature.MicrosoftSignedOnly ||
+        info.signature.StoreSignedOnly ||
+        info.signature.MitigationOptIn;
+}
+
 BOOL SarFilterMatchesCurrentProcess(SarDriverExtension *extension)
 {
+    // Pointing a process that may only load Microsoft-signed images at
+    // SarAsio.dll makes Code Integrity refuse the load, so the audio classes
+    // can't be created there at all: Chromium's sandboxed audio service
+    // (Chrome, Edge, Discord) does this and then plays nothing. Leave such a
+    // process with the system's classes; it loses application routing but
+    // keeps its audio.
+    if (SarCurrentProcessRequiresMicrosoftSignedImages()) {
+        return FALSE;
+    }
+
     PTOKEN_USER tokenUser = nullptr;
     NTSTATUS status = SarCopyProcessUser(PsGetCurrentProcess(), &tokenUser);
 
@@ -768,9 +822,6 @@ BOOL SarFilterMatchesPath(
 {
     PRTL_AVL_TABLE table = &extension->registryRedirectTable;
     PVOID entry = nullptr;
-    KIRQL irql;
-    UNICODE_STRING nonpagedPath;
-    NTSTATUS status = STATUS_SUCCESS;
 
     if (!path) {
         return FALSE;
@@ -782,24 +833,20 @@ BOOL SarFilterMatchesPath(
     }
 #endif
 
-    // TODO: we get a path that's in paged memory from the configuration manager
-    // so we can't access it with IRQL raised to dispatch level by the spinlock.
-    // Probably better to just use an ERESOURCE or something here instead.
-    status = SarStringDuplicate(&nonpagedPath, path);
-
-    if (!NT_SUCCESS(status)) {
-        return FALSE;
-    }
-
-    irql = ExAcquireSpinLockShared(&extension->registryRedirectLock);
-    entry = SarGetStringTableEntry(table, &nonpagedPath);
+    // Stay at PASSIVE_LEVEL: the path from the configuration manager is in
+    // paged memory and the table's string comparison is pageable code. Under
+    // a spin lock this bugchecked (IRQL_NOT_LESS_OR_EQUAL) whenever that code
+    // was paged out.
+    KeEnterCriticalRegion();
+    ExAcquireResourceSharedLite(&extension->registryRedirectLock, TRUE);
+    entry = SarGetStringTableEntry(table, path);
 
     if (entry) {
         *redirectPath = *(PCUNICODE_STRING)entry;
     }
 
-    ExReleaseSpinLockShared(&extension->registryRedirectLock, irql);
-    SarStringFree(&nonpagedPath);
+    ExReleaseResourceLite(&extension->registryRedirectLock);
+    KeLeaveCriticalRegion();
     return entry != nullptr;
 }
 
@@ -1129,6 +1176,7 @@ extern "C" NTSTATUS DriverEntry(
 
     RtlZeroMemory(extension, sizeof(SarDriverExtension));
     ExInitializeFastMutex(&extension->mutex);
+    ExInitializeResourceLite(&extension->registryRedirectLock);
     SarInitializeTable(&extension->controlContextTable);
     SarInitializeStringTable(&extension->registryRedirectTableWow64);
     SarInitializeStringTable(&extension->registryRedirectTable);

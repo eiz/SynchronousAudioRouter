@@ -33,7 +33,7 @@ Discord server at [https://discord.gg/9rwFdMW](https://discord.gg/9rwFdMW).
 
 ## System Requirements
 
-* Windows 7 or later. If you are running a current version of Windows 10, Secure Boot is not supported.
+* Windows 10 or later. Secure Boot is not supported.
 * An audio interface which supports ASIO. If your hardware doesn't come with a
   native ASIO driver, you may be able to use ASIO4ALL instead.
 * Digital audio workstation software. SAR is mainly tested using [REAPER](http://www.reaper.fm/).
@@ -83,12 +83,6 @@ running and has started ASIO. They are automatically disconnected when the
 ASIO driver is closed. If you're using REAPER, make sure "Close audio device
 when stopped and application is inactive" in the Audio preferences is
 disabled.
-
-## Windows 7 Installation Note
-
-Make sure you have Windows update [KB3033929](https://technet.microsoft.com/en-us/library/security/3033929.aspx)
-installed prior to installing SAR, otherwise you will receive an error about
-an unsigned driver.
 
 ## Unsigned prereleased drivers note
 

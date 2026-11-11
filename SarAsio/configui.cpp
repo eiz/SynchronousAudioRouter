@@ -18,6 +18,7 @@
 #include "configui.h"
 #include "dllmain.h"
 #include "utility.h"
+#include "sar.h"
 
 using namespace Sar;
 
@@ -112,8 +113,11 @@ INT_PTR CALLBACK SimpleDialog::dialogProcStub(
     return 0;
 }
 
-EndpointsPropertySheetPage::EndpointsPropertySheetPage(DriverConfig& config)
-    : _config(config)
+EndpointsPropertySheetPage::EndpointsPropertySheetPage(
+    DriverConfig& config, IASIO *runningDriver,
+    const std::string& runningDriverClsid)
+    : _config(config), _runningDriver(runningDriver),
+      _runningDriverClsid(runningDriverClsid)
 {
     pszTemplate = MAKEINTRESOURCE(IDD_CONFIG_ENDPOINTS);
 
@@ -198,6 +202,14 @@ void EndpointsPropertySheetPage::onConfigureHardwareInterface()
 {
     for (auto& driver : _drivers) {
         if (driver.clsid == _config.driverClsid) {
+            // ASIO drivers expect a single instance per process, and some
+            // crash when a second one is created next to a running one. Use
+            // the instance the host already has when it is the selected one.
+            if (_runningDriver && driver.clsid == _runningDriverClsid) {
+                _runningDriver->controlPanel();
+                break;
+            }
+
             CComPtr<IASIO> asio;
 
             if (SUCCEEDED(driver.open(&asio))) {
@@ -225,9 +237,25 @@ void EndpointsPropertySheetPage::onAddEndpoint()
 {
     _epDialogConfig = EndpointConfig();
 
+    // Windows keeps what it knows about an endpoint (the name it shows, the
+    // user's settings) under its ID, so an ID must never be handed to a
+    // different endpoint: a deleted endpoint's ID given to a new one made
+    // Windows keep showing the deleted endpoint's name.
+    GUID guid;
+
+    if (SUCCEEDED(CoCreateGuid(&guid))) {
+        char id[40];
+
+        sprintf_s(id, "ep_%08lx%04hx%04hx%02x%02x%02x%02x%02x%02x%02x%02x",
+            guid.Data1, guid.Data2, guid.Data3,
+            guid.Data4[0], guid.Data4[1], guid.Data4[2], guid.Data4[3],
+            guid.Data4[4], guid.Data4[5], guid.Data4[6], guid.Data4[7]);
+        _epDialogConfig.id = id;
+    }
+
     int counter = 1;
 
-    do {
+    while (_epDialogConfig.id.empty()) {
         std::ostringstream os;
 
         os << "ep_" << counter;
@@ -237,7 +265,7 @@ void EndpointsPropertySheetPage::onAddEndpoint()
         } else {
             counter++;
         }
-    } while (_epDialogConfig.id.empty());
+    }
 
     auto result = DialogBoxParam(
         gDllModule,
@@ -363,6 +391,8 @@ void EndpointsPropertySheetPage::initEpDialogControls()
     _epDialogType = GetDlgItem(_epDialog, 1103);
     _epDialogChannelCount = GetDlgItem(_epDialog, 1105);
 
+    Edit_LimitText(_epDialogName, MAX_ENDPOINT_NAME_LENGTH);
+
     ComboBox_AddString(_epDialogType, L"Playback");
     ComboBox_AddString(_epDialogType, L"Recording");
     ComboBox_SetCurSel(_epDialogType,
@@ -375,7 +405,7 @@ void EndpointsPropertySheetPage::initEpDialogControls()
     Edit_SetText(_epDialogChannelCount, wos.str().c_str());
 }
 
-void EndpointsPropertySheetPage::updateEpDialogConfig()
+bool EndpointsPropertySheetPage::updateEpDialogConfig()
 {
     auto len = Edit_GetTextLength(_epDialogName);
     auto buf = new WCHAR[len + 1];
@@ -388,12 +418,28 @@ void EndpointsPropertySheetPage::updateEpDialogConfig()
     buf = new WCHAR[len + 1];
     Edit_GetText(_epDialogChannelCount, buf, len + 1);
 
-    auto countStr = TCHARToUTF8(buf);
+    WCHAR *end = nullptr;
+    long count = wcstol(buf, &end, 10);
+    bool valid = end != buf && *end == L'\0' &&
+        count >= 1 && count <= SAR_MAX_CHANNEL_COUNT;
 
     delete[] buf;
-    _epDialogConfig.channelCount = max(1, std::stoi(countStr));
+
+    if (!valid) {
+        // std::stoi threw on these and took the host down with it.
+        std::wostringstream message;
+
+        message << L"The channel count must be a number from 1 to "
+            << SAR_MAX_CHANNEL_COUNT << L".";
+        MessageBox(_epDialog, message.str().c_str(), TEXT("Error"),
+            MB_OK | MB_ICONERROR);
+        return false;
+    }
+
+    _epDialogConfig.channelCount = (int)count;
     _epDialogConfig.type = ComboBox_GetCurSel(_epDialogType) == 1 ?
         EndpointType::Recording : EndpointType::Playback;
+    return true;
 }
 
 INT_PTR EndpointsPropertySheetPage::epDialogProc(
@@ -408,7 +454,9 @@ INT_PTR EndpointsPropertySheetPage::epDialogProc(
         case WM_COMMAND:
             switch (LOWORD(wparam)) {
                 case IDOK:
-                    updateEpDialogConfig();
+                    if (!updateEpDialogConfig()) {
+                        break;
+                    }
 
                     // fall-through
                 case IDCANCEL:
@@ -856,10 +904,13 @@ void ApplicationConfigDialog::onBrowseClicked()
     }
 }
 
-ConfigurationPropertyDialog::ConfigurationPropertyDialog(DriverConfig& config)
+ConfigurationPropertyDialog::ConfigurationPropertyDialog(
+    DriverConfig& config, IASIO *runningDriver,
+    const std::string& runningDriverClsid)
     : _originalConfig(config),
       _newConfig(_originalConfig),
-      _endpoints(std::make_shared<EndpointsPropertySheetPage>(_newConfig)),
+      _endpoints(std::make_shared<EndpointsPropertySheetPage>(
+          _newConfig, runningDriver, runningDriverClsid)),
       _applications(std::make_shared<ApplicationsPropertySheetPage>(_newConfig))
 {
     pszCaption = TEXT("Synchronous Audio Router");

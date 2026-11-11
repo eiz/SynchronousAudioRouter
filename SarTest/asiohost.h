@@ -76,6 +76,11 @@ public:
     bool start();
     bool stop();
     void close();
+    // IASIO::controlPanel. SarAsio's panel is modal: this returns once
+    // something closes it.
+    bool controlPanel();
+    // Refreshes stats().clock from the software clock.
+    void readClockStats();
 
     bool running() const { return _running; }
     const AsioHostStats& stats() const { return _stats; }
@@ -91,7 +96,6 @@ private:
     void onTick(long bufferIndex);
     void setPhase(const char *phase);
     void watchdog();
-    void readClockStats();
 
     AsioHostOptions _options;
     AsioHostStats _stats;

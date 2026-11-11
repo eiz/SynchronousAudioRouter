@@ -48,6 +48,12 @@ struct ClockStats
     // there stalls every endpoint at once.
     double maxCallbackMs;
     uint64_t slowCallbacks;     // callbacks that took more than half a period
+    // Clock objects alive in the process now and at most so far, and
+    // controlPanel calls on any of them. ASIO drivers may assume a single
+    // instance per process, so a host (or SarAsio) must never create two.
+    uint32_t liveInstances;
+    uint32_t maxLiveInstances;
+    uint64_t controlPanelCalls;
 };
 
 } // namespace SarTestClock

@@ -17,6 +17,7 @@
 #include "install.h"
 
 #include <setupapi.h>
+#include <cfgmgr32.h>
 #include <newdev.h>
 #include <shlobj.h>
 #include <shlwapi.h>
@@ -58,7 +59,8 @@ std::wstring loggingPath()
 
 bool writeDriverConfig(
     const EndpointLayout& layout, const std::wstring& driverClsid,
-    int waveRtMinimumFrames, const std::wstring& path)
+    int waveRtMinimumFrames, const std::wstring& path,
+    bool applicationRouting)
 {
     std::vector<std::string> endpoints;
 
@@ -80,7 +82,7 @@ bool writeDriverConfig(
     JsonObject root;
 
     root.setString("driverClsid", narrow(driverClsid))
-        .setBool("enableApplicationRouting", false)
+        .setBool("enableApplicationRouting", applicationRouting)
         .setInt("waveRtMinimumFrames", waveRtMinimumFrames)
         .setRaw("endpoints", jsonArray(endpoints))
         .setRaw("applications", "[]");
@@ -153,6 +155,32 @@ static int visitSarDeviceNodes(bool remove)
 
     SetupDiDestroyDeviceInfoList(set);
     return found;
+}
+
+std::wstring sarDeviceInstanceId()
+{
+    HDEVINFO set = SetupDiGetClassDevsW(&kMediaClassGuid, nullptr, nullptr, DIGCF_PRESENT);
+    std::wstring result;
+
+    if (set == INVALID_HANDLE_VALUE) {
+        return result;
+    }
+
+    SP_DEVINFO_DATA data = {};
+
+    data.cbSize = sizeof(data);
+
+    for (DWORD i = 0; result.empty() && SetupDiEnumDeviceInfo(set, i, &data); ++i) {
+        wchar_t id[MAX_DEVICE_ID_LEN] = {};
+
+        if (hasSarHardwareId(set, &data) &&
+            SetupDiGetDeviceInstanceIdW(set, &data, id, MAX_DEVICE_ID_LEN, nullptr)) {
+            result = id;
+        }
+    }
+
+    SetupDiDestroyDeviceInfoList(set);
+    return result;
 }
 
 bool deviceNodeExists()

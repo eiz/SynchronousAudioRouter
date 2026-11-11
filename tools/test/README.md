@@ -80,8 +80,50 @@ them, which is what applications that use a SAR endpoint as their default
 device do while a DAW starts. Every WASAPI call and every host call is
 watched; one that does not return within `--phase-timeout` is reported as
 `HANG`. The scenario fails if any call hung, the host failed to start or
-stop, or no stream was ever opened. `Invoke-SarTest.ps1 -Scenarios` selects
-any of `matrix`, `race` and `kill`.
+stop, or no stream was ever opened.
+
+After the race, `settle-after-race` waits (up to two minutes) for Windows'
+audio endpoint builder to go idle and records how long that took. The
+race's restarts queue more endpoint arrivals and removals than the builder
+can process as they happen; with 16 pairs it stays busy for about 15 s
+afterwards, tearing down and rebuilding SAR endpoints one at a time, and
+streams opened meanwhile stall for up to 4 s in Activate (and longer in
+Initialize, which the audio service serializes) or get invalidated. Without
+the wait, `recovery-after-kill` measured that instead of recovery from a
+killed host.
+
+`SarTest.exe watch` runs from before the race through recovery and logs,
+with timestamps, every change in which SAR KS interfaces are enabled, every
+endpoint state change Windows reports, and seconds in which the endpoint
+builder or audio service used 50 ms of CPU or more (`watch.log`,
+`watch.json`). An endpoint that goes `notpresent` while its interface stays
+enabled is the endpoint builder rebuilding it.
+
+The `issue-*` scenarios are regression checks for specific GitHub issues.
+`SarTest.exe control-panel` (#133) opens SAR's control panel on a running
+host, presses the hardware interface's Configure button and checks that the
+clock never had a second instance alive. It needs an interactive desktop.
+`SarTest.exe no-interface` (#31, #54) opens SAR with no hardware interface
+configured and checks that it still offers a stereo input and output.
+`SarTest.exe endpoint-names` (#15, #66) renames an endpoint keeping its ID,
+then gives it a new ID, and checks that the new ID shows the new name; the
+results record what Windows shows for the reused ID. `long-endpoint-name`
+runs a host whose endpoint names are longer than the driver's 63-character
+limit. The `format-*` scenarios (#2) run the same endpoint IDs at 48 kHz, 96 kHz,
+48 kHz again and then in mono, and fail if a stream's engine format doesn't
+match (`--expect-format`). `app-routing` runs a loopback with application routing on and
+SarAsio's COM classes registered, which turns on the driver's registry
+filter.
+
+The `browser-audio-*` scenarios (#80, #102, #121, #127) register SarAsio's
+COM classes, run a host with application routing on, play `tone.html` in
+Edge (with its audio sandbox off, then on) and use `SarTest.exe meter` to
+check that Edge's audio session was heard. They also record the sandboxed
+audio service's mitigation policies, whether `SarAsio.dll` was loaded into
+it, and Code Integrity events naming it. They run last, and are skipped
+without Edge.
+`Invoke-SarTest.ps1 -Scenarios` selects any of `issues`, `matrix`, `race`,
+`kill` and `browser`.
 
 ## Commands
 
@@ -93,6 +135,11 @@ SarTest host [--iterations K] [--duration S]
 SarTest wasapi [--duration S] [--wait S] [--expect-invalidation]
 SarTest run [--iterations K] [--duration S]
 SarTest race [--cycles K] [--up S] [--down MS] [--openers T] [--hold MS]
+SarTest control-panel
+SarTest no-interface
+SarTest endpoint-names
+SarTest meter [--duration S] [--process <name.exe>] [--min-peak P]
+SarTest watch [--duration S] [--stop-file <path>] [--poll MS] [--probe MS]
 ```
 
 `install` creates the SAR software device node if needed, installs the
@@ -143,7 +190,7 @@ Then, elevated:
 .\Invoke-SarTest.ps1 -PackageDir <driver package> -ToolsDir <usermode package> -CertPath test.cer
 ```
 
-The script runs `run` for 1, 4, 8 and 16 endpoint pairs with three
+The script runs the `issue-*` checks, then `run` for 1, 4, 8 and 16 endpoint pairs with three
 start/stop iterations each, `race` on the largest layout, then a scenario that kills the host while WASAPI
 clients are streaming and checks that a new host can still create endpoints
 afterwards. Results land in `sartest-results\`: one `.log` and `.json` per

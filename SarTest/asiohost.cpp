@@ -365,6 +365,25 @@ void AsioHost::close()
     _asio = nullptr;
 }
 
+bool AsioHost::controlPanel()
+{
+    if (!_asio) {
+        return false;
+    }
+
+    // The panel waits for whoever closes it, so it is not a watched phase.
+    setPhase("idle");
+
+    AsioStatus status = _asio->controlPanel();
+
+    if (status != AsioStatus::OK) {
+        logf("IASIO::controlPanel failed: %ld", (long)status);
+        return false;
+    }
+
+    return true;
+}
+
 void AsioHost::readClockStats()
 {
     SarTestClock::ClockStats stats = {};
