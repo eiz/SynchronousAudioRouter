@@ -126,8 +126,16 @@ check that Edge's audio session was heard. They also record the sandboxed
 audio service's mitigation policies, whether `SarAsio.dll` was loaded into
 it, and Code Integrity events naming it. They run last, and are skipped
 without Edge.
+
+`unload-after-use` runs after everything above except the browser scenarios.
+It disables the SAR device, waits for the driver to unload, enables the
+device again and waits for the driver to come back; `run-after-reload` then
+streams through one endpoint pair. Driver Verifier checks a driver's pool
+allocations when it unloads and bugchecks on any that are left, so with
+Verifier on this is where memory leaked by the earlier scenarios shows.
+
 `Invoke-SarTest.ps1 -Scenarios` selects any of `issues`, `matrix`, `race`,
-`kill` and `browser`.
+`kill`, `unload` and `browser`.
 
 ## Commands
 

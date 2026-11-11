@@ -34,8 +34,9 @@ param(
     [int]$TimeoutSeconds = 600,
     [switch]$SkipInstall,
     [switch]$SkipKillTest,
-    # Any of issues, matrix, race, kill, browser. Installation always runs.
-    [string[]]$Scenarios = @('issues', 'matrix', 'race', 'kill', 'browser'),
+    # Any of issues, matrix, race, kill, unload, browser. Installation always
+    # runs.
+    [string[]]$Scenarios = @('issues', 'matrix', 'race', 'kill', 'unload', 'browser'),
     [int]$RaceCycles = 10,
     # Extra idle time between the race and the kill scenario, on top of
     # waiting for the endpoint builder to go idle (diagnostics).
@@ -62,7 +63,7 @@ if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administra
 # A misspelled group would otherwise be skipped without a word, and the run
 # would pass having tested nothing. Accept "a,b" as one argument too, which
 # is how the list arrives through powershell -File.
-$knownScenarios = 'issues', 'matrix', 'race', 'kill', 'browser'
+$knownScenarios = 'issues', 'matrix', 'race', 'kill', 'unload', 'browser'
 $Scenarios = @($Scenarios | ForEach-Object { $_ -split ',' } |
     ForEach-Object { $_.Trim() } | Where-Object { $_ })
 $unknownScenarios = @($Scenarios | Where-Object { $knownScenarios -notcontains $_ })
@@ -624,6 +625,82 @@ if (-not $SkipKillTest -and $Scenarios -contains 'kill') {
 if ($watchProc) {
     New-Item -ItemType File -Path $watchStop -Force | Out-Null
     if (-not $watchProc.WaitForExit(30000)) { try { $watchProc.Kill() } catch { } }
+}
+
+# Stops the driver after the scenarios before it have used it: disables the
+# SAR device, waits for the driver to unload, enables the device again and
+# waits for the driver to come back. Driver Verifier checks a driver's pool
+# allocations when it unloads and bugchecks on any that are left, so with
+# Verifier on this is where memory leaked by the earlier scenarios shows.
+# Without it, this still catches a driver that cannot be stopped or does not
+# come back.
+function Invoke-UnloadScenario {
+    param([string]$Name)
+
+    $record = [ordered]@{ name = $Name }
+    $hardwareId = 'SW\{0BCFFA5C-E754-48CF-A783-A64C0DC0BB2C}'
+    $driverState = {
+        $driver = Get-CimInstance Win32_SystemDriver -Filter "Name='SynchronousAudioRouter'" `
+            -ErrorAction SilentlyContinue
+        if ($driver) { $driver.State } else { 'absent' }
+    }
+    $waitForState = {
+        param([string]$State, [int]$Seconds)
+        $start = Get-Date
+        while (((Get-Date) - $start).TotalSeconds -lt $Seconds -and (& $driverState) -ne $State) {
+            Start-Sleep -Milliseconds 500
+        }
+        [math]::Round(((Get-Date) - $start).TotalSeconds, 1)
+    }
+
+    Write-Host "==> $Name : disabling the SAR device and waiting for the driver to unload"
+    $device = Get-PnpDevice -Class MEDIA -PresentOnly -ErrorAction SilentlyContinue |
+        Where-Object { $_.HardwareID -contains $hardwareId } | Select-Object -First 1
+    $record.stateBefore = & $driverState
+
+    if (-not $device) {
+        $record.error = 'no SAR device is present'
+    } elseif ($record.stateBefore -ne 'Running') {
+        $record.error = "the driver was not running to begin with ($($record.stateBefore))"
+    } else {
+        $record.instanceId = $device.InstanceId
+        try {
+            Disable-PnpDevice -InstanceId $device.InstanceId -Confirm:$false -ErrorAction Stop
+            $record.unloadSeconds = & $waitForState 'Stopped' 30
+        } catch {
+            $record.error = "the device could not be disabled: $_"
+        }
+        $record.stateDisabled = & $driverState
+        if (-not $record.error -and $record.stateDisabled -ne 'Stopped') {
+            $record.error = "the driver did not unload within 30 s of its device being disabled ($($record.stateDisabled))"
+        }
+
+        # Enable it again whatever happened, so later scenarios have a device.
+        try {
+            Enable-PnpDevice -InstanceId $device.InstanceId -Confirm:$false -ErrorAction Stop
+            $record.reloadSeconds = & $waitForState 'Running' 30
+        } catch {
+            if (-not $record.error) { $record.error = "the device could not be enabled again: $_" }
+        }
+        $record.stateAfter = & $driverState
+        $after = Get-PnpDevice -InstanceId $device.InstanceId -ErrorAction SilentlyContinue
+        $record.deviceStatus = "$($after.Status)"
+        $record.deviceProblem = "$($after.Problem)"
+        if (-not $record.error -and ($record.stateAfter -ne 'Running' -or $record.deviceStatus -ne 'OK')) {
+            $record.error = "the driver did not come back (driver $($record.stateAfter), device $($record.deviceStatus))"
+        }
+    }
+
+    $record.outcome = if ($record.error) { 'failed' } else { 'passed' }
+    Write-Host "    -> $($record.outcome)$(if ($record.error) { ': ' + $record.error })"
+    return $record
+}
+
+if ($Scenarios -contains 'unload') {
+    $summary.scenarios += Invoke-UnloadScenario 'unload-after-use'
+    # The reloaded driver has to work, not only load.
+    $summary.scenarios += Invoke-Scenario 'run-after-reload' (
+        @('run', '--endpoints', $EndpointCounts[0], '--iterations', 1, '--duration', $Duration) + $common)
 }
 
 if ($Scenarios -contains 'browser') {
