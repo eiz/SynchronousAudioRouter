@@ -739,10 +739,29 @@ such reference goes.
 Closing the stream does everything in "Closing" in section 8. The host sees
 the generation change and the running bit clear.
 
+### What is released, and when
+
+A host can start and stop any number of times between boots, and each time
+has to leave nothing behind.
+
+- **An endpoint.** Everything allocated for an endpoint, including the
+  descriptors kernel streaming reads, is released once the endpoint has been
+  withdrawn and the last filter and pin opened from it has been closed. It is
+  not kept until the device stops.
+- **A control open's section.** The section and the driver's own view of it
+  are released once the control handle has closed and the last endpoint that
+  used the section has been released.
+- **Views in other processes.** The host's view goes as described above. A
+  client's views go when its stream closes (section 8).
+
 ### The driver unloads
 
-Registry filtering stops. Nothing else is specified here, because Plug and
-Play does not unload the driver while its device has open handles.
+Registry filtering stops. Plug and Play does not unload the driver while its
+device has open handles, so by then every control handle, filter and pin has
+been closed, and by the rules above nothing is left: no pool memory, no
+section, no mapped view, no registry callback. Driver Verifier's check for
+leaked pool at unload has to pass whatever happened earlier, including a host
+killed while clients were streaming.
 
 ## 12. Limits and constants
 
