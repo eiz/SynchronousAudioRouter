@@ -18,6 +18,8 @@
 // tools/test/README.md for the workflow it is designed around.
 
 #include "common.h"
+#include "conformance.h"
+#include "fuzz.h"
 #include "install.h"
 #include "asiohost.h"
 #include "wasapi.h"
@@ -67,6 +69,17 @@ int usage()
         "      Watch the audio sessions on every active playback endpoint and\n"
         "      report which processes played and how loud; with --process, fail\n"
         "      unless that process reached --min-peak (default 0.01).\n"
+        "  SarTest conformance [--legacy-quirks] [--registry-filter]\n"
+        "      Send the control device every request of the driver specification's\n"
+        "      appendix A directly, the refused ones included, and check each\n"
+        "      status; then run a stream on a section whose audio area is not a\n"
+        "      multiple of 64 KiB. --legacy-quirks expects what releases up to 0.13\n"
+        "      did where the current driver deliberately differs.\n"
+        "  SarTest fuzz [--seconds S] [--seed N] [--restricted]\n"
+        "      Send the driver malformed control and kernel streaming requests from\n"
+        "      several threads while endpoints come and go; fail if a request is\n"
+        "      left hanging. --restricted sends them as a medium-integrity user\n"
+        "      without administrator rights.\n"
         "  SarTest watch [--duration S] [--stop-file <path>] [--poll MS] [--probe MS]\n"
         "      Log every change in which SAR KS interfaces are enabled and every\n"
         "      endpoint state change, with timestamps, until S seconds pass or\n"
@@ -926,6 +939,10 @@ int wmain(int argc, wchar_t **argv)
         rc = cmdMeter(args);
     } else if (args.command == L"watch") {
         rc = cmdWatch(args);
+    } else if (args.command == L"conformance") {
+        rc = cmdConformance(args);
+    } else if (args.command == L"fuzz") {
+        rc = cmdFuzz(args);
     } else {
         rc = usage();
     }
