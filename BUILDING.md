@@ -166,10 +166,14 @@ These are tracked here so nothing is silently missing:
   package ARM64, and the driver has only been built for x64. Add an `NTarm64`
   section and an `aarch64-pc-windows-msvc` build before enabling an ARM64
   matrix entry. This is the step that matters for the Windows-on-Arm direction.
-- **Control Flow Guard and Spectre mitigations.** The C++ driver was built
-  with both. The Rust driver is built with neither yet: Control Flow Guard
-  needs a compiler flag and a linker option, and Rust has no equivalent of
-  MSVC's `/Qspectre`.
+- **Speculation barriers.** The C++ driver was built with MSVC's `/Qspectre`.
+  Rust has no equivalent, so only the C shim is compiled with it (Control
+  Flow Guard is on for the whole image). The exposure is small: the only
+  caller-supplied value the driver addresses kernel memory with is an
+  endpoint's slot in the register table. It is range-checked when the
+  endpoint is created and used by later requests, and nothing read through it
+  is used as an address. Revisit if a table indexed by a caller's value is
+  ever added.
 - **A pinned Rust toolchain.** CI builds with whatever stable Rust the runner
   image carries, and the Microsoft WDK crates are pinned a release behind
   (`driver/Cargo.toml` says why).

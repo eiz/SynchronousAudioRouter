@@ -4,4 +4,9 @@
 # wdk-build refuses to configure a driver binary unless the CRT is linked
 # statically (the driver links no CRT at all, see sar-driver/build.rs).
 [target.x86_64-pc-windows-msvc]
-rustflags = ["-C", "target-feature=+crt-static"]
+rustflags = [
+    "-C", "target-feature=+crt-static",
+    # Control Flow Guard checks on indirect calls, as in a WDK-built driver.
+    # The linker option that marks the image is in sar-driver/build.rs.
+    "-C", "control-flow-guard=checks",
+]

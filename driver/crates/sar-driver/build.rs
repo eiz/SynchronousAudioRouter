@@ -40,6 +40,9 @@ fn main() -> Result<(), wdk_build::ConfigError> {
         "/IGNORE:4216",
         "/NXCOMPAT",
         "/DYNAMICBASE",
+        // Control Flow Guard: build the table of valid call targets and mark
+        // the image (rustc and the C shim are told to emit the checks).
+        "/GUARD:CF",
         "/MAP",
         "/MAPINFO:EXPORTS",
         "/OPT:REF,ICF",

@@ -29,6 +29,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .flag("/kernel")
         // Stack cookies, as in every WDK driver build.
         .flag("/GS")
+        // Control Flow Guard and Spectre mitigations, as in every WDK driver
+        // build. This file is the only code in the driver that MSVC
+        // compiles; Rust has no counterpart to /Qspectre.
+        .flag("/guard:cf")
+        .flag("/Qspectre")
         .flag("/W4")
         .flag("/WX")
         // No default library names in the object: the driver links no CRT.
