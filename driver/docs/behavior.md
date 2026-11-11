@@ -1022,8 +1022,16 @@ The last 16 bytes of the register cell are unused.
 
 A stream's buffer of *m* cells starting at cell *k* is mapped into the client
 as one view of *m* × `C` bytes at section offset *k* × `C`. The host reaches
-the same bytes at `virtualAddress` + *k* × `C`. A client's view of the
-register table is one view of `C` bytes at section offset `registerBase`.
+the same bytes at `virtualAddress` + *k* × `C`.
+
+A view of a section has to start on a 64 KiB boundary, and `registerBase` is
+only page-aligned, so a view of the register table cannot start at
+`registerBase` in general. A client's view starts at `registerBase` rounded
+down to a multiple of `C` and is (`registerBase` mod `C`) + `C` bytes long.
+The register table begins (`registerBase` mod `C`) bytes into the view, and
+the position register address reported to the client includes that offset.
+When the audio area is not a multiple of `C`, the view therefore also covers
+the tail of the audio area, which is never part of any stream's cells.
 
 ### A.7 Register record
 
@@ -1069,6 +1077,14 @@ driver.
 **Reference strings.** Wave filter: `<id>_<channelCount>_<sampleRate>_<sampleSize>`,
 numbers in decimal. Topology filter: the same followed by `_topology`. Both
 factories are created to be freed when the device stops.
+
+**Cached filter data.** Right after creating the two factories, and before
+either one's device interfaces are switched on, the driver has kernel
+streaming write each factory's cached filter data (the `FilterData` value and
+the medium cache that Windows keeps with the factory's device interfaces)
+from the factory's own descriptor: `KsFilterFactoryUpdateCacheData` with a
+null descriptor, the wave factory first. The results are not checked: a
+failure here does not fail the request.
 
 **Wave filter** — categories `KSCATEGORY_AUDIO`, `KSCATEGORY_REALTIME`, and
 `KSCATEGORY_RENDER` (playback) or `KSCATEGORY_CAPTURE` (recording).
