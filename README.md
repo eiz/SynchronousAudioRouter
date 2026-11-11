@@ -99,3 +99,12 @@ The following do not, and Windows only loads their driver with the
 
 For more information about the `testsigning` option, see here:
 https://docs.microsoft.com/en-us/windows-hardware/drivers/install/the-testsigning-boot-configuration-option#enable-or-disable-use-of-test-signed-code
+
+## License
+
+Synchronous Audio Router is licensed under the GNU General Public License,
+version 3 or later ([COPYING.txt](COPYING.txt)); the files that say so are
+under version 2 or later ([COPYING-V2.txt](COPYING-V2.txt)).
+
+The kernel driver, everything under [driver/](driver/), is separately licensed
+under the MIT license ([driver/LICENSE](driver/LICENSE)).

@@ -5,3 +5,8 @@ updates:
     directory: /
     schedule:
       interval: weekly
+  # The driver's crates. Cargo.lock pins them; this proposes the updates.
+  - package-ecosystem: cargo
+    directory: /driver
+    schedule:
+      interval: weekly
