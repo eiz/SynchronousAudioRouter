@@ -1,10 +1,10 @@
 # Building SynchronousAudioRouter
 
 This repo ships a verifiable WDK build pipeline (`.github/workflows/build.yml`)
-plus two helper scripts under `tools/`. The goal is a **reproducible, unsigned,
-submission-ready driver package** that can then be signed for free via
-[OSSign](https://ossign.org/) or Microsoft attestation signing. The build itself
-never signs anything — signing is a separate, later step.
+plus helper scripts under `tools/`. The goal is a **reproducible, unsigned,
+submission-ready driver package** that is then signed through Microsoft
+attestation signing. The build itself never signs anything for release; that is
+a separate step, described under [Releasing](#releasing).
 
 ## What the pipeline produces
 
@@ -20,10 +20,10 @@ For each run, the `driver` job emits an artifact `sar-driver-x64/` containing:
 | `SHA256SUMS.txt` | SHA-256 of every payload file |
 | `BUILD-INFO.txt` | commit, version, platform, build time |
 
-On pushes to `master`/tags the job also produces a GitHub **build-provenance
+On every run that isn't for a pull request (pushes to `master`, `vnext` and
+tags, and release builds) the job also produces a GitHub **build-provenance
 attestation** for the `.sys`, cryptographically linking the binary to the exact
-workflow run and source commit. Hashes + provenance are precisely the
-"source ↔ binary is verifiable" property OSSign asks for.
+workflow run and source commit.
 
 Packaging also runs `InfVerif /h` on the stamped INF and fails the build if it
 doesn't pass. Partner Center applies that check to attestation submissions.
@@ -31,11 +31,16 @@ doesn't pass. Partner Center applies that check to attestation submissions.
 The `usermode` job builds the `SarAsio.dll` ASIO plugin for x64 and x86 (32-bit
 DAWs need the 32-bit DLL).
 
+The `installer` job builds the MSI around the *test-signed* driver, as artifact
+`sar-installer-x64-testsigned`, for machines with test signing on (see the
+README.txt inside). `tools/Build-SarInstaller.ps1` does the build, and the
+release workflow uses the same script with the Microsoft-signed driver.
+
 ## Version
 
 `VERSION` at the repository root holds the release version (`major.minor.patch`).
-CI stamps `<VERSION>.<run number>` into the driver's `DriverVer` and into the
-MSI's product version. A `v*` tag has to match `VERSION` (`v0.14.0`, or
+CI stamps `<VERSION>.<number of commits>` into the driver's `DriverVer` and into
+the MSI's product version. A `v*` tag has to match `VERSION` (`v0.14.0`, or
 `v0.14.0-rc1` for a pre-release), or the build fails.
 
 ## Local build
@@ -54,19 +59,75 @@ msbuild SynchronousAudioRouter.sln /t:SynchronousAudioRouter `
 ./tools/Package-SarDriver.ps1 -Platform x64 -DriverVersion 0.14.0.0 -Describe local
 ```
 
-## Signing (the part the build deliberately skips)
+## Signing
 
-A modified kernel driver does **not** inherit anyone else's signature; the
-package above must be signed before stock Windows will load it without test mode.
+`build.yml` never signs anything for release. A kernel driver has to carry
+Microsoft's signature before stock Windows will load it, and there are two ways
+to get a driver that loads:
 
-1. **For your own machine, right now (free):** enable test signing
-   (`bcdedit /set testsigning on`, reboot) and test-sign the `.sys`/`.cat`. Note
-   the desktop watermark and that this breaks most anti-cheat games and requires
-   Secure Boot off on Windows 11.
-2. **For a clean, redistributable driver (free, the real goal):** submit
-   `SynchronousAudioRouter_x64.cab` to OSSign or, if you hold an EV certificate,
-   to Microsoft Partner Center for **attestation signing**. The returned
-   signature loads on stock Windows 11 with no test mode.
+1. **On a test machine:** enable test signing (`bcdedit /set testsigning on`,
+   reboot) and use the test-signed package or MSI from CI. Note the desktop
+   watermark, that this breaks most anti-cheat games, and that it needs Secure
+   Boot off on Windows 11.
+2. **For a release:** the driver's `.cab` is signed with the project's EV code
+   signing certificate and submitted to Microsoft Partner Center for
+   **attestation signing**. The driver that comes back loads on stock Windows
+   10 and 11 with no test mode. The `release` workflow does everything around
+   that submission.
+
+## Releasing
+
+`.github/workflows/release.yml` runs by hand, in two stages:
+
+1. **Set the version.** `VERSION` has to hold the version being released.
+2. **Stage `submission`.** Run the `release` workflow with stage `submission`
+   on the commit to release. It builds through `build.yml`, signs the driver's
+   `.cab` with the EV certificate and uploads it as
+   `sar-attestation-submission`.
+3. **Submit to Microsoft.** In Partner Center, under Hardware, choose *Submit
+   new hardware*, upload that `.cab` with both test-signing options unchecked,
+   and download the signed zip once it has been processed.
+4. **Draft the release.** Create a draft GitHub release for the tag (for
+   example `v0.14.0`, targeting the same commit) and attach the zip as
+   downloaded.
+5. **Stage `release`.** Run the workflow again from the same commit, with
+   stage `release`, the submission run's ID and the tag. It:
+   - checks that Microsoft signed the driver and that it is the same binary
+     the submission run built (`tools/Test-SarSignedDriver.ps1`);
+   - signs `SarAsio.dll` (x64 and x86), `SarConfigure.exe` and the installer's
+     custom action DLL;
+   - builds the MSI around the signed driver and signs it;
+   - attaches the MSI and `SHA256SUMS.txt` to the draft release and removes
+     the zip.
+6. **Test and publish.** Install the MSI from the draft on a machine with
+   Secure Boot on and test signing off, then publish the release. Publishing
+   creates the tag.
+
+### One-time setup
+
+- **Partner Center:** a Hardware Developer Program account with the EV
+  certificate registered.
+- **DigiCert KeyLocker:** an identity that may sign with the certificate (a
+  service user is the right kind for CI), its API token, and its client
+  authentication certificate (`.p12`) with the password.
+- **GitHub:** an environment named `signing`, with required reviewers so that
+  every signing job waits for approval, holding:
+
+  | kind | name | value |
+  |------|------|-------|
+  | secret | `SM_API_KEY` | the identity's API token |
+  | secret | `SM_CLIENT_CERT_FILE_B64` | the `.p12`, base64-encoded |
+  | secret | `SM_CLIENT_CERT_PASSWORD` | the `.p12`'s password |
+  | variable | `SM_HOST` | `https://clientauth.one.digicert.com` |
+  | variable | `SM_CODE_SIGNING_CERT_SHA1_HASH` | the certificate's SHA-1 thumbprint |
+
+### Signing by hand
+
+`tools/Sign-SarFiles.ps1 -Files <file> -Thumbprint <sha1>` signs with the same
+settings on any x64 Windows machine where the KeyLocker client tools are set up
+(SMCTL and the KSP library from the DigiCert ONE Clients app, and
+`smctl windows certsync` run once). The KeyLocker provider is 64-bit, so only
+the 64-bit `signtool` can use it; the script picks that one.
 
 ## Known follow-ups (intentionally not done in iteration 1)
 
@@ -79,11 +140,6 @@ These are tracked here so nothing is silently missing:
 - **`DriverVer` in source.** The committed INF still has the placeholder
   `DriverVer=0.1`; the pipeline stamps a valid value at build time but the source
   value should eventually be fixed too.
-- **Release installer (MSI).** The `installer` job builds the WiX
-  `SarInstaller` project (pinned WiX 3.14 binaries) around the *test-signed*
-  driver, as artifact `sar-installer-x64-testsigned`, for manual testing on
-  machines with test signing on (see the README.txt inside). A redistributable
-  MSI needs the attestation-signed driver, so it has to be built after signing.
 - **EWDK alternative.** For maximum reproducibility you can swap the
   `Install-WdkBuildEnv.ps1` step for a pinned **Enterprise WDK** ISO (a fully
   self-contained, version-locked build environment). That removes the dependency
