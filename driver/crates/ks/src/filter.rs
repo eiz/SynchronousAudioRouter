@@ -2,6 +2,33 @@
 // SPDX-License-Identifier: MIT
 
 //! Filter factories, filters and pins.
+//!
+//! # Who owns a factory's memory
+//!
+//! Everything AVStream reads on behalf of a factory (the filter descriptor
+//! and the tables it points to) and everything the trampolines reach through
+//! a `Context` pointer is one allocation, the factory's *block*. The
+//! factory's filters and their pins point into the same block: AVStream
+//! gives a new filter its factory's descriptor and `Context`, and a new pin
+//! its filter's.
+//!
+//! The block belongs to AVStream's object bags. It is put in the factory's
+//! bag when the factory is created, and in the bag of every filter and pin
+//! when AVStream creates one. To AVStream an item that is in several bags is
+//! still one item: it counts the bags, and calls the item's free routine
+//! once, when the item has left the last of them ("Object Bags" in the
+//! Windows driver documentation). A bag is emptied when its object is
+//! deleted. So `free_block` runs when the factory and every filter and pin
+//! made from it are gone, and not before: nothing AVStream still has can
+//! point into the block then.
+//!
+//! It follows that this crate keeps no reference count of its own on a
+//! block, and must not take one per bag: the free routine runs once per
+//! item, not once per bag. (Taking one per bag is how every block, and with
+//! it the driver's state for every filter, used to stay allocated for good.)
+//!
+//! When the factory object itself goes is a separate matter, and the handle
+//! has to know it: see [`FilterFactory`].
 
 use alloc::{boxed::Box, vec::Vec};
 use core::{
@@ -12,7 +39,7 @@ use core::{
 
 use ks_sys as sys;
 use ntk::{
-    alloc_ext::{try_vec_from_slice, Shared},
+    alloc_ext::{try_box, try_vec_from_slice, Shared},
     Guid,
 };
 use ntstatus::{IoStatus, NtStatus};
@@ -28,7 +55,8 @@ use crate::{
 ///
 /// All callbacks run at `PASSIVE_LEVEL`. `Context` is the value given to
 /// [`FilterFactory::create`]; it stays alive as long as the factory or any
-/// filter or pin created from it exists.
+/// filter or pin created from it exists, and the factory's reference to it
+/// is released when the last of them has gone.
 pub trait FilterHandler: 'static {
     type Context: Send + Sync + 'static;
 
@@ -143,12 +171,11 @@ impl Pin {
 }
 
 /// The block behind the `Context` of a factory and of everything created
-/// from it.
+/// from it. Owned by AVStream's object bags; see the module documentation.
 #[repr(C)]
 struct FactoryBlock<H: FilterHandler> {
     header: Header,
     user: Shared<H::Context>,
-    state: Shared<FactoryState>,
     /// The descriptor AVStream points into; freed with the block.
     _storage: Box<Storage>,
 }
@@ -163,9 +190,11 @@ struct FactoryState {
 /// A filter factory created at run time.
 ///
 /// AVStream may destroy the factory object on its own (when the device
-/// stops) and, after [`delete`](Self::delete), keeps it only until its last
-/// filter closes. The handle notices both and turns its methods into
-/// no-ops, so it can be kept, copied and dropped freely.
+/// stops). After [`delete`](Self::delete) it destroys the object at once if
+/// no filter is open, and otherwise when the last open filter closes. The
+/// handle is told through an item of its own in the factory's bag, and turns
+/// its methods into no-ops from then on, so it can be kept, copied and
+/// dropped freely.
 #[derive(Clone)]
 pub struct FilterFactory {
     raw: sys::PKSFILTERFACTORY,
@@ -201,10 +230,9 @@ impl FilterFactory {
             alive: AtomicBool::new(true),
             deleted: AtomicBool::new(false),
         })?;
-        let block = Shared::try_new(FactoryBlock::<H> {
+        let block = try_box(FactoryBlock::<H> {
             header: Header::new::<H>(Kind::Factory),
             user: context,
-            state: state.clone(),
             _storage: storage,
         })?;
 
@@ -212,8 +240,9 @@ impl FilterFactory {
         let mut raw: sys::PKSFILTERFACTORY = core::ptr::null_mut();
         // SAFETY: the device mutex is held (`guard`). The descriptor lives
         // in `block`, which is handed to the factory's object bag below and
-        // so outlives the factory. The reference string is NUL-terminated
-        // and only read.
+        // so outlives the factory (if that fails, the factory is deleted
+        // before the block is). The reference string is NUL-terminated and
+        // only read.
         let status = unsafe {
             sys::KsCreateFilterFactory(
                 fdo.as_raw(),
@@ -228,21 +257,39 @@ impl FilterFactory {
         };
         NtStatus(status).into_result()?;
 
-        let in_bag = block.clone().into_context();
+        let block = Box::into_raw(block).cast::<c_void>();
+        let gone = state.clone().into_context();
         // SAFETY: `raw` is the factory just created; the device mutex is
         // still held, so AVStream cannot have created a filter from it or
-        // destroyed it. On success the bag owns `in_bag` and returns it
-        // through `free_factory_block::<H>` when the factory is destroyed.
+        // destroyed it, and its bag may be added to. Two items go in:
+        //
+        // * the block, which AVStream from then on owns and frees through
+        //   `free_block::<H>` (module documentation). If it cannot be added,
+        //   nothing of ours is in a bag. The factory is then deleted, and
+        //   AVStream destroys a factory that has no filter before that call
+        //   returns; only after it is the block freed here.
+        // * a reference to the handle's state, in this bag only, so that
+        //   `factory_gone` runs exactly when AVStream destroys the factory
+        //   object, however long filters keep the block. If it cannot be
+        //   added, deleting the factory leaves the block to AVStream.
+        //
         // Only then is the Context published (until that store the factory
         // carries the device's context, which the trampolines reject).
         unsafe {
-            let status = sys::KsAddItemToObjectBag((*raw).Bag, in_bag, Some(free_factory_block::<H>));
+            let status = sys::KsAddItemToObjectBag((*raw).Bag, block, Some(free_block::<H>));
             if !NtStatus(status).is_success() {
-                drop(Shared::<FactoryBlock<H>>::from_context(in_bag));
+                drop(Shared::<FactoryState>::from_context(gone));
+                let _ = sys::KsDeleteFilterFactory(raw);
+                drop(Box::from_raw(block.cast::<FactoryBlock<H>>()));
+                return Err(NtStatus(status));
+            }
+            let status = sys::KsAddItemToObjectBag((*raw).Bag, gone, Some(factory_gone));
+            if !NtStatus(status).is_success() {
+                drop(Shared::<FactoryState>::from_context(gone));
                 let _ = sys::KsDeleteFilterFactory(raw);
                 return Err(NtStatus(status));
             }
-            (*raw).Context = in_bag;
+            (*raw).Context = block;
         }
         Ok(Self { raw, state })
     }
@@ -315,19 +362,25 @@ impl FilterFactory {
     }
 }
 
-/// Bag callback of a factory: AVStream is destroying the factory object.
-unsafe extern "C" fn free_factory_block<H: FilterHandler>(data: *mut c_void) {
+/// Free routine of the item that is in a factory's bag only: AVStream is
+/// destroying the factory object, so the handle's pointer to it is dead.
+unsafe extern "C" fn factory_gone(data: *mut c_void) {
     // SAFETY: `data` is the reference `FilterFactory::create` put in the
     // factory's bag, delivered exactly once.
-    let block = unsafe { Shared::<FactoryBlock<H>>::from_context(data) };
-    block.state.alive.store(false, Ordering::Release);
+    let state = unsafe { Shared::<FactoryState>::from_context(data) };
+    state.alive.store(false, Ordering::Release);
 }
 
-/// Bag callback of a filter or pin: release its reference to the block.
-unsafe extern "C" fn free_block_reference<H: FilterHandler>(data: *mut c_void) {
-    // SAFETY: `data` is a reference `retain_in_bag` put in a bag, delivered
-    // exactly once.
-    drop(unsafe { Shared::<FactoryBlock<H>>::from_context(data) });
+/// Free routine of a factory's block: it has left the last bag it was in,
+/// so the factory and every filter and pin created from it have been
+/// deleted.
+unsafe extern "C" fn free_block<H: FilterHandler>(data: *mut c_void) {
+    // SAFETY: `data` is the block `FilterFactory::create` gave to the
+    // factory's bag. AVStream calls an item's free routine once, when no bag
+    // holds the item any more; the bags that held it are those of the
+    // objects whose descriptor and Context point into it, and all of them
+    // are gone.
+    drop(unsafe { Box::from_raw(data.cast::<FactoryBlock<H>>()) });
 }
 
 /// The factory block behind an AVStream object's `Context`, if it is one
@@ -339,8 +392,8 @@ unsafe extern "C" fn free_block_reference<H: FilterHandler>(data: *mut c_void) {
 /// driver (or null).
 unsafe fn block_of<'a, H: FilterHandler>(context: *mut c_void) -> Option<&'a FactoryBlock<H>> {
     // SAFETY: by the crate invariant a non-null Context is one of this
-    // crate's tagged blocks, kept alive by the object's ancestors (and, once
-    // `retain_in_bag` has run, by the object itself).
+    // crate's tagged blocks, kept alive by the bag of the object's parent
+    // (and, once `share_with_bag` has run, by the object's own).
     if unsafe { context::is::<H>(context, Kind::Factory) } {
         // SAFETY: the header check proves the type.
         Some(unsafe { &*context.cast::<FactoryBlock<H>>() })
@@ -349,25 +402,22 @@ unsafe fn block_of<'a, H: FilterHandler>(context: *mut c_void) -> Option<&'a Fac
     }
 }
 
-/// Gives an AVStream object its own reference to the block its `Context`
-/// points to, released when the object is destroyed.
+/// Puts the block an AVStream object's `Context` points to in that object's
+/// own bag as well, so that the block cannot be freed while the object
+/// exists. This takes no reference: the block stays one item, which AVStream
+/// frees once, when the last bag that holds it is emptied.
 ///
 /// # Safety
 ///
-/// `context` must have passed `block_of::<H>`, and `bag` must be the object
-/// bag of the object that carries it.
-unsafe fn retain_in_bag<H: FilterHandler>(context: *mut c_void, bag: sys::KSOBJECT_BAG) -> Result<(), NtStatus> {
-    // SAFETY: the block is live (its parent object holds a reference), so a
-    // new reference can be taken; the bag takes it over on success.
-    unsafe {
-        let extra = Shared::<FactoryBlock<H>>::clone_from_context(context).into_context();
-        let status = sys::KsAddItemToObjectBag(bag, extra, Some(free_block_reference::<H>));
-        if !NtStatus(status).is_success() {
-            drop(Shared::<FactoryBlock<H>>::from_context(extra));
-            return Err(NtStatus(status));
-        }
-    }
-    Ok(())
+/// `context` must have passed `block_of::<H>`, `bag` must be the object bag
+/// of the object that carries it, and the mutex that guards that bag (for a
+/// filter or a pin, the filter control mutex) must be held.
+unsafe fn share_with_bag<H: FilterHandler>(context: *mut c_void, bag: sys::KSOBJECT_BAG) -> Result<(), NtStatus> {
+    // SAFETY: the block is live (the bag of the object's parent holds it)
+    // and already has `free_block::<H>` as its free routine; the caller
+    // holds the bag's mutex.
+    let status = unsafe { sys::KsAddItemToObjectBag(bag, context, Some(free_block::<H>)) };
+    NtStatus(status).into_result()
 }
 
 fn status_of(result: Result<(), NtStatus>) -> NTSTATUS {
@@ -425,8 +475,10 @@ pub(crate) mod trampolines {
         let Some(block) = (unsafe { block_of::<H>(context) }) else {
             return NtStatus::NOT_FOUND.0;
         };
-        // SAFETY: `context` passed `block_of`, `bag` is this filter's bag.
-        if let Err(status) = unsafe { retain_in_bag::<H>(context, bag) } {
+        // SAFETY: `context` passed `block_of`, `bag` is this filter's bag,
+        // and AVStream holds the filter control mutex while it calls a
+        // filter's Create dispatch.
+        if let Err(status) = unsafe { share_with_bag::<H>(context, bag) } {
             return status.0;
         }
         status_of(H::filter_create(&block.user))
@@ -434,7 +486,7 @@ pub(crate) mod trampolines {
 
     unsafe extern "C" fn filter_close<H: FilterHandler>(filter: sys::PKSFILTER, _irp: PIRP) -> NTSTATUS {
         // SAFETY: AVStream passes a valid KSFILTER whose create succeeded,
-        // so its bag holds a reference to the block.
+        // so its bag holds the block.
         if let Some(block) = unsafe { block_of::<H>((*filter).Context) } {
             H::filter_close(&block.user);
         }
@@ -449,8 +501,10 @@ pub(crate) mod trampolines {
         let Some(block) = (unsafe { block_of::<H>(context) }) else {
             return NtStatus::NOT_FOUND.0;
         };
-        // SAFETY: `context` passed `block_of`, `bag` is this pin's bag.
-        if let Err(status) = unsafe { retain_in_bag::<H>(context, bag) } {
+        // SAFETY: `context` passed `block_of`, `bag` is this pin's bag, and
+        // AVStream holds the parent filter's control mutex while it calls a
+        // pin's Create dispatch.
+        if let Err(status) = unsafe { share_with_bag::<H>(context, bag) } {
             return status.0;
         }
         // SAFETY: `Pin` is a transparent wrapper of the valid KSPIN.
@@ -460,7 +514,7 @@ pub(crate) mod trampolines {
 
     unsafe extern "C" fn pin_close<H: FilterHandler>(pin: sys::PKSPIN, _irp: PIRP) -> NTSTATUS {
         // SAFETY: AVStream passes a valid KSPIN whose create succeeded, so
-        // its bag holds a reference to the block.
+        // its bag holds the block.
         if let Some(block) = unsafe { block_of::<H>((*pin).Context) } {
             // SAFETY: transparent wrapper of the valid KSPIN.
             H::pin_close(&block.user, unsafe { &*pin.cast::<Pin>() });

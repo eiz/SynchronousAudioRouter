@@ -73,6 +73,13 @@ independently confirmed.
    occurs when the host process is killed (cleanup runs from the process
    rundown). The probe was then removed.
 
+   *Corrected later (items 41 and 42).* The references described here were
+   never all given back, which is why the driver released nothing. And this
+   probe could not have seen the factory go: the item it watched was in the
+   open filter's bag as well, and kernel streaming frees such an item only
+   when it has left every bag. What it concluded is so all the same; item 42
+   measured it with an item that is in the factory's bag alone.
+
 6. **[section 5, A.5] Why "create endpoint" completes on a system worker
    thread.** Not explained. `IoRegisterDeviceInterface` is documented as
    callable only "in the context of a system thread", which is the likely
@@ -309,9 +316,12 @@ pass):
 - Items 33 to 36: application routing works for a 64-bit client process
   (the `app-routing` scenario); the first attempt crashed in exactly this
   path (see below), so the path is exercised.
-- Item 5: by the instrumented run described there.
+- Item 5: by the instrumented run described there (but see the correction
+  there).
 - Item 20 (ksthunk above the driver): seen in a stack trace.
 - Items 38 and 39: by the instrumented runs described in item 38.
+- Items 41 to 45: by the instrumented runs described there and by the
+  `unload` scenarios.
 
 Found by the rig, not by reasoning:
 
@@ -336,7 +346,9 @@ Not exercised by any scenario, so only reasoned about:
   observed.
 - Driver unload and device stop/removal: the VM is restored from a
   checkpoint after every run, so the unload path, and with it Driver
-  Verifier's check for leaked pool, never ran.
+  Verifier's check for leaked pool, never ran. (True when this was written.
+  The suite has since gained an `unload` group, which found that the driver
+  released nothing; see section J.)
 - A failure of `KsFilterFactoryUpdateCacheData` (item 40). The call was
   never seen to fail, so the code that ignores its result only ever had a
   success to ignore.
@@ -418,3 +430,161 @@ written. The items continue the numbering of sections A to F.
       (`_Must_inspect_result_`). The specification wins: the wrapper returns
       the status and the driver discards it. Nothing is logged or retried,
       and the request's own status and byte count (A.5) do not change.
+
+## J. Releasing endpoints and sections (section 11)
+
+"What is released, and when" and the rewritten "The driver unloads" were
+added to section 11 after a run with the new `unload` scenarios ended in
+Driver Verifier's stop for pool left allocated at unload (0xC4, subcode
+0x62): 38,744 allocations, among them every endpoint and every section the
+run had created.
+
+41. **[section 11] Why nothing was released: an object bag counts an item
+    once, however many bags it is in.** The driver kept each factory's block
+    (the descriptors kernel streaming reads, and the factory's reference to
+    its endpoint) alive with a reference in the factory's object bag and one
+    more in the bag of every filter and pin opened from it, each to be given
+    back by the free routine registered with that bag (item 5). Kernel
+    streaming does not call a free routine per bag. "Object Bags" says that
+    an item placed in more than one bag is not released "until it is no
+    longer contained in any object bag", and `KsRemoveItemFromObjectBag`
+    "returns the number of references on Item": one pointer in several bags
+    is one item, with one count and one routine. [doc] **[rig]** Run
+    `cleanroom-unload-probeA-20261111-141438` (`issues`, `unload`) was the
+    driver as it stood, with counters, stopped on purpose in its unload
+    routine. 56 blocks had been put in a factory's bag, and 657 times one of
+    them had been put in a filter's or a pin's (54 of those a pin's). The
+    routine registered with the factories' bags had run 56 times, every time
+    before the device was first told to stop. The routine registered with
+    the filters' and pins' bags had never run. No block had been freed. Each
+    block was left holding one reference for every filter and pin it had
+    ever had, and every block had had some.
+
+    Resolved: a factory's block is one allocation, with no count of the
+    driver's own. It goes into the factory's bag and, as before, into the
+    bag of every filter and pin created from the factory, always as the same
+    item with the same free routine, and the single call kernel streaming
+    makes of that routine frees it. The endpoint goes when both its blocks
+    have gone and the control handle has let go of it; the section when its
+    last endpoint and the control handle have.
+
+42. **[section 11] When kernel streaming destroys a factory the driver has
+    deleted.** Microsoft says that `KsDeleteFilterFactory` "deletes a given
+    filter factory" and that what is in a factory's bag is cleaned up "when
+    the filter factory is deleted". Whether that happens at once when
+    filters are open, and when it happens otherwise, is not documented, and
+    item 5's probe could not tell (see the correction there). It matters
+    twice. The first rule of "What is released, and when" holds only if a
+    deleted factory does not linger until the device stops. And a filter
+    must not outlive the descriptor it was created from. **[rig]** Measured
+    with an item that is in the factory's bag and nowhere else, so that its
+    free routine marks the end of the factory object itself. (The driver
+    keeps such an item for good: it is how a `FilterFactory` handle learns
+    that its pointer to the factory is dead.)
+
+    - Run `cleanroom-unload-probeB-20261111-142405` (`issues`, `kill`,
+      `unload`), stopped on purpose when the device was first told to stop.
+      All 184 factories had a filter open when the driver deleted them:
+      Windows keeps an endpoint's filters open for as long as the endpoint
+      exists. None was destroyed inside `KsDeleteFilterFactory`, none while
+      one of its filters was open, and all 184 were gone by the time of the
+      stop. All 184 blocks had been freed, each one when the last thing
+      that had happened to its factory was a filter's Close dispatch: none
+      inside the delete call, none after a pin's Close. The build would have
+      stopped the system at once had a block been freed with a filter or pin
+      open, or a filter been created from a factory already destroyed.
+      Neither happened.
+    - Run `cleanroom-unload-probeC-20261111-143042` (`issues`, `unload`):
+      the same build, made to create a third factory for every endpoint and
+      delete it at once, before anything could open a filter. All 28 were
+      destroyed, and their blocks freed, before `KsDeleteFilterFactory`
+      returned. The 56 real factories behaved as in the other run.
+
+    So a deleted factory is destroyed at once if it has no filter, and
+    otherwise when its last filter closes. It outlives its filters, and they
+    outlive their pins. The driver depends on this in two places only. The
+    first rule depends on a deleted factory not lingering. And one failure
+    path frees a block directly: if the block cannot be put in a new
+    factory's bag, the factory is deleted and the block is freed after that
+    call, which is sound because that factory never had a filter. Everything
+    else rests on what Microsoft documents about bags (item 43).
+
+43. **[section 11] Which bags hold the block, and how it is known that
+    nothing reaches it once it is freed.** The block is reached through the
+    descriptor pointer and the context pointer of the factory, of each
+    filter (kernel streaming gives a filter its factory's) and of each pin
+    (its filter's), and through nothing else: the driver's own handle to a
+    factory holds no pointer into it. Each of those objects has the block in
+    its bag. Microsoft documents that a bag is emptied when its object is
+    deleted (what is in it "is automatically cleaned up when the filter
+    factory is deleted", "when the filter is deleted", "when the pin is
+    closed") and that an item in several bags is freed when it has left the
+    last. So the free routine cannot run while an object that points into
+    the block exists. [doc]
+
+    By item 42 the factory's bag alone would be enough on this version of
+    Windows. The filters' and pins' bags are kept so that the free does not
+    rest on that order, which is observed and not documented.
+
+    `KsAddItemToObjectBag` asks for the mutex that guards the bag, and it is
+    held each time: the device mutex for a factory's bag (whoever creates a
+    factory holds it), and the filter control mutex for a filter's or a
+    pin's, which kernel streaming holds while it calls a filter's or a pin's
+    Create dispatch ("Filter Control Mutex in AVStream"). [doc]
+
+    What no page says is whether kernel streaming reads an object's
+    descriptor once more after emptying that object's bag, while it finishes
+    deleting it. Microsoft's own pattern implies that it does not: `KsEdit`
+    puts an object's dynamically allocated descriptor in that object's bag,
+    where it is freed at this very moment. **[rig]** And the rig would show
+    it. Driver Verifier's special pool is on for this driver and took every
+    allocation it made (in the listing of the failing run, "Pool Allocations
+    Succeeded SpecialPool" equals the number attempted), so a read of a
+    freed block faults on the spot. The runs of item 42 freed every block
+    they created, and so did the acceptance run of item 45 (whose scenarios
+    made 1,172 blocks in the failing run), without one.
+
+44. **[section 11] Where an endpoint and a section are released now.**
+    Usually not on a thread of the host. When the host closes its control
+    handle, the endpoint is withdrawn with filters still open (all 92
+    endpoints of run probeB), and its last reference is dropped later,
+    inside kernel streaming's cleanup of the last of its filters to close,
+    on whatever thread closes that filter. If the control handle has gone by
+    then, the section goes there too: the kernel view is unmapped, the
+    section object dereferenced and its kernel handle closed. None of that
+    needs a particular process, and nothing in it takes a lock that kernel
+    streaming could be holding. **[rig]** Every release in the runs of item
+    42 happened this way, under Driver Verifier's IRQL checking and deadlock
+    detection.
+
+45. **[section 11] Shown: released at the last close, not when the device
+    stops.** A clean unload shows only that nothing is left at the end. Run
+    probeB counted live endpoints and sections and reported them at the
+    moment the device was first told to stop, which is before kernel
+    streaming frees anything on account of the stop. Twelve control handles
+    had come and gone by then. Of the 92 endpoints and 12 sections they had
+    created, none existed. 32 of the endpoints, the 16 pairs of the
+    `kill-host` scenario, had been withdrawn while a client still had their
+    stream open, the host having been killed mid-stream; all 32 had been
+    released. Run probeC: none of 28 endpoints and 10 sections existed.
+    **[rig]**
+
+    The committed code, without counters, passes the whole suite including
+    the `unload` group (run `cleanroom-unload-accept-20261111-143701`, 20
+    scenarios): the driver unloads with nothing left allocated and works
+    again when the device is enabled.
+
+46. **[section 11] Not exercised.** Only reasoned about:
+
+    - A device stop while a host still has endpoints. Kernel streaming then
+      frees the factories itself ("freed when the device stops"), their own
+      items tell the handles, and the endpoints go when the host's handle
+      closes. No scenario stops the device under a running host.
+    - `KsAddItemToObjectBag` failing, in the three places it is called for a
+      block or a factory's own item.
+    - A filter or pin whose Create dispatch fails after the block has been
+      put in its bag (a filter opened on an endpoint that has just been
+      withdrawn, a second stream). Kernel streaming then deletes the object
+      and empties its bag like any other. Whether a scenario produced one is
+      not known.
+    - Other versions of Windows than the rig's.

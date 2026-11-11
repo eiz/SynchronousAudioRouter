@@ -19,6 +19,10 @@ use sar_core::{
     registers::{self, Event, Record, RegisterTable},
 };
 
+/// The section of one control handle and the driver's view of its register
+/// table. Shared by the control handle and by every endpoint created on it:
+/// both are released when the handle has closed and the last of those
+/// endpoints has been released (section 11).
 pub struct SharedSection {
     layout: Layout,
     section: Section,

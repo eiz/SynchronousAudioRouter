@@ -75,6 +75,14 @@ impl EndpointState {
     }
 }
 
+/// One endpoint.
+///
+/// It is shared by the control handle that created it and by its two filter
+/// factories, each of which keeps a reference for as long as the factory or
+/// a filter or pin opened from it exists. So it is released, and with it its
+/// hold on the section, once it has been withdrawn (the control handle lets
+/// go, the factories are deleted) and the last filter and pin a client had
+/// open on it has been closed (section 11, "What is released, and when").
 pub struct Endpoint {
     direction: Direction,
     index: u32,

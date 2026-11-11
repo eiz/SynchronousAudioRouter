@@ -114,6 +114,32 @@ on none of these pages. The probes assumed it from general familiarity with
 kernel streaming, and found it there. The committed change does not depend on
 it.
 
+## Releasing endpoints and sections (section 11)
+
+The same engineer, in the same session, then made the driver release what it
+allocates (section 11, "What is released, and when"; `SPEC-GAPS.md`, section
+J). What was consulted for that, beyond the above:
+
+| Source | What was taken |
+|---|---|
+| `docs/behavior.md`, section 11 as extended ("What is released, and when", "The driver unloads") | The three rules. |
+| The brief for the task | That the existing driver passes the same run on the same VM, so the rules can be met with kernel streaming on this version of Windows. Nothing about how. |
+| `rig-results/unload-evidence/` (a run of this driver's baseline with the new `unload` scenarios, made by the engineer who briefed the work: Driver Verifier's stop for pool left allocated, the debugger's `!verifier 3` listing of this driver's allocations, a summary by calling function, the run's log) | That every block, endpoint and section was still allocated at unload, and how many. That Driver Verifier's special pool is on for this driver in the rig and took every allocation. |
+| learn.microsoft.com `.../stream/object-bags` | An item placed in more than one bag is not released until it is in none; a bag is emptied when its object is closed or deleted; a dynamically allocated descriptor belongs in the bag of the object it describes. |
+| `.../ddi/ks/nf-ks-ksadditemtoobjectbag` | The free routine is called when the item is removed or the bag deleted. The mutex of the bag must be held: the device mutex for a device's or a filter factory's bag, the filter control mutex for a filter's or a pin's. |
+| `.../ddi/ks/nf-ks-ksremoveitemfromobjectbag` | An item has one count of references across bags, and is freed only when it leaves the last. Read for that; the driver does not call the function. |
+| `.../ddi/ks/nf-ks-kscopyobjectbagitems` | Nothing used. |
+| `.../stream/filter-control-mutex-in-avstream` | Kernel streaming holds the filter control mutex while it calls a filter's or a pin's Create and Close dispatch; creation and destruction of filters and pins are synchronised by it. |
+| `.../ddi/ks/nf-ks-ksdeletefilterfactory` | Read again: "deletes a given filter factory"; a macro over `KsFreeObjectCreateItemsByContext`. Nothing about open filters or about when the factory object goes. |
+| `.../ddi/ks/nf-ks-ksfreeobjectcreateitemsbycontext` | Frees every create item with the given context. Nothing about the object behind them. |
+| `.../ddi/ks/ns-ks-_ksfilterfactory`, `.../ns-ks-_ksfilter`, `.../ns-ks-_kspin` | What is in an object's bag is cleaned up when the factory is deleted, the filter is deleted, the pin is closed. A new filter's context is its factory's, a new pin's its filter's. |
+| `.../ddi/ks/nf-ks-_ksedit` | `KsEdit` puts a dynamically allocated copy of an object's descriptor in that object's bag: Microsoft's own example of a descriptor that is freed when the bag is emptied. The driver does not call it. |
+| The result files of the rig runs `cleanroom-unload-*` under `rig-results/` (console output, scenario logs, the bugcheck analyses of this driver's own probe builds) | The measurements recorded in `SPEC-GAPS.md`, items 41 to 45. |
+
+The pages were fetched as before: by address, from learn.microsoft.com only,
+with no web search. No crate source was opened. No header was read for this
+change.
+
 ## Accidental exposure log
 
 - At session start the agent's context contained an automatically attached
@@ -165,3 +191,9 @@ For the session that made the cached filter data change:
   was repeated with an absolute `--out`, which every later run used.
 - The harness's result files again include log lines of the existing
   user-mode software and of the test programs. They were read as test output.
+- Nothing new for the release work, which was the same session continued.
+  Its evidence directory, `rig-results/unload-evidence/`, holds output of
+  this driver only (see the table above). Every shell command again began
+  with `cd <the workspace> &&`, every rig run was given an absolute `--out`,
+  and the background output files under `/tmp/claude-1000/...` were again
+  left unread.
