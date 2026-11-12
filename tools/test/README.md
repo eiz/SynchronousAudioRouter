@@ -145,7 +145,8 @@ the current driver deliberately differs (specification, section 13).
 
 `formats` streams at sample rates, ASIO periods and channel counts the other
 scenarios never use (44.1 to 192 kHz, 64 to 256 frames, 4, 8 and 32
-channels), and with 64 endpoints. SarAsio refuses a period longer than the
+channels), with a hardware interface whose samples are 32-bit float and one
+whose samples are 24-bit, and with 64 endpoints. SarAsio refuses a period longer than the
 audio engine's 10 ms, so nothing longer is tried.
 
 `contention` keeps one host up while another with 64 endpoints is created and
@@ -226,7 +227,9 @@ elevated process: without one Windows gives "high", and the log and the
 report's `priorityClass` say which it was.
 
 The clock reads `SAR_TEST_CLOCK_RATE`, `SAR_TEST_CLOCK_FRAMES`,
-`SAR_TEST_CLOCK_INPUTS` and `SAR_TEST_CLOCK_OUTPUTS` from the environment.
+`SAR_TEST_CLOCK_INPUTS`, `SAR_TEST_CLOCK_OUTPUTS` and
+`SAR_TEST_CLOCK_SAMPLES` (`int32`, `int24` or `float32`, the sample type of
+its channels) from the environment.
 Set `--no-sarasio-log` to stop SarAsio from logging to
 `%APPDATA%\SynchronousAudioRouter\logs`.
 

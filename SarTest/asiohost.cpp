@@ -230,6 +230,8 @@ bool AsioHost::open()
     setPhase("getChannelInfo");
     _infos.clear();
 
+    long sampleType = Int32LSB;
+
     for (int direction = 0; direction < 2; ++direction) {
         bool isInput = direction == 0;
         long count = isInput ? _totalInputs : _totalOutputs;
@@ -246,9 +248,22 @@ bool AsioHost::open()
                 return false;
             }
 
-            if (info.sampleType != Int32LSB) {
+            // The host only copies samples from inputs to outputs, so any
+            // type will do as long as every channel has the same one: a host
+            // application refuses a device that mixes them.
+            if (info.sampleType != Int32LSB && info.sampleType != Int24LSB &&
+                info.sampleType != Float32LSB) {
                 logf("Unsupported sample type %ld on %s %ld (%s)",
                     info.sampleType, isInput ? "input" : "output", i, info.name);
+                setPhase("idle");
+                return false;
+            }
+
+            if (_infos.empty()) {
+                sampleType = info.sampleType;
+            } else if (info.sampleType != sampleType) {
+                logf("Sample type %ld on %s %ld (%s), but %ld on the channels before it",
+                    info.sampleType, isInput ? "input" : "output", i, info.name, sampleType);
                 setPhase("idle");
                 return false;
             }
@@ -261,7 +276,9 @@ bool AsioHost::open()
         }
     }
 
-    _sampleSize = 4;
+    _sampleSize = sampleType == Int24LSB ? 3 : 4;
+    logf("Sample type %ld (%s)", sampleType,
+        sampleType == Float32LSB ? "32-bit float" : sampleType == Int24LSB ? "24-bit integer" : "32-bit integer");
     setPhase("createBuffers");
 
     double t0 = nowMs();
