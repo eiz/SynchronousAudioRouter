@@ -25,6 +25,12 @@
 //   SAR_TEST_CLOCK_OUTPUTS  dummy output channels    (default 2)
 //   SAR_TEST_CLOCK_SAMPLES  sample type of the channels: int32 (default),
 //                           int24 or float32
+//   SAR_TEST_CLOCK_BURST    frames of a device period to deliver at once:
+//                           the clock wakes once per that many frames and
+//                           makes all the callbacks they amount to back to
+//                           back, carrying the remainder over, as a driver
+//                           that polls its device does (default: one
+//                           callback per wake, evenly spaced)
 
 #define NOMINMAX
 #define WIN32_LEAN_AND_MEAN
@@ -106,6 +112,8 @@ public:
         _bufferFrames = envLong(L"SAR_TEST_CLOCK_FRAMES", 480);
         _inputCount = envLong(L"SAR_TEST_CLOCK_INPUTS", 2);
         _outputCount = envLong(L"SAR_TEST_CLOCK_OUTPUTS", 2);
+
+        _burstFrames = envLong(L"SAR_TEST_CLOCK_BURST", 0);
 
         wchar_t samples[16] = {};
         DWORD length = GetEnvironmentVariableW(L"SAR_TEST_CLOCK_SAMPLES", samples, 16);
@@ -431,9 +439,13 @@ private:
             timer = CreateWaitableTimerW(nullptr, TRUE, nullptr);
         }
 
-        const double periodMs = _bufferFrames * 1000.0 / _sampleRate;
-        const int64_t period100ns = (int64_t)(_bufferFrames * 10000000.0 / _sampleRate + 0.5);
+        // Frames per wake: one callback's worth, or a device period's worth
+        // delivered as a burst of callbacks.
+        const long wakeFrames = _burstFrames > 0 ? _burstFrames : _bufferFrames;
+        const double periodMs = wakeFrames * 1000.0 / _sampleRate;
+        const int64_t period100ns = (int64_t)(wakeFrames * 10000000.0 / _sampleRate + 0.5);
         const DWORD waitTimeoutMs = (DWORD)(periodMs * 4.0 + 50.0);
+        long pendingFrames = 0;
         int64_t origin = fileTimeNow();
         long bufferIndex = 0;
         HANDLE handles[2] = { _stopEvent, timer };
@@ -466,23 +478,29 @@ private:
                 origin = fileTimeNow() - (int64_t)n * period100ns;
             }
 
-            _samplePosition += _bufferFrames;
+            for (pendingFrames += wakeFrames;
+                 pendingFrames >= _bufferFrames && _running;
+                 pendingFrames -= _bufferFrames) {
 
-            int64_t callbackStart = fileTimeNow();
+                _samplePosition += _bufferFrames;
 
-            _callbacks.tick(bufferIndex, AsioBool::True);
+                int64_t callbackStart = fileTimeNow();
 
-            double callbackMs = (double)(fileTimeNow() - callbackStart) / 10000.0;
+                _callbacks.tick(bufferIndex, AsioBool::True);
 
-            if (callbackMs > _maxCallbackMs.load()) {
-                _maxCallbackMs = callbackMs;
+                double callbackMs = (double)(fileTimeNow() - callbackStart) / 10000.0;
+
+                if (callbackMs > _maxCallbackMs.load()) {
+                    _maxCallbackMs = callbackMs;
+                }
+
+                if (callbackMs > periodMs / 2.0) {
+                    _slowCallbacks++;
+                }
+
+                bufferIndex ^= 1;
+                _ticks++;
             }
-
-            if (callbackMs > periodMs / 2.0) {
-                _slowCallbacks++;
-            }
-            bufferIndex ^= 1;
-            _ticks++;
         }
 
         CloseHandle(timer);
@@ -496,6 +514,7 @@ private:
     long _inputCount = 2;
     long _outputCount = 2;
     AsioSampleType _sampleType = Int32LSB;
+    long _burstFrames = 0;
     bool _active = false;
     std::atomic<bool> _running{ false };
     AsioCallbacks _callbacks = {};
