@@ -11,7 +11,7 @@ organized inside: a different implementation that behaves as described is the
 same driver as far as the rest of SAR and Windows can tell. Internal names are
 not used.
 
-Sections 1 to 13 explain what the driver does. Appendix A is the binary
+Sections 1 to 14 explain what the driver does. Appendix A is the binary
 interface: every request code, structure offset, status value, descriptor and
 registry value another implementation has to reproduce exactly to be a drop-in
 replacement.
@@ -35,6 +35,7 @@ what happens and section 13 lists it as a known gap.
 11. Teardown
 12. Limits and constants
 13. Known gaps and quirks
+14. How long requests may hold each other up
 
 Appendix A. Binary interface
 
@@ -400,6 +401,29 @@ endpoint's register record, not only its own. Nothing read from the register
 table may be trusted: the host must check every value against the section's
 real bounds before using it, and the driver never uses register contents to
 make a memory access.
+
+### It stays in physical memory
+
+Audio state does not belong in pageable memory. The whole section, audio area
+and register table, is locked into physical memory when the buffer layout is
+set and stays locked until the section is released (section 11). Its contents
+are never written to the paging file, and no touch of it, by the host, by a
+client or by the driver, waits for a disk.
+
+The driver's own reads and writes of the register table go through a mapping
+that cannot take a page fault of any kind. Updating a record therefore costs
+a few memory accesses and nothing else, whatever lock the driver holds while
+it does so (section 14).
+
+If the memory cannot be locked, "set buffer layout" fails with
+`STATUS_INSUFFICIENT_RESOURCES` and leaves the control handle as it was: no
+section, no mapping, and the request can be made again.
+
+What this does not cover is a process's own view. Windows may still remove
+pages of a view from that process's working set; the next touch is then a
+fault that is settled without I/O, because the page never left memory. A host
+that wants its audio thread free of those as well locks its view into its
+working set itself.
 
 ### Register record
 
@@ -814,6 +838,95 @@ decision to make, not a requirement to copy.
   built.
 - **The shared header declares requests for an unrelated network filter**
   (`SarNdis`). The driver implements none of them.
+- **Nothing limits how much memory control handles lock in total.** Each
+  locks its whole section, up to 128 MiB and the register table (sections 6
+  and 12), and whoever may open the control interface may open it many times.
+
+## 14. How long requests may hold each other up
+
+Nothing in the driver runs once per audio period (section 4), so in the
+steady state it cannot make a stream late. What it can do is make one piece
+of housekeeping wait behind another: creating an endpoint, opening and closing
+a filter or a stream, and closing a host all take locks. The host has a
+real-time thread that talks to the driver, and the Windows audio service
+opens and closes filters on every endpoint of every host. These rules bound
+what such a request can be made to wait for.
+
+### Kernel streaming's device mutex
+
+Kernel streaming takes one mutex for the whole device whenever a filter is
+opened or closed, and the device is shared by every endpoint of every control
+handle. Whatever the driver does while it holds that mutex therefore delays
+every client that is opening or closing a filter on any endpoint, including
+the endpoints of other hosts.
+
+- **Only for what needs it.** The driver holds the device mutex around the
+  kernel streaming calls that need it and around nothing else. In particular
+  the registry values of an endpoint's interfaces (A.10) are written without
+  it: writing them needs the device and the endpoint's reference strings,
+  nothing that kernel streaming owns.
+- **One endpoint at a time.** When the driver has several endpoints to deal
+  with, it releases the device mutex between one endpoint and the next. This
+  matters most when a control handle closes (section 11): a host with many
+  endpoints is withdrawn endpoint by endpoint, so a client's open or close
+  waits for the kernel streaming calls of at most one endpoint, however many
+  the host had.
+
+### The driver's own locks
+
+A lock of the driver's own is held only while the driver reads or writes its
+own memory, the section's register table included (which is locked in
+physical memory, section 6). It is released before any
+call that can wait on another part of the system:
+
+- a registry call;
+- registering a device interface or changing its state;
+- creating or closing a handle;
+- mapping or unmapping a view of the section;
+- creating or deleting a filter factory.
+
+Two places where this shows from outside:
+
+- **Opening a stream** (section 8) maps the register table into the client
+  without holding anything a request on the same endpoint would wait for. If
+  two opens of one endpoint race, one gets the stream and the other fails as
+  section 8 says; a mapping made for the loser is removed again.
+- **"Create endpoint"** (section 5) does not hold up other requests on the
+  same control handle while the endpoint's filter factories are created. A
+  "wait for notification events" request arriving meanwhile is answered or
+  parked as usual.
+
+With this rule the kind of lock stops mattering for correctness: none of the
+calls above is ever made with one held, so a kind that raises the IRQL to
+`APC_LEVEL` while held would work as well as one that does not. Which kind
+the driver uses is not specified here.
+
+### Refusals that need no lock
+
+A request that the driver refuses without looking at an endpoint's state is
+refused without taking that endpoint's lock. The WaveRT properties the driver
+does not implement (section 8) are the case that matters: Windows may ask for
+the presentation position periodically while a stream runs.
+
+### The notification queue
+
+The queue of notification events (section 9) is guarded by a spin lock, which
+the host's real-time thread takes whenever it collects events. The time the
+lock is held does not grow with the number of events waiting: no memory is
+allocated, and no more than a fixed, small amount is copied, while it is held.
+
+### How it is checked
+
+The test suite's `contention` scenario keeps one host up while a second host
+with 64 endpoints is created and closed five times, and times every open and
+close of the first host's playback filter. Its log gives the median, the 99th
+percentile and the longest of those times while the second host was idle,
+being created, and being closed. The longest time while the second host is
+being created or closed is the number these rules exist to keep small: it
+should be on the order of one endpoint's worth of work, not one host's.
+
+That the section is locked in physical memory (section 6) cannot be seen from
+user mode, and the test suite does not check it.
 
 ## Appendix A. Binary interface
 
