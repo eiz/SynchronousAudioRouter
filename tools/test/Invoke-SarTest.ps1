@@ -34,9 +34,9 @@ param(
     [int]$TimeoutSeconds = 600,
     [switch]$SkipInstall,
     [switch]$SkipKillTest,
-    # Any of issues, conformance, matrix, race, kill, formats, fuzz, unload,
-    # device, browser. Installation always runs.
-    [string[]]$Scenarios = @('issues', 'conformance', 'matrix', 'race', 'kill', 'formats', 'fuzz', 'unload', 'device', 'browser'),
+    # Any of issues, conformance, matrix, race, kill, formats, contention,
+    # fuzz, unload, device, browser. Installation always runs.
+    [string[]]$Scenarios = @('issues', 'conformance', 'matrix', 'race', 'kill', 'formats', 'contention', 'fuzz', 'unload', 'device', 'browser'),
     [int]$RaceCycles = 10,
     # Extra idle time between the race and the kill scenario, on top of
     # waiting for the endpoint builder to go idle (diagnostics).
@@ -58,6 +58,10 @@ param(
     # new one each run when 0; the scenario's log and results name it).
     [int]$FuzzSeconds = 60,
     [long]$FuzzSeed = 0,
+    # The contention scenario fails if opening or closing one host's filter
+    # took longer than this while another host was being created or closed.
+    # 0 records the times without judging them.
+    [int]$ContentionLimitMs = 0,
     # A directory with another build of SarTest.exe, SarAsio.dll and
     # SarTestClock.dll to run every scenario with, once the ones in -ToolsDir
     # have installed the driver: the 32-bit builds, to put a 32-bit host and
@@ -128,7 +132,7 @@ if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administra
 # A misspelled group would otherwise be skipped without a word, and the run
 # would pass having tested nothing. Accept "a,b" as one argument too, which
 # is how the list arrives through powershell -File.
-$knownScenarios = 'issues', 'conformance', 'matrix', 'race', 'kill', 'formats', 'fuzz', 'unload', 'device', 'browser'
+$knownScenarios = 'issues', 'conformance', 'matrix', 'race', 'kill', 'formats', 'contention', 'fuzz', 'unload', 'device', 'browser'
 $Scenarios = @($Scenarios | ForEach-Object { $_ -split ',' } |
     ForEach-Object { $_.Trim() } | Where-Object { $_ })
 $unknownScenarios = @($Scenarios | Where-Object { $knownScenarios -notcontains $_ })
@@ -767,6 +771,18 @@ if ($Scenarios -contains 'formats') {
     }
     $summary.scenarios += Invoke-Scenario 'endpoints-32x2' (
         @('run', '--endpoints', 32, '--iterations', 1, '--duration', $Duration) + $common)
+    $null = Wait-EndpointBuilderIdle -TimeoutSeconds 180
+}
+
+if ($Scenarios -contains 'contention') {
+    # One host stays up while another with 64 endpoints is created and closed
+    # five times, and every open and close of the first host's playback
+    # filter is timed. Kernel streaming serializes filter opens across the
+    # whole device, so this is what one host's start and stop cost the
+    # clients of every other.
+    $contention = @('contention', '--endpoints', 32, '--rounds', 5)
+    if ($ContentionLimitMs -gt 0) { $contention += @('--max-wait-ms', $ContentionLimitMs) }
+    $summary.scenarios += Invoke-Scenario 'contention' $contention
     $null = Wait-EndpointBuilderIdle -TimeoutSeconds 180
 }
 

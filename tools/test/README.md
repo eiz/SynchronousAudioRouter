@@ -148,6 +148,14 @@ scenarios never use (44.1 to 192 kHz, 64 to 256 frames, 4, 8 and 32
 channels), and with 64 endpoints. SarAsio refuses a period longer than the
 audio engine's 10 ms, so nothing longer is tried.
 
+`contention` keeps one host up while another with 64 endpoints is created and
+closed five times, and times every open and close of the first host's
+playback filter. Kernel streaming serializes filter opens across the whole
+device, so its log shows what one host's start and stop cost the clients of
+every other: the median, 99th percentile and longest wait while the other
+host was idle, being created, and being closed. `-ContentionLimitMs` turns
+the longest wait into a pass or fail.
+
 `fuzz` sends the driver malformed and badly ordered control and kernel
 streaming requests from several threads for `-FuzzSeconds`, as a user without
 administrator rights, while endpoints come and go underneath. It passes if no
@@ -172,8 +180,8 @@ recorded as tolerated, and only a hang (or a bugcheck) fails the run.
 started.
 
 `Invoke-SarTest.ps1 -Scenarios` selects any of `issues`, `conformance`,
-`matrix`, `race`, `kill`, `formats`, `fuzz`, `unload`, `device` and
-`browser`.
+`matrix`, `race`, `kill`, `formats`, `contention`, `fuzz`, `unload`, `device`
+and `browser`.
 
 ## Commands
 
@@ -191,6 +199,7 @@ SarTest endpoint-names
 SarTest meter [--duration S] [--process <name.exe>] [--min-peak P]
 SarTest watch [--duration S] [--stop-file <path>] [--poll MS] [--probe MS]
 SarTest conformance [--legacy-quirks] [--registry-filter]
+SarTest contention [--endpoints N] [--rounds K] [--max-wait-ms M]
 SarTest fuzz [--seconds S] [--seed N] [--restricted]
 ```
 
@@ -208,6 +217,13 @@ Layout options are shared by all commands: `--endpoints N` is the number of
 playback/recording pairs (default 2), `--channels C` the channels per
 endpoint (default 2). The reporter's 32-channel setup is roughly
 `--endpoints 16 --channels 2` or `--endpoints 4 --channels 8`.
+
+`host`, `wasapi`, `run`, `race`, `conformance` and `contention` put their
+process in the realtime priority class, as a DAW and its audio threads are
+scheduled ahead of everything else on a machine set up for audio;
+`--priority high` or `--priority normal` changes that. Realtime needs an
+elevated process: without one Windows gives "high", and the log and the
+report's `priorityClass` say which it was.
 
 The clock reads `SAR_TEST_CLOCK_RATE`, `SAR_TEST_CLOCK_FRAMES`,
 `SAR_TEST_CLOCK_INPUTS` and `SAR_TEST_CLOCK_OUTPUTS` from the environment.

@@ -96,6 +96,7 @@
     <ClCompile Include="asiohost.cpp" />
     <ClCompile Include="common.cpp" />
     <ClCompile Include="conformance.cpp" />
+    <ClCompile Include="contention.cpp" />
     <ClCompile Include="control.cpp" />
     <ClCompile Include="fuzz.cpp" />
     <ClCompile Include="install.cpp" />
@@ -106,6 +107,7 @@
     <ClInclude Include="asiohost.h" />
     <ClInclude Include="common.h" />
     <ClInclude Include="conformance.h" />
+    <ClInclude Include="contention.h" />
     <ClInclude Include="control.h" />
     <ClInclude Include="fuzz.h" />
     <ClInclude Include="install.h" />

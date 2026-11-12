@@ -19,6 +19,7 @@
 
 #include "common.h"
 #include "conformance.h"
+#include "contention.h"
 #include "fuzz.h"
 #include "install.h"
 #include "asiohost.h"
@@ -78,8 +79,13 @@ int usage()
         "      status; then run a stream on a section whose audio area is not a\n"
         "      multiple of 64 KiB. --legacy-quirks expects what releases up to 0.13\n"
         "      did where the current driver deliberately differs.\n"
-        "  host, wasapi, run, race and conformance run in the realtime priority\n"
-        "  class; --priority high|normal changes that.\n"
+        "  SarTest contention [--endpoints N] [--rounds K] [--max-wait-ms M]\n"
+        "      Keep one host up while another with N endpoint pairs is created and\n"
+        "      closed K times, and time every open and close of the first host's\n"
+        "      playback filter; with --max-wait-ms, fail if one took longer while\n"
+        "      the other host was being created or closed.\n"
+        "  host, wasapi, run, race, conformance and contention run in the realtime\n"
+        "  priority class; --priority high|normal changes that.\n"
         "  SarTest fuzz [--seconds S] [--seed N] [--restricted]\n"
         "      Send the driver malformed control and kernel streaming requests from\n"
         "      several threads while endpoints come and go; fail if a request is\n"
@@ -930,7 +936,8 @@ int wmain(int argc, wchar_t **argv)
     // top of whatever class its process is in.) The fuzzer stays at normal
     // priority: it is load, not audio.
     if (args.command == L"host" || args.command == L"wasapi" || args.command == L"run" ||
-        args.command == L"race" || args.command == L"conformance") {
+        args.command == L"race" || args.command == L"conformance" ||
+        args.command == L"contention") {
         g_priorityClass = setProcessPriority(args);
     }
 
@@ -962,6 +969,8 @@ int wmain(int argc, wchar_t **argv)
         rc = cmdWatch(args);
     } else if (args.command == L"conformance") {
         rc = cmdConformance(args);
+    } else if (args.command == L"contention") {
+        rc = cmdContention(args);
     } else if (args.command == L"fuzz") {
         rc = cmdFuzz(args);
     } else {
