@@ -1088,6 +1088,22 @@ allow "modify state" access in the client's own handle table; anything else
 fails with the object manager's status. The host's handle (A.5) carries
 "modify state" and "synchronize" access and nothing more.
 
+**Whose handle it is.** The value is always looked up as a handle of the
+process that made the request, with that process's own rights, exactly as
+for a request that came straight from user mode. What the request says about
+its origin must not decide this. Requests from 32-bit processes reach the
+driver through `ksthunk.sys`, the filter Windows places above every kernel
+streaming device to convert 32-bit requests, and it passes them on marked as
+coming from kernel mode, while the handle value in them is still the 32-bit
+process's own. A value that names a kernel handle is refused like any other
+handle the caller has no right to. (A lookup with kernel access would skip
+the access check and accept kernel handles; Driver Verifier stops the machine
+when a driver does it with a user-mode handle.)
+
+The same holds for everything else a request carries: no address, length or
+handle in a kernel streaming request is to be trusted more because the
+request is marked as coming from kernel mode.
+
 ### A.9 Endpoint filters
 
 What each endpoint presents to kernel streaming. Sizes are for the 64-bit
