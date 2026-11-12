@@ -25,8 +25,9 @@ under the MIT license ([LICENSE](LICENSE)).
 | `sar-driver` | The driver. Only its entry point contains `unsafe`. |
 
 `unsafe` is confined to `ntk`, `ks` and the `-sys` crates. The only C is
-`ntx-sys/shim/seh.c`: four functions, each one `__try` block around an access
-to user memory, which Rust cannot express.
+`ntx-sys/shim/seh.c`: five functions, each one `__try` block, around an
+access to user memory or around locking pages in memory, both of which report
+failure by raising an exception that Rust cannot catch.
 
 ## Building
 

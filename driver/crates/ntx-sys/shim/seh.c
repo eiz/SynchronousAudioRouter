@@ -7,8 +7,9 @@
  * Why this is C: touching a user-mode address from kernel mode can fault at
  * any time (the page can be unmapped or made read-only by another thread of
  * the process), and ProbeForRead/ProbeForWrite report a bad address by
- * raising an exception. The only way to survive either is a structured
- * exception handler (__try/__except) around the access. Rust has no SEH
+ * raising an exception. So does MmProbeAndLockPages when it cannot lock the
+ * pages it is given. The only way to survive any of these is a structured
+ * exception handler (__try/__except) around the call. Rust has no SEH
  * construct, so each function below is the smallest possible __try block and
  * does nothing else; all decisions are made by the Rust callers.
  *
@@ -93,6 +94,26 @@ SarShimGuardedWrite(
 {
     __try {
         RtlCopyMemory(Destination, Source, Length);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return GetExceptionCode();
+    }
+    return STATUS_SUCCESS;
+}
+
+/*
+ * Makes the pages an MDL describes resident and locks them in physical
+ * memory. MmProbeAndLockPages reports failure by raising an exception, which
+ * is the only reason this is here.
+ */
+NTSTATUS
+SarShimProbeAndLockPages(
+    _Inout_ MDL *MemoryDescriptorList,
+    _In_ KPROCESSOR_MODE AccessMode,
+    _In_ LOCK_OPERATION Operation
+    )
+{
+    __try {
+        MmProbeAndLockPages(MemoryDescriptorList, AccessMode, Operation);
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         return GetExceptionCode();
     }

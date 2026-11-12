@@ -10,13 +10,15 @@ use core::{
 };
 
 use ntstatus::NtStatus;
+use ntx_sys::seh::SarShimProbeAndLockPages;
 use wdk_sys::{
     ntddk::{
-        MmMapViewInSystemSpaceEx, MmUnmapViewInSystemSpace, ObReferenceObjectByHandle,
+        IoAllocateMdl, IoFreeMdl, MmMapLockedPagesSpecifyCache, MmMapViewInSystemSpaceEx,
+        MmUnlockPages, MmUnmapLockedPages, MmUnmapViewInSystemSpace, ObReferenceObjectByHandle,
         ObfDereferenceObject, ZwClose, ZwCreateSection, ZwMapViewOfSection, ZwUnmapViewOfSection,
     },
-    HANDLE, LARGE_INTEGER, OBJECT_ATTRIBUTES, OBJ_KERNEL_HANDLE, PAGE_READWRITE,
-    SECTION_ALL_ACCESS, SEC_COMMIT,
+    MdlMappingNoExecute, HANDLE, LARGE_INTEGER, MDL, OBJECT_ATTRIBUTES, OBJ_KERNEL_HANDLE,
+    PAGE_READWRITE, SECTION_ALL_ACCESS, SEC_COMMIT,
 };
 
 use crate::object::Process;
@@ -126,9 +128,10 @@ impl Section {
         })
     }
 
-    /// Maps `size` bytes starting at `offset` into system address space, so
-    /// that the driver can reach them from any process context. `offset`
-    /// must be a multiple of 65,536.
+    /// Maps `size` bytes starting at `offset` into system address space.
+    /// `offset` must be a multiple of 65,536. The view is pageable: it is
+    /// only good for getting at the section's pages in order to lock them
+    /// ([`SystemView::lock_pages`]).
     pub fn map_into_system_space(&self, offset: u64, size: usize) -> Result<SystemView, NtStatus> {
         let mut base: *mut c_void = core::ptr::null_mut();
         let mut section_offset = LARGE_INTEGER {
@@ -213,62 +216,68 @@ impl Drop for UserView {
     }
 }
 
-/// A view of a section in system address space, accessed as 32-bit words.
-///
-/// The same memory is mapped writable into user processes, so it can change
-/// at any moment. All access is therefore by volatile or atomic operations
-/// on raw pointers; no reference to the memory is ever formed, and nothing
-/// read from it may be trusted.
+/// A view of a section in system address space. Like any view it is
+/// pageable, so nothing is ever read or written through it; it exists so
+/// that the pages behind it can be locked.
 pub struct SystemView {
     base: NonNull<u8>,
     size: usize,
 }
 
-// SAFETY: system address space is valid in every context, and all access is
-// by volatile/atomic word operations that tolerate concurrent use.
+// SAFETY: system address space is valid in every context; the view is only
+// ever handed to the memory manager.
 unsafe impl Send for SystemView {}
 // SAFETY: as above.
 unsafe impl Sync for SystemView {}
 
 impl SystemView {
-    pub fn len(&self) -> usize {
-        self.size
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.size == 0
-    }
-
-    fn word(&self, offset: usize) -> *mut u32 {
-        assert!(
-            offset % 4 == 0 && offset.checked_add(4).is_some_and(|end| end <= self.size),
-            "register access outside the mapped view"
-        );
-        // SAFETY: the offset was just checked to lie inside the view.
-        unsafe { self.base.as_ptr().add(offset).cast::<u32>() }
-    }
-
-    /// Reads the word at byte `offset`. Panics if it is outside the view or
-    /// misaligned. Must be called below `DISPATCH_LEVEL` (the memory is
-    /// pageable).
-    pub fn read_u32(&self, offset: usize) -> u32 {
-        // SAFETY: `word` returns an aligned pointer inside the live view.
-        unsafe { self.word(offset).read_volatile() }
-    }
-
-    /// Writes the word at byte `offset`.
-    pub fn write_u32(&self, offset: usize, value: u32) {
-        // SAFETY: `word` returns an aligned pointer inside the live view.
-        unsafe { self.word(offset).write_volatile(value) }
-    }
-
-    /// Stores the word at byte `offset` with a sequentially consistent
-    /// atomic store: a full memory barrier and a single store.
-    pub fn publish_u32(&self, offset: usize, value: u32) {
-        // SAFETY: `word` returns an aligned pointer inside the live view,
-        // valid for the duration of the call; atomic access is the correct
-        // way to touch memory that other processes modify concurrently.
-        unsafe { AtomicU32::from_ptr(self.word(offset)) }.store(value, Ordering::SeqCst);
+    /// Makes the pages behind `length` bytes of the view, starting at byte
+    /// `offset`, resident and locks them in physical memory: they cannot be
+    /// paged out until the result is dropped, whatever becomes of this view
+    /// or of any other. Both numbers must be multiples of the page size.
+    ///
+    /// Fails with `STATUS_INSUFFICIENT_RESOURCES` if the pages cannot be
+    /// locked. Must be called at `PASSIVE_LEVEL`.
+    pub fn lock_pages(&self, offset: usize, length: usize) -> Result<LockedPages, NtStatus> {
+        const PAGE_MASK: usize = 4096 - 1;
+        let in_view = offset.checked_add(length).is_some_and(|end| end <= self.size);
+        let whole_pages = (offset | length) & PAGE_MASK == 0;
+        let length32 = u32::try_from(length)
+            .ok()
+            .filter(|_| in_view && whole_pages && length != 0);
+        let Some(length32) = length32 else {
+            return Err(NtStatus::INVALID_PARAMETER);
+        };
+        // SAFETY: the range lies inside the live view (checked above). No
+        // IRP is involved; the MDL belongs to the caller until freed.
+        let mdl = unsafe {
+            IoAllocateMdl(
+                self.base.as_ptr().add(offset).cast(),
+                length32,
+                0,
+                0,
+                core::ptr::null_mut(),
+            )
+        };
+        let Some(mdl) = NonNull::new(mdl) else {
+            return Err(NtStatus::INSUFFICIENT_RESOURCES);
+        };
+        // SAFETY: a fresh, unlocked MDL over valid (pageable) kernel
+        // addresses, at PASSIVE_LEVEL. The shim turns the exception
+        // MmProbeAndLockPages raises on failure into a status.
+        let status = unsafe {
+            SarShimProbeAndLockPages(
+                mdl.as_ptr(),
+                wdk_sys::_MODE::KernelMode as i8,
+                wdk_sys::_LOCK_OPERATION::IoModifyAccess,
+            )
+        };
+        if !NtStatus(status).is_success() {
+            // SAFETY: the MDL was allocated above and is not locked.
+            unsafe { IoFreeMdl(mdl.as_ptr()) };
+            return Err(NtStatus::INSUFFICIENT_RESOURCES);
+        }
+        Ok(LockedPages { mdl, length })
     }
 }
 
@@ -279,5 +288,138 @@ impl Drop for SystemView {
         unsafe {
             let _ = MmUnmapViewInSystemSpace(self.base.as_ptr().cast());
         }
+    }
+}
+
+/// Physical pages of a section, locked in memory (an MDL in the locked
+/// state). The lock is on the pages themselves, not on any view of them: it
+/// holds while views come and go in whatever process, and ends when this
+/// value is dropped.
+pub struct LockedPages {
+    mdl: NonNull<MDL>,
+    length: usize,
+}
+
+// SAFETY: a locked MDL may be used and released from any thread and process
+// context; the type exposes no access to the memory.
+unsafe impl Send for LockedPages {}
+// SAFETY: as above.
+unsafe impl Sync for LockedPages {}
+
+impl LockedPages {
+    /// Number of bytes locked.
+    pub fn len(&self) -> usize {
+        self.length
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.length == 0
+    }
+
+    /// Maps the locked pages into system address space, not executable.
+    /// Such a mapping is of physical pages that cannot go away, so an access
+    /// through it cannot take a page fault of any kind.
+    pub fn map(self) -> Result<LockedView, NtStatus> {
+        // SAFETY: the MDL is locked and has no system mapping yet (this
+        // method consumes the only value that could make one). With
+        // BugCheckOnFailure false the routine returns null on failure.
+        let base = unsafe {
+            MmMapLockedPagesSpecifyCache(
+                self.mdl.as_ptr(),
+                wdk_sys::_MODE::KernelMode as i8,
+                wdk_sys::_MEMORY_CACHING_TYPE::MmCached,
+                core::ptr::null_mut(),
+                0,
+                wdk_sys::_MM_PAGE_PRIORITY::NormalPagePriority as u32 | MdlMappingNoExecute,
+            )
+        };
+        match NonNull::new(base.cast::<u8>()) {
+            Some(base) => Ok(LockedView { base, pages: self }),
+            // Dropping `self` unlocks the pages again.
+            None => Err(NtStatus::INSUFFICIENT_RESOURCES),
+        }
+    }
+}
+
+impl Drop for LockedPages {
+    fn drop(&mut self) {
+        // SAFETY: the MDL was locked by `SystemView::lock_pages` and is
+        // unlocked and freed exactly once; any mapping of it has been
+        // removed by `LockedView`'s destructor, which runs first.
+        unsafe {
+            MmUnlockPages(self.mdl.as_ptr());
+            IoFreeMdl(self.mdl.as_ptr());
+        }
+    }
+}
+
+/// Locked pages of a section mapped into system address space, accessed as
+/// 32-bit words. An access cannot fault, so it may be made under any lock
+/// and at any IRQL.
+///
+/// The same memory is mapped writable into user processes, so it can change
+/// at any moment. All access is therefore by volatile or atomic operations
+/// on raw pointers; no reference to the memory is ever formed, and nothing
+/// read from it may be trusted.
+pub struct LockedView {
+    base: NonNull<u8>,
+    // After `base` on purpose: fields are dropped in order, and this type's
+    // destructor removes the mapping before the pages are unlocked.
+    pages: LockedPages,
+}
+
+// SAFETY: system address space is valid in every context, and all access is
+// by volatile/atomic word operations that tolerate concurrent use.
+unsafe impl Send for LockedView {}
+// SAFETY: as above.
+unsafe impl Sync for LockedView {}
+
+impl LockedView {
+    pub fn len(&self) -> usize {
+        self.pages.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.pages.is_empty()
+    }
+
+    fn word(&self, offset: usize) -> *mut u32 {
+        assert!(
+            offset % 4 == 0 && offset.checked_add(4).is_some_and(|end| end <= self.pages.len()),
+            "register access outside the mapped view"
+        );
+        // SAFETY: the offset was just checked to lie inside the mapping.
+        unsafe { self.base.as_ptr().add(offset).cast::<u32>() }
+    }
+
+    /// Reads the word at byte `offset`. Panics if it is outside the view or
+    /// misaligned.
+    pub fn read_u32(&self, offset: usize) -> u32 {
+        // SAFETY: `word` returns an aligned pointer inside the live mapping.
+        unsafe { self.word(offset).read_volatile() }
+    }
+
+    /// Writes the word at byte `offset`.
+    pub fn write_u32(&self, offset: usize, value: u32) {
+        // SAFETY: `word` returns an aligned pointer inside the live mapping.
+        unsafe { self.word(offset).write_volatile(value) }
+    }
+
+    /// Stores the word at byte `offset` with a sequentially consistent
+    /// atomic store: a full memory barrier and a single store.
+    pub fn publish_u32(&self, offset: usize, value: u32) {
+        // SAFETY: `word` returns an aligned pointer inside the live mapping,
+        // valid for the duration of the call; atomic access is the correct
+        // way to touch memory that other processes modify concurrently.
+        unsafe { AtomicU32::from_ptr(self.word(offset)) }.store(value, Ordering::SeqCst);
+    }
+}
+
+impl Drop for LockedView {
+    fn drop(&mut self) {
+        // SAFETY: `base` is the address MmMapLockedPagesSpecifyCache
+        // returned for this MDL, unmapped exactly once, before the MDL is
+        // unlocked (the `pages` field is dropped after this runs).
+        unsafe { MmUnmapLockedPages(self.base.as_ptr().cast(), self.pages.mdl.as_ptr()) };
     }
 }

@@ -62,6 +62,20 @@ pub mod seh {
             alignment: u32,
         ) -> NTSTATUS;
 
+        /// `MmProbeAndLockPages` under an exception handler: makes the pages
+        /// the MDL describes resident and locks them in physical memory.
+        /// Returns the exception code if they cannot be locked.
+        ///
+        /// # Safety
+        ///
+        /// `mdl` must be an MDL from `IoAllocateMdl` that is not locked.
+        /// For a pageable range IRQL must be at most APC_LEVEL.
+        pub fn SarShimProbeAndLockPages(
+            mdl: wdk_sys::PMDL,
+            access_mode: wdk_sys::KPROCESSOR_MODE,
+            operation: wdk_sys::LOCK_OPERATION,
+        ) -> NTSTATUS;
+
         /// Copies `length` bytes to `destination`, catching a fault. No probe.
         ///
         /// # Safety
