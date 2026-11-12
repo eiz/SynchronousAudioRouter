@@ -23,6 +23,8 @@
 //   SAR_TEST_CLOCK_FRAMES   frames per callback      (default 480, 10 ms)
 //   SAR_TEST_CLOCK_INPUTS   dummy input channels     (default 2)
 //   SAR_TEST_CLOCK_OUTPUTS  dummy output channels    (default 2)
+//   SAR_TEST_CLOCK_SAMPLES  sample type of the channels: int32 (default),
+//                           int24 or float32
 
 #define NOMINMAX
 #define WIN32_LEAN_AND_MEAN
@@ -104,6 +106,15 @@ public:
         _bufferFrames = envLong(L"SAR_TEST_CLOCK_FRAMES", 480);
         _inputCount = envLong(L"SAR_TEST_CLOCK_INPUTS", 2);
         _outputCount = envLong(L"SAR_TEST_CLOCK_OUTPUTS", 2);
+
+        wchar_t samples[16] = {};
+        DWORD length = GetEnvironmentVariableW(L"SAR_TEST_CLOCK_SAMPLES", samples, 16);
+
+        if (length > 0 && length < 16 && _wcsicmp(samples, L"float32") == 0) {
+            _sampleType = Float32LSB;
+        } else if (length > 0 && length < 16 && _wcsicmp(samples, L"int24") == 0) {
+            _sampleType = Int24LSB;
+        }
     }
 
     virtual ~SoftwareClock()
@@ -304,7 +315,7 @@ public:
 
         info->isActive = _active ? AsioBool::True : AsioBool::False;
         info->group = 0;
-        info->sampleType = Int32LSB;
+        info->sampleType = _sampleType;
         sprintf_s(info->name, 32, "Clock %s %ld", isInput ? "In" : "Out", info->index + 1);
         return AsioStatus::OK;
     }
@@ -484,6 +495,7 @@ private:
     long _bufferFrames = 480;
     long _inputCount = 2;
     long _outputCount = 2;
+    AsioSampleType _sampleType = Int32LSB;
     bool _active = false;
     std::atomic<bool> _running{ false };
     AsioCallbacks _callbacks = {};

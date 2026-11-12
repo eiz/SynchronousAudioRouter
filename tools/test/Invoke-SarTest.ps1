@@ -773,6 +773,18 @@ if ($Scenarios -contains 'formats') {
     foreach ($wide in 4, 8, 32) {
         $summary.scenarios += Invoke-Scenario "channels-$wide" ($fmt + @('--rate', 48000, '--channels', $wide))
     }
+    # The hardware interface's sample type, which SarAsio gives its own
+    # channels too. With a 32-bit float interface it converts every sample
+    # on the way between the host and the endpoints, which stay integer; with
+    # a 24-bit one the endpoints' samples are three bytes.
+    try {
+        foreach ($samples in 'float32', 'int24') {
+            $env:SAR_TEST_CLOCK_SAMPLES = $samples
+            $summary.scenarios += Invoke-Scenario "samples-$samples" ($fmt + @('--rate', 48000, '--channels', 2))
+        }
+    } finally {
+        Remove-Item Env:SAR_TEST_CLOCK_SAMPLES -ErrorAction SilentlyContinue
+    }
     $summary.scenarios += Invoke-Scenario 'endpoints-32x2' (
         @('run', '--endpoints', 32, '--iterations', 1, '--duration', $Duration) + $common)
     $null = Wait-EndpointBuilderIdle -TimeoutSeconds 180
