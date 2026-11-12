@@ -6,6 +6,7 @@
 use alloc::boxed::Box;
 use core::{
     cell::UnsafeCell,
+    marker::PhantomData,
     mem::MaybeUninit,
     ops::{Deref, DerefMut},
     sync::atomic::{AtomicBool, Ordering},
@@ -14,10 +15,13 @@ use core::{
 use ntstatus::NtStatus;
 use wdk_sys::{
     ntddk::{
-        KeAcquireSpinLockRaiseToDpc, KeInitializeMutex, KeReleaseMutex, KeReleaseSpinLock,
-        KeWaitForSingleObject,
+        ExAcquireRundownProtection, ExReInitializeRundownProtection, ExReleaseRundownProtection,
+        ExRundownCompleted, ExWaitForRundownProtectionRelease, KeAcquireSpinLockRaiseToDpc,
+        KeEnterCriticalRegion, KeInitializeEvent, KeInitializeMutex, KeLeaveCriticalRegion,
+        KeReleaseMutex, KeReleaseSpinLock, KeSetEvent, KeWaitForSingleObject,
     },
-    KIRQL, KMUTEX, KSPIN_LOCK,
+    EX_RUNDOWN_REF, KEVENT, KIRQL, KMUTEX, KSPIN_LOCK,
+    _EX_RUNDOWN_REF__bindgen_ty_1 as EX_RUNDOWN_REF_VALUE,
 };
 
 use crate::alloc_ext::{try_box, Shared};
@@ -110,6 +114,177 @@ impl<T> Drop for MutexGuard<'_, T> {
         self.mutex.held.store(false, Ordering::Release);
         // SAFETY: this thread owns the mutex (the guard exists).
         unsafe { KeReleaseMutex(self.mutex.raw(), 0) };
+    }
+}
+
+/// Something that happens once and can be waited for: a kernel notification
+/// event that starts unset and stays set.
+///
+/// Waiting for one is not holding a lock: the waiter holds nothing, and
+/// whoever will set the event is not kept from anything.
+pub struct Completion {
+    // Boxed for the same reason as a mutex: the kernel object must not move.
+    raw: Box<UnsafeCell<MaybeUninit<KEVENT>>>,
+}
+
+// SAFETY: a kernel event may be set and waited on from any thread.
+unsafe impl Send for Completion {}
+// SAFETY: as above.
+unsafe impl Sync for Completion {}
+
+impl Completion {
+    pub fn try_new() -> Result<Self, NtStatus> {
+        let raw = try_box(UnsafeCell::new(MaybeUninit::<KEVENT>::uninit()))?;
+        // SAFETY: `raw` is writable storage for a KEVENT at its final
+        // address; KeInitializeEvent initialises it, not signalled.
+        unsafe {
+            KeInitializeEvent(
+                raw.get().cast::<KEVENT>(),
+                wdk_sys::_EVENT_TYPE::NotificationEvent,
+                0,
+            );
+        }
+        Ok(Self { raw })
+    }
+
+    /// Marks the thing as done and wakes everyone waiting. May be called
+    /// more than once, at or below `DISPATCH_LEVEL`.
+    pub fn set(&self) {
+        // SAFETY: an initialised event that outlives the call; the caller
+        // does not wait on it right after (Wait is false).
+        unsafe {
+            let _ = KeSetEvent(self.raw.get().cast::<KEVENT>(), 0, 0);
+        }
+    }
+
+    /// Returns once [`set`](Self::set) has been called. Must be called at
+    /// `PASSIVE_LEVEL` and, since it may wait, with no lock held.
+    pub fn wait(&self) {
+        // SAFETY: an initialised event that outlives the call. A
+        // non-alertable kernel-mode wait without timeout returns only when
+        // the event is signalled.
+        let _ = unsafe {
+            KeWaitForSingleObject(
+                self.raw.get().cast(),
+                wdk_sys::_KWAIT_REASON::Executive,
+                wdk_sys::_MODE::KernelMode as i8,
+                0,
+                core::ptr::null_mut(),
+            )
+        };
+    }
+}
+
+/// Run-down protection (`EX_RUNDOWN_REF`): a gate that any number of threads
+/// may be inside at once, and that can be shut in such a way that the one
+/// shutting it knows when everybody has left.
+///
+/// It serialises nothing and nobody waits to get in: entering either
+/// succeeds at once or, once the gate is being shut, fails at once.
+pub struct Rundown {
+    raw: UnsafeCell<EX_RUNDOWN_REF>,
+    /// Whether the gate has been shut and not opened again.
+    shut: AtomicBool,
+}
+
+// SAFETY: the structure is only ever handed to the run-down routines, which
+// use interlocked operations on it.
+unsafe impl Send for Rundown {}
+// SAFETY: as above.
+unsafe impl Sync for Rundown {}
+
+impl Rundown {
+    /// An open gate with nobody inside: the state
+    /// `ExInitializeRundownProtection` produces, which is all zero. (Being a
+    /// constant lets it be a `static`; the structure holds no pointer to
+    /// itself and may be moved while nobody is inside.)
+    pub const fn new() -> Self {
+        Self {
+            raw: UnsafeCell::new(EX_RUNDOWN_REF {
+                __bindgen_anon_1: EX_RUNDOWN_REF_VALUE { Count: 0 },
+            }),
+            shut: AtomicBool::new(false),
+        }
+    }
+
+    /// Enters, unless the gate has been shut. The gate cannot finish
+    /// shutting until the result is dropped.
+    ///
+    /// Must be called at `PASSIVE_LEVEL`. Until the result is dropped the
+    /// thread is in a critical region, so that it cannot be suspended while
+    /// somebody waits for it to leave.
+    pub fn enter(&self) -> Option<RundownGuard<'_>> {
+        // SAFETY: entering a critical region is always allowed at
+        // PASSIVE_LEVEL; it is left again below or in the guard's
+        // destructor. `raw` is an initialised run-down structure in
+        // non-paged memory.
+        unsafe {
+            KeEnterCriticalRegion();
+            if ExAcquireRundownProtection(self.raw.get()) == 0 {
+                KeLeaveCriticalRegion();
+                return None;
+            }
+        }
+        Some(RundownGuard {
+            gate: self,
+            _same_thread: PhantomData,
+        })
+    }
+
+    /// Shuts the gate: nobody enters from now on, and the call returns when
+    /// everybody who was inside has left. Shutting a gate that is shut does
+    /// nothing.
+    ///
+    /// Must be called at or below `APC_LEVEL`, and never at the same time
+    /// as another `shut` or [`open`](Self::open) of the same gate.
+    pub fn shut(&self) {
+        if self.shut.swap(true, Ordering::AcqRel) {
+            return;
+        }
+        // SAFETY: an initialised run-down structure; the caller's contract
+        // rules out a concurrent wait or re-initialisation.
+        unsafe {
+            ExWaitForRundownProtectionRelease(self.raw.get());
+            ExRundownCompleted(self.raw.get());
+        }
+    }
+
+    /// Opens a gate that was shut. Opening one that is open does nothing.
+    ///
+    /// Must be called at or below `APC_LEVEL`, and never at the same time
+    /// as a [`shut`](Self::shut) or another `open` of the same gate.
+    pub fn open(&self) {
+        if !self.shut.swap(false, Ordering::AcqRel) {
+            return;
+        }
+        // SAFETY: the structure was run down by `shut` (the flag was set),
+        // which is what re-initialising it requires.
+        unsafe { ExReInitializeRundownProtection(self.raw.get()) };
+    }
+}
+
+impl Default for Rundown {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Proof of being inside a [`Rundown`] gate. It stays on the thread that
+/// entered: leaving the critical region is that thread's to do.
+pub struct RundownGuard<'a> {
+    gate: &'a Rundown,
+    _same_thread: PhantomData<*mut ()>,
+}
+
+impl Drop for RundownGuard<'_> {
+    fn drop(&mut self) {
+        // SAFETY: releases the protection `enter` acquired and leaves the
+        // critical region it entered, once each, on the same thread (the
+        // guard is not `Send`).
+        unsafe {
+            ExReleaseRundownProtection(self.gate.raw.get());
+            KeLeaveCriticalRegion();
+        }
     }
 }
 
