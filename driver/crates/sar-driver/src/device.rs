@@ -6,6 +6,7 @@
 #![forbid(unsafe_code)]
 
 use alloc::collections::VecDeque;
+use core::sync::atomic::AtomicBool;
 
 use ks::device::{Device, DeviceHandler, RegistryPath};
 use ntk::{
@@ -23,11 +24,21 @@ use sar_core::{
     endpoint::WideString,
 };
 
-use crate::{control::ControlHandle, publish::PublishJob, regfilter::RoutingFilter};
+use crate::{
+    control::ControlHandle,
+    endpoint::Identities,
+    publish::PublishQueue,
+    regfilter::RoutingFilter,
+};
 
 /// State that exists once per loaded driver.
 pub struct DriverState {
     pub handle: DriverHandle,
+    /// Set by the request that starts the registry filter, for good once
+    /// the filter is registered. The registration itself is a call into the
+    /// registry and is made with no lock held (section 14); this is what
+    /// keeps a second request from making it too.
+    pub registry_filter_claimed: AtomicBool,
     /// The application-routing registry filter, once a host has started it.
     /// It stays until the driver unloads (section 10, "Lifetime").
     pub registry_filter: Mutex<Option<RegistryCallback<RoutingFilter>>>,
@@ -41,7 +52,9 @@ pub struct DeviceState {
     control_interface: Mutex<Option<DeviceInterface>>,
     /// Endpoints waiting to be published, oldest first (section 5: several
     /// create requests "are finished in the order they were made").
-    pub publish_queue: Mutex<VecDeque<PublishJob>>,
+    pub publish_queue: Mutex<PublishQueue>,
+    /// The identities of the endpoints whose filter factories exist.
+    pub identities: Identities,
 }
 
 /// The type the kernel-facing traits are implemented on.
@@ -51,6 +64,7 @@ pub struct Sar;
 pub fn driver_entry(driver: &mut DriverObject, registry_path: &RegistryPath) -> Result<(), NtStatus> {
     let state = Shared::try_new(DriverState {
         handle: DriverHandle::new(driver),
+        registry_filter_claimed: AtomicBool::new(false),
         registry_filter: Mutex::try_new(None)?,
     })?;
 
@@ -74,7 +88,11 @@ impl DeviceHandler for Sar {
     fn add(_device: &Device) -> Result<Shared<DeviceState>, NtStatus> {
         Shared::try_new(DeviceState {
             control_interface: Mutex::try_new(None)?,
-            publish_queue: Mutex::try_new(VecDeque::new())?,
+            publish_queue: Mutex::try_new(PublishQueue {
+                jobs: VecDeque::new(),
+                draining: false,
+            })?,
+            identities: Identities::try_new()?,
         })
     }
 

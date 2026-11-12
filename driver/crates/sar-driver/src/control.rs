@@ -5,6 +5,7 @@
 #![forbid(unsafe_code)]
 
 use alloc::vec::Vec;
+use core::sync::atomic::Ordering;
 
 use ks::device::Device;
 use ntk::{
@@ -27,7 +28,7 @@ use sar_core::{
     },
     endpoint::{EndpointRequest, WideString},
     layout::{LayoutReply, LayoutRequest},
-    notify::{Notification, NotificationQueue, WaitDisposition},
+    notify::{Batch, NotificationQueue, WaitDisposition},
     registry::FILTER_ALTITUDE,
 };
 
@@ -72,7 +73,7 @@ impl ControlHandle {
                 host_view: None,
                 endpoints: Vec::new(),
             })?,
-            notifications: Shared::try_new(IrpQueue::try_new(NotificationQueue::new())?)?,
+            notifications: Shared::try_new(IrpQueue::try_new(NotificationQueue::try_new()?)?)?,
         })
     }
 
@@ -85,11 +86,32 @@ impl ControlHandle {
             (core::mem::take(&mut state.endpoints), state.host_view.take())
         };
 
-        // 2. Each endpoint is withdrawn.
+        // 2. Each endpoint is withdrawn, one at a time, the device mutex
+        // being taken and released inside for each kernel streaming call
+        // that needs it, so that a client's open or close of any filter on
+        // the device never waits for more than one such call (section 14).
+        // Until its turn comes an endpoint goes on working. What all of
+        // them are told first, which touches memory only, is that they are
+        // going: nothing new is begun on them, and a request for an
+        // endpoint with the identity of one of them waits for it to go.
+        //
+        // An endpoint that another thread is still creating or publishing
+        // is taken down by that thread. This one waits for it, so that when
+        // the close has finished nothing of the handle's is left in kernel
+        // streaming; but only after it has withdrawn every endpoint it can
+        // withdraw itself, because the other thread may in turn be waiting
+        // for one of those to go (`Identities`).
+        for endpoint in &endpoints {
+            endpoint.announce_withdrawal();
+        }
         if let Some(device) = Device::of(device) {
-            let guard = device.lock();
-            for endpoint in &endpoints {
-                endpoint.withdraw(&guard);
+            if let Some(device_state) = device.context::<Sar>() {
+                for endpoint in &endpoints {
+                    let _ = endpoint.withdraw(device, &device_state.identities);
+                }
+                for endpoint in &endpoints {
+                    endpoint.wait_withdrawn();
+                }
             }
         }
         drop(endpoints);
@@ -173,7 +195,8 @@ fn set_buffer_layout(control: &ControlHandle, irp: Irp) -> DispatchResult {
             None
         }
     };
-    if let Some(status) = refusal(&control.state.lock()) {
+    let refused = refusal(&control.state.lock());
+    if let Some(status) = refused {
         return irp.complete(status);
     }
 
@@ -237,47 +260,96 @@ fn create_endpoint(device: &DeviceObject, control: &Shared<ControlHandle>, irp: 
         return irp.complete(NtStatus::INVALID_DEVICE_REQUEST);
     };
 
-    // Everything that can fail for lack of memory is obtained before the
-    // endpoint exists, so that nothing has to be undone after the request
-    // has been marked pending.
+    // The work item is obtained before the endpoint exists, so that queuing
+    // it cannot fail once the request has been marked pending.
     let work = match WorkItem::try_new(ks_device.functional_device_object()) {
         Ok(work) => work,
         Err(status) => return irp.complete(status),
     };
 
-    // Lock order: device mutex, then the control handle, then the queue.
-    let guard = ks_device.lock();
-    let mut state = control.state.lock();
-    if state.closing {
-        return irp.complete(NtStatus::FILE_CLOSED);
-    }
-    let Some(section) = state.section.clone() else {
-        return irp.complete(NtStatus::INVALID_STATE_TRANSITION);
-    };
+    // May the endpoint be created at all? Decided under the control
+    // handle's lock, which is then released: creating the filter factories
+    // takes tens of milliseconds, and other requests on this handle (a
+    // "wait for notification events" above all) are not to be held up by
+    // it (section 14).
+    //
     // Two endpoints with one index would share a register record. (The
     // specification lists "indexes are not checked for reuse" as a gap.)
-    if state.endpoints.iter().any(|e| e.index() == request.index) {
-        return irp.complete(NtStatus::INVALID_PARAMETER);
-    }
-    let mut queue = device_state.publish_queue.lock();
-    if state.endpoints.try_reserve(1).is_err() || queue.try_reserve(1).is_err() {
-        return irp.complete(NtStatus::INSUFFICIENT_RESOURCES);
-    }
-
-    let endpoint = match Endpoint::create(&guard, &request, section, control.notifications.clone()) {
+    let refusal = |state: &ControlState| {
+        if state.closing {
+            Some(NtStatus::FILE_CLOSED)
+        } else if state.section.is_none() {
+            Some(NtStatus::INVALID_STATE_TRANSITION)
+        } else if state.endpoints.iter().any(|e| e.index() == request.index) {
+            Some(NtStatus::INVALID_PARAMETER)
+        } else {
+            None
+        }
+    };
+    let section = {
+        let state = control.state.lock();
+        match refusal(&state) {
+            Some(status) => Err(status),
+            None => state.section.clone().ok_or(NtStatus::INVALID_STATE_TRANSITION),
+        }
+    };
+    let section = match section {
+        Ok(section) => section,
+        Err(status) => return irp.complete(status),
+    };
+    let endpoint = match Endpoint::try_new(&request, section, control.notifications.clone()) {
         Ok(endpoint) => endpoint,
         Err(status) => return irp.complete(status),
     };
-    state.endpoints.push(endpoint.clone());
+
+    // The endpoint joins the handle's endpoints before its factories exist.
+    // That reserves its index, and it lets a close of the handle that comes
+    // while the factories are being created see the endpoint and wait for
+    // it to be undone.
+    let refused = {
+        let mut state = control.state.lock();
+        let refused = refusal(&state).or_else(|| {
+            state
+                .endpoints
+                .try_reserve(1)
+                .is_err()
+                .then_some(NtStatus::INSUFFICIENT_RESOURCES)
+        });
+        if refused.is_none() {
+            state.endpoints.push(endpoint.clone());
+        }
+        refused
+    };
+    if let Some(status) = refused {
+        return irp.complete(status);
+    }
+
+    // The factories are created with no lock of the driver's held.
+    if let Err(status) = Endpoint::create_factories(&endpoint, ks_device, &device_state.identities) {
+        control.forget_endpoint(&endpoint);
+        return irp.complete(status);
+    }
+
+    // The request is marked pending and queued in one step under the
+    // queue's lock, so that requests are published in the order in which
+    // they got here.
+    let mut queue = device_state.publish_queue.lock();
+    if queue.jobs.try_reserve(1).is_err() {
+        drop(queue);
+        if !endpoint.withdraw(ks_device, &device_state.identities) {
+            // The control handle is closing and has taken it over.
+            endpoint.wait_withdrawn();
+        }
+        control.forget_endpoint(&endpoint);
+        return irp.complete(NtStatus::INSUFFICIENT_RESOURCES);
+    }
     let (request, result) = irp.pend();
-    queue.push_back(PublishJob {
+    queue.jobs.push_back(PublishJob {
         endpoint,
         control: control.clone(),
         request,
     });
     drop(queue);
-    drop(state);
-    drop(guard);
     work.queue::<PublishWork>(device_state);
     result
 }
@@ -288,24 +360,17 @@ fn wait_notifications(control: &ControlHandle, mut irp: Irp) -> DispatchResult {
     let capacity = notification_capacity(irp.output_length());
 
     let mut disposition = WaitDisposition::Pend;
-    let mut batch: Vec<Notification<EventObject>> = Vec::new();
-    let mut out_of_memory = false;
+    // Events come out of the queue a batch at a time. The batch is on this
+    // thread's stack and of a fixed size: the queue's lock is a spin lock
+    // the host's real-time thread takes, and nothing is allocated, and no
+    // more than a batch copied, while it is held (section 14).
+    let mut batch: Batch<EventObject> = Batch::new();
     // Decided under the queue's lock, so that an event registered at the
     // same moment either is seen here or finds this request parked.
     let parked = control.notifications.park_if(irp, |queue| {
         disposition = queue.wait_disposition(capacity);
         if disposition == WaitDisposition::Deliver {
-            let take = capacity.min(queue.len());
-            if batch.try_reserve_exact(take).is_err() {
-                out_of_memory = true;
-            } else {
-                while batch.len() < take {
-                    match queue.pop() {
-                        Some(notification) => batch.push(notification),
-                        None => break,
-                    }
-                }
-            }
+            queue.take(&mut batch, capacity);
         }
         disposition == WaitDisposition::Pend
     });
@@ -314,9 +379,6 @@ fn wait_notifications(control: &ControlHandle, mut irp: Irp) -> DispatchResult {
         Err(irp) => irp,
     };
 
-    if out_of_memory {
-        return irp.complete(NtStatus::INSUFFICIENT_RESOURCES);
-    }
     match disposition {
         WaitDisposition::BufferTooSmall => {
             irp.complete(IoStatus::new(NtStatus::BUFFER_TOO_SMALL, NOTIFICATION_RECORD_SIZE))
@@ -326,23 +388,39 @@ fn wait_notifications(control: &ControlHandle, mut irp: Irp) -> DispatchResult {
         WaitDisposition::Pend => irp.complete(NtStatus::UNSUCCESSFUL),
         WaitDisposition::Deliver => {
             let output = irp.buffered_output();
+            let mut taken = 0;
             let mut filled = 0;
-            for notification in batch {
-                // A handle is only ever created on a thread of the process
-                // that will own it: this one. An event that cannot be turned
-                // into a handle is dropped; the others are still delivered.
-                let Ok(handle) = notification.event.open_handle_in_current_process() else {
-                    continue;
-                };
-                let record = encode_notification(handle, notification.generation, notification.index);
-                let start = filled * NOTIFICATION_RECORD_SIZE;
-                match output.get_mut(start..start + NOTIFICATION_RECORD_SIZE) {
-                    Some(slot) => {
+            loop {
+                taken += batch.len();
+                // The lock is not held here: handles are created, and the
+                // chunk of the queue the batch emptied, if any, is freed.
+                for notification in batch.drain() {
+                    // A handle is only ever created on a thread of the
+                    // process that will own it: this one. An event that
+                    // cannot be turned into a handle is dropped; the others
+                    // are still delivered.
+                    let Ok(handle) = notification.event.open_handle_in_current_process() else {
+                        continue;
+                    };
+                    let record = encode_notification(handle, notification.generation, notification.index);
+                    let start = filled * NOTIFICATION_RECORD_SIZE;
+                    // Cannot fail: at most `capacity` events are taken.
+                    if let Some(slot) = output.get_mut(start..start + NOTIFICATION_RECORD_SIZE) {
                         slot.copy_from_slice(&record);
                         filled += 1;
                     }
-                    // Cannot happen: at most `capacity` events were taken.
-                    None => break,
+                }
+                // "As many as fit": while the caller's buffer has room and
+                // events are waiting, take another batch, under a hold of
+                // the lock of its own.
+                if taken >= capacity {
+                    break;
+                }
+                control
+                    .notifications
+                    .with_state(|queue| queue.take(&mut batch, capacity - taken));
+                if batch.is_empty() {
+                    break;
                 }
             }
             irp.complete(IoStatus::new(NtStatus::SUCCESS, filled * NOTIFICATION_RECORD_SIZE))
@@ -356,22 +434,29 @@ fn start_registry_filter() -> NtStatus {
     let Some(driver) = DRIVER.get() else {
         return NtStatus::UNSUCCESSFUL;
     };
-    let mut slot = driver.registry_filter.lock();
-    if slot.is_some() {
+    // Registering the callback is a call into the registry, and reading the
+    // caller's user opens its token: neither is made under a lock (section
+    // 14). What keeps the filter from being started twice is a claim that
+    // the first request stakes and keeps if it succeeds. A request that
+    // arrives while another is still registering the callback is answered
+    // like one that arrives afterwards.
+    if driver.registry_filter_claimed.swap(true, Ordering::AcqRel) {
         return NtStatus::RESOURCE_IN_USE;
     }
-    let user = match UserSid::of_current_process() {
-        Ok(user) => user,
-        Err(status) => return status,
-    };
-    let Some(altitude) = WideString::<16>::from_ascii(FILTER_ALTITUDE) else {
-        return NtStatus::UNSUCCESSFUL;
-    };
-    match RegistryCallback::register(driver.handle, altitude.as_units(), RoutingFilter::new(user)) {
+    let started = UserSid::of_current_process().and_then(|user| {
+        let altitude = WideString::<16>::from_ascii(FILTER_ALTITUDE).ok_or(NtStatus::UNSUCCESSFUL)?;
+        RegistryCallback::register(driver.handle, altitude.as_units(), RoutingFilter::new(user))
+    });
+    match started {
         Ok(callback) => {
-            *slot = Some(callback);
+            let previous = driver.registry_filter.lock().replace(callback);
+            drop(previous);
             NtStatus::SUCCESS
         }
-        Err(status) => status,
+        Err(status) => {
+            // Nothing was started: the next request may try.
+            driver.registry_filter_claimed.store(false, Ordering::Release);
+            status
+        }
     }
 }
