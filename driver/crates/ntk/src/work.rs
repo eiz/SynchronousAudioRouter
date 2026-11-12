@@ -3,6 +3,7 @@
 
 //! System worker threads.
 
+use alloc::boxed::Box;
 use core::{ffi::c_void, ptr::NonNull};
 
 use ntstatus::NtStatus;
@@ -31,6 +32,9 @@ pub struct WorkItem {
 
 // SAFETY: an unqueued work item is plain memory owned by this value.
 unsafe impl Send for WorkItem {}
+// SAFETY: nothing can be done with a shared reference to one: queuing and
+// dropping both take the value.
+unsafe impl Sync for WorkItem {}
 
 impl WorkItem {
     /// Allocates a work item tied to `device`: the device object (and with
@@ -61,6 +65,28 @@ impl WorkItem {
     }
 }
 
+impl WorkItem {
+    /// Queues the dropping of `value` to the delayed work queue: its
+    /// destructor runs on a system worker thread, at `PASSIVE_LEVEL` and
+    /// with no lock of the caller's held, however little the caller may be
+    /// able to afford just now. May be called up to `DISPATCH_LEVEL`.
+    pub fn queue_drop<T: Send + 'static>(self, value: Box<T>) {
+        let raw = self.raw.as_ptr();
+        core::mem::forget(self);
+        // SAFETY: `raw` is an unqueued work item; `drop_routine::<T>`
+        // matches IO_WORKITEM_ROUTINE_EX, takes back the box passed here
+        // exactly once and frees the work item.
+        unsafe {
+            IoQueueWorkItemEx(
+                raw,
+                Some(drop_routine::<T>),
+                wdk_sys::_WORK_QUEUE_TYPE::DelayedWorkQueue,
+                Box::into_raw(value).cast(),
+            );
+        }
+    }
+}
+
 impl Drop for WorkItem {
     fn drop(&mut self) {
         // SAFETY: the item was allocated by IoAllocateWorkItem and never
@@ -79,6 +105,15 @@ unsafe extern "C" fn routine<R: WorkRoutine>(io_object: *mut c_void, context: *m
     let device = unsafe { DeviceObject::from_raw(io_object.cast()) };
     R::run(device, &context);
     drop(context);
+    // SAFETY: the work item passed to its own routine may be freed there;
+    // nothing else refers to it.
+    unsafe { IoFreeWorkItem(item) };
+}
+
+unsafe extern "C" fn drop_routine<T>(_io_object: *mut c_void, context: *mut c_void, item: PIO_WORKITEM) {
+    // SAFETY: `context` is the box `queue_drop` converted with `into_raw`,
+    // delivered exactly once.
+    drop(unsafe { Box::from_raw(context.cast::<T>()) });
     // SAFETY: the work item passed to its own routine may be freed there;
     // nothing else refers to it.
     unsafe { IoFreeWorkItem(item) };
