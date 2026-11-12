@@ -19,7 +19,54 @@
 #include "sarclient.h"
 #include "utility.h"
 
+#include <cmath>
+
 namespace Sar {
+
+namespace {
+
+// An endpoint's buffer is integer PCM. When the hardware interface's samples
+// are 32-bit float, the virtual channels' are too, because a host wants one
+// sample type across a device, and each sample is converted on its way
+// between the endpoint and the host: full scale is 2^31 on one side and 1.0
+// on the other. Each direction rounds to what the other side can hold, an
+// integer sample to the 24 significant bits of a float and a float to the
+// nearest 2^-31 of full scale, and a float outside full scale is clipped.
+inline void floatFromInt32(char *target, const char *source)
+{
+    int32_t value;
+
+    memcpy(&value, source, sizeof(value));
+
+    float converted = (float)((double)value * (1.0 / 2147483648.0));
+
+    memcpy(target, &converted, sizeof(converted));
+}
+
+inline void int32FromFloat(char *target, const char *source)
+{
+    float value;
+
+    memcpy(&value, source, sizeof(value));
+
+    double scaled = (double)value * 2147483648.0;
+    int32_t converted;
+
+    if (scaled >= 2147483647.0) {
+        converted = INT32_MAX;
+    } else if (scaled <= -2147483648.0) {
+        converted = INT32_MIN;
+    } else if (scaled != scaled) {
+        // Not a number. Silence, not whatever the cast would make of it.
+        converted = 0;
+    } else {
+        converted = (int32_t)lrint(scaled);
+    }
+
+    memcpy(target, &converted, sizeof(converted));
+}
+
+} // namespace
 
 SarClient::SarClient(
     const DriverConfig& driverConfig,
@@ -113,13 +160,15 @@ void SarClient::tick(long bufferIndex)
                 endpointDataFirst, firstSize,
                 endpointDataSecond, secondSize,
                 asioBuffers.data(), ntargets, activeChannelCount,
-                asioBufferSize, _bufferConfig.sampleSize);
+                asioBufferSize, _bufferConfig.sampleSize,
+                _bufferConfig.floatSamples);
         } else {
             mux(
                 endpointDataFirst, firstSize,
                 endpointDataSecond, secondSize,
                 asioBuffers.data(), ntargets, activeChannelCount,
-                asioBufferSize, _bufferConfig.sampleSize);
+                asioBufferSize, _bufferConfig.sampleSize,
+                _bufferConfig.floatSamples);
         }
 
         auto lateGeneration = _registers[i].generation;
@@ -474,7 +523,7 @@ void SarClient::demux(
     void *muxBufferFirst, size_t firstSize,
     void *muxBufferSecond, size_t secondSize,
     void **targetBuffers, int ntargets, int nsources,
-    size_t targetSize, int sampleSize)
+    size_t targetSize, int sampleSize, bool floatSamples)
 {
     int i;
     size_t sourceStride = (size_t)(sampleSize * nsources);
@@ -494,7 +543,12 @@ void SarClient::demux(
              j < targetSize && remaining >= sourceStride;
              j += sampleSize) {
 
-            memcpy((char *)(targetBuffers[i]) + j, buf, sampleSize);
+            if (floatSamples) {
+                floatFromInt32((char *)(targetBuffers[i]) + j, buf);
+            } else {
+                memcpy((char *)(targetBuffers[i]) + j, buf, sampleSize);
+            }
+
             buf += sourceStride;
             remaining -= sourceStride;
 
@@ -518,7 +572,7 @@ void SarClient::mux(
     void *muxBufferFirst, size_t firstSize,
     void *muxBufferSecond, size_t secondSize,
     void **targetBuffers, int ntargets, int nsources,
-    size_t targetSize, int sampleSize)
+    size_t targetSize, int sampleSize, bool floatSamples)
 {
     size_t sourceStride = (size_t)(sampleSize * nsources);
     if (nsources > ntargets)
@@ -538,7 +592,12 @@ void SarClient::mux(
              j < targetSize && remaining >= sourceStride;
              j += sampleSize) {
 
-            memcpy(buf, (char *)(targetBuffers[i]) + j, sampleSize);
+            if (floatSamples) {
+                int32FromFloat(buf, (char *)(targetBuffers[i]) + j);
+            } else {
+                memcpy(buf, (char *)(targetBuffers[i]) + j, sampleSize);
+            }
+
             buf += sourceStride;
             remaining -= sourceStride;
 
