@@ -32,27 +32,30 @@ unsafe impl Send for EventObject {}
 unsafe impl Sync for EventObject {}
 
 impl EventObject {
-    /// Resolves `handle` in the current process's handle table. The handle
-    /// must name an event object and grant the "modify state" right; with
-    /// `user_mode` the check is made with the caller's own rights. Fails
-    /// with the object manager's status otherwise.
-    pub fn from_handle(handle: u64, user_mode: bool) -> Result<Self, NtStatus> {
-        let mode = if user_mode {
-            wdk_sys::_MODE::UserMode
-        } else {
-            wdk_sys::_MODE::KernelMode
-        };
+    /// Resolves `handle` as a handle of the process the calling thread runs
+    /// in, with that process's own rights: it must be in the process's own
+    /// handle table, name an event object and grant the "modify state"
+    /// right. Fails with the object manager's status otherwise.
+    ///
+    /// The lookup is always made with user access, and there is no way to
+    /// ask for another. A handle value that arrives in a request is the
+    /// requesting process's, whatever the request says about its origin
+    /// (requests from 32-bit processes arrive marked as kernel-mode ones). A
+    /// lookup with kernel access would skip the access check and accept the
+    /// value of a kernel handle.
+    pub fn from_user_handle(handle: u64) -> Result<Self, NtStatus> {
         let mut object: *mut c_void = core::ptr::null_mut();
         // SAFETY: `handle` is an untrusted value that the object manager
-        // validates against the handle table, the required access and the
-        // event object type. `ExEventObjectType` is a kernel export that
-        // points at the type object. `object` receives a referenced pointer.
+        // validates, as a user-mode caller's, against the handle table, the
+        // required access and the event object type. `ExEventObjectType` is
+        // a kernel export that points at the type object. `object` receives
+        // a referenced pointer.
         let status = unsafe {
             ObReferenceObjectByHandle(
                 handle as usize as HANDLE,
                 EVENT_MODIFY_STATE,
                 *ExEventObjectType,
-                mode as i8,
+                wdk_sys::_MODE::UserMode as i8,
                 &mut object,
                 core::ptr::null_mut(),
             )
@@ -90,7 +93,7 @@ impl EventObject {
 
 impl Drop for EventObject {
     fn drop(&mut self) {
-        // SAFETY: releases the reference taken in `from_handle`.
+        // SAFETY: releases the reference taken in `from_user_handle`.
         unsafe { ObfDereferenceObject(self.object.as_ptr()) };
     }
 }

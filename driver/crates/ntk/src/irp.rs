@@ -166,12 +166,6 @@ impl Irp {
         self.device_control().map_or(0, |d| d.2)
     }
 
-    /// Whether the request came from user mode.
-    pub fn requestor_is_user(&self) -> bool {
-        // SAFETY: the IRP is valid while `self` exists.
-        unsafe { self.raw.as_ref() }.RequestorMode != wdk_sys::_MODE::KernelMode as i8
-    }
-
     /// The file object the request is for.
     pub fn file(&self) -> Option<FileRef<'_>> {
         NonNull::new(self.stack().FileObject).map(|raw| FileRef {

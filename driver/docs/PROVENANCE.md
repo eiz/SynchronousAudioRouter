@@ -140,6 +140,36 @@ The pages were fetched as before: by address, from learn.microsoft.com only,
 with no web search. No crate source was opened. No header was read for this
 change.
 
+## Requests of 32-bit clients (A.8)
+
+The same engineer, in the same session, then changed how a client's event
+handle is looked up and went through what else a request carries
+(`SPEC-GAPS.md`, section K). What was consulted for that, beyond the above:
+
+| Source | What was taken |
+|---|---|
+| `docs/behavior.md`, A.8 as extended ("Whose handle it is" and the closing paragraph) | The requirement. |
+| The brief for the task | That requests from 32-bit processes reach the driver through `ksthunk.sys` marked as kernel-mode requests (also in A.8 now); how to run the rig with the 32-bit tools. |
+| `rig-results/thunk-evidence/` (a run of this driver with the 32-bit test tools, made by the engineer who briefed the work: the bugcheck analysis, the conformance test's log up to the stop) | Where the driver stopped the machine and with which handle; the addresses a 32-bit host is given for its section. |
+| WDK 10.0.26100.0 `shared/ksmedia.h` | The WaveRT structures and their 32-bit variants (`KSRTAUDIO_BUFFER32`, `KSRTAUDIO_HWREGISTER32`, `KSRTAUDIO_NOTIFICATION_EVENT_PROPERTY32` and the request structures), to see which fields differ in size. |
+| This build's generated `wdk-sys` bindings (in the Windows build directory) | The declarations of `IoIs32bitProcess`, `ZwCreateEvent`, `PsGetCurrentProcessId`, `PsSetLoadImageNotifyRoutine` and `KeQueryPerformanceCounter`, for the temporary probes only. |
+| learn.microsoft.com `.../ddi/wdm/nf-wdm-obreferenceobjectbyhandle` | "Drivers should always specify UserMode for handles they receive from user address space"; with user access the requested access is compared with the granted one; Driver Verifier's stop 0xC4, 0xF6 for a user handle looked up with kernel access. |
+| `.../audio/ksproperty-rtaudio-register-notification-event`, `.../audio/ksproperty-rtaudio-buffer` | The request carries "a user-mode event handle"; the client should ask for a null base address and is given "the virtual address of the allocated audio buffer". Nothing about 32-bit clients. |
+| `.../ddi/ksmedia/ns-ksmedia-ksrtaudio_buffer32`, `.../ns-ksmedia-ksrtaudio_notification_event_property32` | The 32-bit structures are documented by their members' names only. |
+| `.../kernel/supporting-32-bit-i-o-in-your-64-bit-driver`, `.../ddi/wdm/nf-wdm-iois32bitprocess` | The contents of device control buffers are not converted for a 32-bit caller, which is why something has to; `IoIs32bitProcess` only answers for the request the I/O manager issued for a user-mode process. |
+| `.../ddi/wdm/nf-wdm-zwmapviewofsection` | With a null base address the system chooses where the view goes. |
+| learn.microsoft.com (Win32) `.../winprog64/wow64-implementation-details`, `.../winprog64/performance-and-memory-consumption` | In a 32-bit process "all user-mode address space above the 32-bit limit is reserved by the system"; the limit is 2 GB, or 4 GB for a large-address-aware image. |
+| `.../winprog64/registry-redirector`, `.../winprog64/shared-registry-keys` | Where a 32-bit process's view of the class registrations is kept (`...\SOFTWARE\Classes\Wow6432Node\CLSID`), read to judge the `app-routing` failure of the 32-bit tools. |
+| `.../ddi/ks/nc-ks-pfnkshandler`, `.../nf-ks-kspropertyhandler` | A property handler is given "an aligned copy" of the request and of the value. |
+| `.../ddi/ks/nc-ks-pfnksintersecthandlerex`, `.../nf-ks-kspindataintersectionex` | The arguments of the intersection handler. Nothing about what has been validated. |
+| `.../ddi/ks/nf-ks-ksvalidateconnectrequest`, `.../nc-ks-pfnkspinirp` | A connection request's "basic data format" is validated; "the buffer is passed a copy of the original input buffer, if the originator was not in kernel mode". |
+| The result files of the rig runs `cleanroom-thunk-*` under `rig-results/` (console output, scenario logs, the bugcheck analyses of this driver's own probe builds) | The measurements recorded in `SPEC-GAPS.md`, items 47 to 54. |
+
+Two web searches were made for this work, both restricted to
+learn.microsoft.com, to find any documentation of `ksthunk.sys`. They found
+none. The result lists named some question-and-answer threads hosted there;
+none was opened. Every page above was fetched by its address.
+
 ## Accidental exposure log
 
 - At session start the agent's context contained an automatically attached
@@ -197,3 +227,10 @@ For the session that made the cached filter data change:
   with `cd <the workspace> &&`, every rig run was given an absolute `--out`,
   and the background output files under `/tmp/claude-1000/...` were again
   left unread.
+- For the work on 32-bit clients, still the same session: the result files
+  include log files written by SarAsio itself. One of them was opened, for
+  the host of the `app-routing` scenario, to see which processes had
+  written one; its lines carry the names of source files and functions of
+  SarAsio's user-mode ASIO wrapper. They were read as test output and say
+  nothing about the kernel driver. Shell commands, `--out` and the
+  background output files were handled as before.

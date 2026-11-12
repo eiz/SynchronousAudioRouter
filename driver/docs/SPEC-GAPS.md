@@ -169,6 +169,9 @@ independently confirmed.
     still read in the right address space. **[rig]** (the stack trace; a
     32-bit client was not tested)
 
+    *Later (section K).* A 32-bit client has since been tested, and what
+    arrives was measured: items 47 to 54.
+
 21. **[section 7] Format matching when the caller's range admits zero
     channels.** "Reduced to the caller's maximum if that is lower" would
     yield a format with 0 channels. Answered with `STATUS_NO_MATCH`. [guess]
@@ -203,6 +206,10 @@ independently confirmed.
     Implemented: the stream keeps one register view per process; the
     position-register property maps one on demand for a process that has
     none. [guess]
+
+    *Later (item 51).* The condition matters every time for an
+    exclusive-mode stream: its pin is not created by the process that then
+    uses it.
 
 28. **[A.9] Information value of successful "set" property requests**
     (proposed format, channel configuration, register notification event).
@@ -337,6 +344,8 @@ Not exercised by any scenario, so only reasoned about:
 - Item 1 for a layout whose audio area is not a multiple of 65,536 bytes (it
   is not known which `bufferSize` values the host uses).
 - 32-bit hosts and 32-bit clients; the 32-bit registry redirections.
+  (True when this was written. The test tools now exist as 32-bit builds;
+  see section K.)
 - A process restricted to Microsoft-signed images (item 32).
 - Every refusal path of the control interface (bad lengths, bad pointers,
   out-of-range parameters), the section 13 choices, a second buffer request,
@@ -588,3 +597,199 @@ run had created.
       and empties its bag like any other. Whether a scenario produced one is
       not known.
     - Other versions of Windows than the rig's.
+
+## K. Requests of 32-bit clients, and what a request says about its origin (A.8)
+
+A.8 gained "Whose handle it is" and its closing paragraph after the suite,
+run with 32-bit test tools, stopped the machine in the driver: Driver
+Verifier 0xC4, subcode 0xF6 ("a driver references a user-mode handle as
+kernel mode"), when a 32-bit client registered the event of an
+exclusive-mode stream.
+
+47. **[A.8] Why a 32-bit client's event handle was looked up with kernel
+    access.** The kernel streaming wrapper told the driver whether a
+    property request was marked as coming from user mode, and the driver
+    looked the event handle up with user access only then, and with kernel
+    access otherwise. The mark is not the caller's. The requests of a 32-bit
+    process that need converting reach the driver marked as kernel-mode
+    requests, with the process's own handle value in them (item 48).
+    `ObReferenceObjectByHandle` is documented for this: "Drivers should
+    always specify UserMode for handles they receive from user address
+    space", and Driver Verifier stops the machine with exactly this code
+    when a driver does otherwise. [doc]
+
+    Resolved: the handle is always looked up with user access, in the
+    process the request runs in. And nothing can ask for anything else: the
+    property request the wrapper hands the driver no longer says how the
+    request was marked, and the unused accessor for the same mark on a
+    control request was removed. Neither `ks` nor `sar-driver` reads a
+    request's origin mark any more. **[rig]**
+
+    - Run `cleanroom-thunk-fix32-20261111-180338` (32-bit tools, `issues`,
+      `conformance`): the conformance test passes through to its end. A
+      32-bit client opens an exclusive-mode, event-driven stream, the host is
+      handed the event the client registered, the client's event is
+      signalled when the host signals its handle, and the client refills its
+      buffer twenty times.
+    - Run `cleanroom-thunk-probeK-20261111-182757` (64-bit tools, `issues`):
+      a build that, on the first registration, created an event with a
+      kernel handle and looked that handle's value up the way a client's is,
+      then stopped on purpose. The client's own handle (0x3F0, in the audio
+      engine's process) had been accepted. The kernel handle's value
+      (0xFFFFFFFF80002A5C) was refused with `STATUS_INVALID_HANDLE`, and the
+      current-process pseudo-handle with `STATUS_OBJECT_TYPE_MISMATCH`. That
+      is the object manager's answer for "a value that names a kernel
+      handle".
+
+48. **[A.8; item 20] How the requests of a 32-bit client arrive.** Microsoft
+    documents the 32-bit WaveRT structures by name only
+    (`KSRTAUDIO_BUFFER32` and the others have no remarks at all) and does
+    not document `ksthunk.sys`; a search of learn.microsoft.com found no
+    page that describes it. What follows was measured. **[rig]** Run
+    `cleanroom-thunk-probeT32-20261111-183241` (32-bit tools, `issues`,
+    `conformance`, `unload`) counted what the wrapper saw and reported it
+    when the device was first told to stop:
+
+    - Exactly three property requests arrived marked as coming from kernel
+      mode: buffer with notification, position register, and register
+      notification event. These are the WaveRT requests whose structures
+      hold an address or a handle and so differ between 32 and 64 bits. All
+      three ran on a thread of a 32-bit process, the client's own. For all
+      three `IoIs32bitProcess` given the request answered "not 32-bit": the
+      request the driver sees is not the one the 32-bit process issued.
+    - The one other WaveRT request of the 32-bit client, hardware latency,
+      whose structure is the same in both sizes, arrived marked as coming
+      from user mode, unconverted.
+    - For every property request of the run, however marked, the request
+      and the value buffer handed to the driver were in kernel memory and
+      did not overlap (the build would have stopped at once otherwise). That
+      agrees with Microsoft's description of a property handler's
+      arguments, "an aligned copy" of each.
+    - No pin was created on a thread of a 32-bit process (item 51).
+
+    So the driver does no conversion, sees 64-bit structures only (item 20),
+    and cannot tell a 32-bit client by anything in the request. It does not
+    need to.
+
+49. **[A.8] Everything else a request carries, checked against "not to be
+    trusted more because the request is marked as coming from kernel
+    mode".** With the mark out of reach (item 47) nothing in the driver can
+    depend on it. What each value is checked against instead:
+
+    | What a request carries | What the driver does with it |
+    |---|---|
+    | Event handle (register notification event) | Looked up with user access in the requesting process (item 47). |
+    | Requested buffer address (buffer requests) | Must be null; otherwise `STATUS_NOT_IMPLEMENTED`. Never used as an address. |
+    | Requested buffer size | Goes through the size calculation of section 8, every step checked for overflow, and must fit the audio area. |
+    | Notification count | Stored in the register record as given, as specified; the driver does not act on it. |
+    | Requested register address (position register) | Ignored. |
+    | Pin and node numbers | Compared with the numbers the filter has; anything else is `STATUS_NOT_FOUND`. |
+    | Lengths of the request and of the value buffer | Every field is read through a length check in `sar-core`; the minimum sizes kernel streaming enforces are not relied on. |
+    | Format of a proposed-format or pin-creation request | Checked field by field with length checks. The length of a pin's format is the one kernel streaming validated when it created the pin (`KsValidateConnectRequest` "validates ... basic data format"); the driver has nothing of its own to bound it by. |
+    | Caller's data range in an intersection request | Was taken to be as long as it said, on the strength of kernel streaming's checks. Now used only if all of it lies inside the request (changed with this work; in run probeT32 every range did). |
+    | State values | Anything but the four states is `STATUS_INVALID_PARAMETER`. |
+    | Control requests (section 5) | Their buffers are always probed as user addresses; they never depended on the mark. |
+
+    The addresses in the replies are the driver's own (item 50).
+
+50. **[A.9] How an address given to a 32-bit client stays within its
+    reach.** The specification does not say, and the driver does nothing
+    special. A buffer or register view is mapped into the process the
+    request runs in, at an address the system chooses. For a converted
+    request that process is the 32-bit client itself (item 48: the request
+    runs on the client's own thread), and in a 32-bit process "all user-mode
+    address space above the 32-bit limit is reserved by the system" ("WOW64
+    Implementation Details"; the limit is 2 GB, or 4 GB for an image marked
+    large-address-aware). So the system cannot place the view where the
+    32-bit `BufferAddress` or `Register` field could not hold it, and
+    whatever converts the reply only has to drop zero bits. [doc] **[rig]**
+    In run probeT32 the highest address any buffer or register reply to the
+    32-bit client covered was 0x01103008, and in the runs without counters
+    the client streamed through the buffer it was given (item 47). The
+    host's view is in the same position: a
+    32-bit host was given its whole section, 128 MiB in one case, at
+    0x02E60000.
+
+    Not settled: the driver would hand a 64-bit address to whatever asked,
+    and does not itself check that the address fits the client. It could
+    only check by learning that the client is 32-bit, which nothing in the
+    request says (item 48).
+
+51. **[section 8; item 27] Who creates the pin of an exclusive-mode
+    stream.** Not the client. In run probeT32 a 32-bit client ran an
+    exclusive-mode stream and made its buffer, register and event requests
+    on its own threads, yet no pin's Create dispatch ran on a thread of a
+    32-bit process: the pin was created in another process, and the client
+    used it from its own. "Maps the register table into the opening
+    process" therefore puts a view in a process that never asks for the
+    register, and the client gets its own view when it asks for the position
+    register (item 27, which is thus not a corner case). Both go when the
+    stream closes. **[rig]**
+
+52. **[section 10, A.11] Application routing for a 32-bit client.** With
+    the 32-bit tools the `app-routing` scenario fails: "the client never
+    loaded SarAsio.dll, so application routing was not in effect". The
+    driver's part works, and the client does load it. **[rig]**
+
+    - Run probeT32: 23 reads by 32-bit processes of the in-process server
+      of one of the two classes, every one at the key A.11 gives for a
+      32-bit process, none anywhere else.
+    - Run `cleanroom-thunk-probeR32-20261111-184406` (32-bit tools,
+      `issues`, `unload`): eight such reads of the device enumerator class;
+      the wrapper's key opened every time; four were answered with the
+      wrapper's value (a result of 78 bytes, which is a 32-character path
+      such as that of the 32-bit `SarAsio.dll` of the test tools) and four
+      with the status of the same read on the wrapper's key, as A.11 says.
+    - Run `cleanroom-thunk-probeR2-32-20261111-185149` (32-bit tools,
+      `issues`, `unload`) recorded process ids. The reads answered with the
+      wrapper's value all came from one process, which never opened a
+      control handle and into which an image named `SarAsio.dll` was mapped
+      after it had been mapped into the scenario's host: the client.
+
+    So the 32-bit client's read is redirected and `SarAsio.dll` is mapped
+    into it. Why the harness concludes otherwise is outside the driver and
+    was not pursued.
+
+53. **[A.8] Still not settled or not exercised for 32-bit clients.**
+
+    - How a 32-bit handle value is widened on the way down is not
+      documented. It does not matter to the lookup (item 47), which refuses
+      a kernel handle's value however it comes about; the refusal was shown
+      for such a value in a 64-bit process, not for one sent by a 32-bit
+      process.
+    - Only the three converted requests of item 48 were seen marked as
+      kernel-mode. Which others Windows would convert (the clock register
+      and the unregistration have structures of the same kind) was not
+      seen; they are answered `STATUS_NOT_IMPLEMENTED` whatever their mark.
+    - A request that really comes from kernel code, with a kernel handle
+      for its event, is now refused. The specification asks for that.
+    - 32-bit clients of other kinds than x86 on x64 (the rig has no other).
+    - A kernel streaming property request sent to a control handle never
+      reaches the driver from a 32-bit process: it is answered above the
+      driver with 0xC0000206, where a 64-bit process gets the driver's
+      `STATUS_INVALID_DEVICE_REQUEST` (the conformance test records both as
+      observed, not as required).
+
+54. **[rig] What the suite shows with the 32-bit tools.** The committed code
+    passes the whole suite with the 64-bit tools (run
+    `cleanroom-thunk-accept64-20261111-185720`, 36 scenarios). With the
+    32-bit tools it neither stops nor hangs the machine, and the
+    conformance test, the 32-bit fuzzing (26,152 kernel streaming and 3,040
+    control requests in one run) and the unload pass; but the run as a
+    whole does not:
+
+    - `app-routing` fails every time, for the reason in item 52.
+    - In run `cleanroom-thunk-accept32-20261111-190915`, `recovery-after-kill`
+      and `run-after-fuzz` also failed, both with "signal verified for too
+      little of the duration": the 32-bit client's streams began about three
+      seconds after the test started its five-second window (in the 64-bit
+      run, 0.03 s and 0.07 s after). Neither failed again: not in run
+      `cleanroom-thunk-accept32b-20261111-193733`, the same build and
+      scenarios, where `app-routing` alone failed, and not in run
+      `cleanroom-thunk-probeD32-20261111-192349`, a build with timers.
+
+    Shared-mode streams are served to the audio engine's own process
+    whatever the client is (in run probeT32 no property request came from a
+    32-bit process outside the exclusive-mode stream), so nothing the driver
+    is asked on their behalf depends on the client being a 32-bit one. Why a
+    32-bit client is sometimes that slow to start was not found.

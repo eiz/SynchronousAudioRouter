@@ -569,9 +569,10 @@ impl Endpoint {
         let Some(handle) = properties::notification_event_handle(call.request) else {
             return NtStatus::INVALID_PARAMETER;
         };
-        // Resolved now, with the client's own rights; the driver keeps the
-        // event itself, not the handle value.
-        let event = match EventObject::from_handle(handle, call.from_user_mode) {
+        // Resolved now, as a handle of the requesting process with that
+        // process's own rights, whatever the request says about its origin
+        // (A.8). The driver keeps the event itself, not the handle value.
+        let event = match EventObject::from_user_handle(handle) {
             Ok(event) => event,
             Err(status) => return status,
         };

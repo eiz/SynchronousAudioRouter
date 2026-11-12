@@ -94,6 +94,13 @@ pub enum Target<'a> {
 }
 
 /// A property request.
+///
+/// It does not say whether the request is marked as coming from user or
+/// from kernel mode, on purpose. That mark is not the caller's identity:
+/// Windows converts the requests of 32-bit processes on the way down and
+/// passes them on as kernel-mode requests, with the process's own handle
+/// values and sizes still in them. A handler has to treat everything in a
+/// request as the requesting process's, always.
 pub struct PropertyCall<'a> {
     /// The property set.
     pub set: Guid,
@@ -103,8 +110,6 @@ pub struct PropertyCall<'a> {
     pub is_set: bool,
     /// The whole request: the 24-byte `KSPROPERTY` and what follows it.
     pub request: &'a [u8],
-    /// Whether the request came from user mode.
-    pub from_user_mode: bool,
 }
 
 /// A data format returned from intersection: up to 128 bytes.
@@ -588,10 +593,12 @@ pub(crate) mod trampolines {
         if request.is_null() || request_length < core::mem::size_of::<sys::KSIDENTIFIER>() {
             return NtStatus::INVALID_PARAMETER.0;
         }
-        // SAFETY: AVStream hands the handler its own copy of the request,
-        // InputBufferLength bytes long, and a value buffer of
-        // OutputBufferLength bytes (both in one kernel allocation that
-        // lives until the IRP completes; the two do not overlap).
+        // SAFETY: AVStream hands the handler its own aligned copy of the
+        // request, InputBufferLength bytes long, and a value buffer of
+        // OutputBufferLength bytes (both in kernel memory that lives until
+        // the IRP completes; the two do not overlap). That is so for a
+        // request marked as coming from kernel mode as well, which is how
+        // the converted request of a 32-bit process arrives.
         let (request_bytes, data_bytes, identifier) = unsafe {
             (
                 core::slice::from_raw_parts(request.cast::<u8>().cast_const(), request_length),
@@ -608,8 +615,6 @@ pub(crate) mod trampolines {
             id: identifier.Id,
             is_set: identifier.Flags & sys::KSPROPERTY_TYPE_SET != 0,
             request: request_bytes,
-            // SAFETY: valid IRP.
-            from_user_mode: unsafe { (*irp).RequestorMode } != wdk_sys::_MODE::KernelMode as i8,
         };
         let outcome = H::property(&block.user, target, &call, data_bytes);
         let mut information = outcome.information;
@@ -701,13 +706,34 @@ pub(crate) mod trampolines {
         let Some(block) = (unsafe { block_of::<H>((*filter).Context) }) else {
             return NtStatus::NOT_FOUND.0;
         };
-        // SAFETY: AVStream validated the request: `pin` is its KSP_PIN and
-        // `data_range` one of the caller's ranges, at least a KSDATARANGE
-        // and FormatSize bytes long inside AVStream's copy of the request.
+        // `pin` is the KSP_PIN at the start of AVStream's copy of the
+        // request, which is as long as the IRP's input length, and
+        // `data_range` is one of the caller's ranges inside that copy. How
+        // long the range is, is the caller's word (its FormatSize): the
+        // range is used only if all of it lies inside the request, whoever
+        // the request claims to come from.
+        // SAFETY: the IRP is the one AVStream passed to the handler.
+        let Some((request_length, _)) = (unsafe { property_lengths(irp) }) else {
+            return NtStatus::INVALID_DEVICE_REQUEST.0;
+        };
+        let (request_start, range_start) = (pin as usize, data_range as usize);
+        let room = request_start
+            .checked_add(request_length)
+            .filter(|_| range_start >= request_start)
+            .and_then(|request_end| request_end.checked_sub(range_start));
+        let Some(room) = room.filter(|_| request_length >= core::mem::size_of::<sys::KSP_PIN>()) else {
+            return NtStatus::INVALID_PARAMETER.0;
+        };
+        if room < core::mem::size_of::<sys::KSDATARANGE>() {
+            return NtStatus::NO_MATCH.0;
+        }
+        // SAFETY: the request holds a whole KSP_PIN at `pin` and at least a
+        // KSDATARANGE at `data_range` (both checked above), and no more of
+        // the range is read than the request has room for.
         let (pin_id, caller_range) = unsafe {
             // FormatSize is the first field of a KSDATARANGE.
             let size = data_range.cast::<u32>().read() as usize;
-            if size < core::mem::size_of::<sys::KSDATARANGE>() {
+            if size < core::mem::size_of::<sys::KSDATARANGE>() || size > room {
                 return NtStatus::NO_MATCH.0;
             }
             (
