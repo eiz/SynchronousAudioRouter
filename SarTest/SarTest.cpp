@@ -33,6 +33,9 @@ using namespace SarTest;
 
 namespace {
 
+// The priority class the process was put in ("" for commands that leave it).
+std::string g_priorityClass;
+
 int usage()
 {
     printf(
@@ -75,6 +78,8 @@ int usage()
         "      status; then run a stream on a section whose audio area is not a\n"
         "      multiple of 64 KiB. --legacy-quirks expects what releases up to 0.13\n"
         "      did where the current driver deliberately differs.\n"
+        "  host, wasapi, run, race and conformance run in the realtime priority\n"
+        "  class; --priority high|normal changes that.\n"
         "  SarTest fuzz [--seconds S] [--seed N] [--restricted]\n"
         "      Send the driver malformed control and kernel streaming requests from\n"
         "      several threads while endpoints come and go; fail if a request is\n"
@@ -307,6 +312,7 @@ int cmdHost(const Args& args)
     JsonObject result;
 
     result.setString("command", "host")
+        .setString("priorityClass", g_priorityClass)
         .setBool("passed", rc == 0)
         .setInt("exitCode", rc)
         .setRaw("host", host.toJson())
@@ -325,6 +331,7 @@ int cmdWasapi(const Args& args)
         JsonObject result;
 
         result.setString("command", "wasapi")
+            .setString("priorityClass", g_priorityClass)
             .setBool("passed", false)
             .setInt("exitCode", 1)
             .setString("failure", "endpoints not found");
@@ -337,6 +344,7 @@ int cmdWasapi(const Args& args)
     int rc = result.passed ? 0 : 2;
 
     json.setString("command", "wasapi")
+        .setString("priorityClass", g_priorityClass)
         .setBool("passed", result.passed)
         .setInt("exitCode", rc)
         .setRaw("wasapi", result.toJson());
@@ -431,6 +439,7 @@ int cmdRace(const Args& args)
     JsonObject result;
 
     result.setString("command", "race")
+        .setString("priorityClass", g_priorityClass)
         .setBool("passed", rc == 0)
         .setInt("exitCode", rc)
         .setInt("endpointPairs", layout.pairs)
@@ -524,6 +533,7 @@ int cmdRun(const Args& args)
     JsonObject result;
 
     result.setString("command", "run")
+        .setString("priorityClass", g_priorityClass)
         .setBool("passed", rc == 0)
         .setInt("exitCode", rc)
         .setInt("endpointPairs", layout.pairs)
@@ -911,6 +921,17 @@ int wmain(int argc, wchar_t **argv)
     if (FAILED(hr)) {
         logf("CoInitializeEx failed: %s", hresultText(hr).c_str());
         return 1;
+    }
+
+    // The commands that stream run in the realtime priority class, as the
+    // DAW and the audio threads they stand in for are scheduled ahead of
+    // everything else on a machine set up for audio. (The software clock's
+    // tick thread asks for time-critical priority, which only puts it at the
+    // top of whatever class its process is in.) The fuzzer stays at normal
+    // priority: it is load, not audio.
+    if (args.command == L"host" || args.command == L"wasapi" || args.command == L"run" ||
+        args.command == L"race" || args.command == L"conformance") {
+        g_priorityClass = setProcessPriority(args);
     }
 
     int rc;
