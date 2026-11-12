@@ -245,12 +245,24 @@ function Invoke-AppRoutingScenario {
 
     # Look while the client runs; its module list is gone once it exits.
     $record.sarAsioLoaded = $false
+    $powershell32 = "$env:SystemRoot\SysWOW64\WindowsPowerShell\v1.0\powershell.exe"
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     while (-not $client.HasExited -and (Get-Date) -lt $deadline) {
         if (-not $record.sarAsioLoaded) {
             try {
                 $record.sarAsioLoaded = [bool]((Get-Process -Id $client.Id).Modules |
                     Where-Object ModuleName -eq 'SarAsio.dll')
+            } catch { }
+        }
+        if (-not $record.sarAsioLoaded -and (Test-Path $powershell32)) {
+            # A 64-bit process is shown only the 64-bit modules of a 32-bit
+            # one (the client, when the scenarios run with the 32-bit tools):
+            # ask a 32-bit PowerShell as well.
+            try {
+                $answer = & $powershell32 -NoProfile -Command (
+                    "[bool]((Get-Process -Id $($client.Id) -ErrorAction SilentlyContinue).Modules | " +
+                    "Where-Object ModuleName -eq 'SarAsio.dll')")
+                $record.sarAsioLoaded = "$answer".Trim() -eq 'True'
             } catch { }
         }
         Start-Sleep -Milliseconds 500
