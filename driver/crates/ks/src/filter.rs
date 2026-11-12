@@ -40,6 +40,7 @@ use core::{
 use ks_sys as sys;
 use ntk::{
     alloc_ext::{try_box, try_vec_from_slice, Shared},
+    work::WorkItem,
     Guid,
 };
 use ntstatus::{IoStatus, NtStatus};
@@ -48,7 +49,7 @@ use wdk_sys::{IRP, IRP_MJ_DEVICE_CONTROL, NTSTATUS, PIRP};
 use crate::{
     context::{self, Header, Kind},
     descriptor::{FilterSpec, Storage},
-    device::DeviceGuard,
+    device::{Device, FactoryCalls},
 };
 
 /// A driver's behavior for the filters of one kind of filter factory.
@@ -183,13 +184,19 @@ struct FactoryBlock<H: FilterHandler> {
     user: Shared<H::Context>,
     /// The descriptor AVStream points into; freed with the block.
     _storage: Box<Storage>,
+    /// What frees the block; see `free_block`.
+    release: Option<WorkItem>,
 }
+
+// SAFETY: a block is plain memory plus the handler's context, which is
+// `Send + Sync`. The pointers inside the descriptor point into the
+// descriptor's own allocations and are never followed by this crate; by the
+// time a block changes threads (to be freed) AVStream has let go of it.
+unsafe impl<H: FilterHandler> Send for FactoryBlock<H> {}
 
 struct FactoryState {
     /// Cleared when AVStream destroys the factory object.
     alive: AtomicBool,
-    /// Set once the driver has asked for the factory to be deleted.
-    deleted: AtomicBool,
 }
 
 /// A filter factory created at run time.
@@ -198,19 +205,40 @@ struct FactoryState {
 /// stops). After [`delete`](Self::delete) it destroys the object at once if
 /// no filter is open, and otherwise when the last open filter closes. The
 /// handle is told through an item of its own in the factory's bag, and turns
-/// its methods into no-ops from then on, so it can be kept, copied and
-/// dropped freely.
-#[derive(Clone)]
+/// its methods into no-ops from then on.
+///
+/// # Which calls are made under the device mutex
+///
+/// Every open and close of any filter on the device waits for the device
+/// mutex, so it is held for the calls Microsoft documents as needing it and
+/// for nothing else: creating the factory and filling its bag
+/// (`KsCreateFilterFactory`, `KsAddItemToObjectBag`) and deleting it
+/// (`KsDeleteFilterFactory`; "Device Mutex in AVStream": the creation and
+/// destruction of filter factories is what the mutex synchronises). The
+/// allocations a new factory needs are made before the mutex is taken.
+///
+/// The other calls are made without it. Their reference pages name no mutex
+/// ("Mutexes in AVStream": a function's page says so if one has to be held),
+/// and each of them works in the registry or in Plug and Play for
+/// milliseconds at a time. What they do need is the factory to exist for the
+/// duration of the call, and that is arranged here instead:
+///
+/// * The handle cannot be copied, the calls take it by `&mut` and `delete`
+///   consumes it. So no call can overlap the driver's own deletion of the
+///   factory, or another call on it.
+/// * AVStream's own destruction of factories, when the device stops, waits
+///   for calls that are under way and refuses later ones
+///   ([`FactoryCalls`]).
 pub struct FilterFactory {
     raw: sys::PKSFILTERFACTORY,
     state: Shared<FactoryState>,
+    calls: FactoryCalls,
 }
 
-// SAFETY: the raw pointer is only dereferenced under the device mutex and
-// after checking `state`; the handle itself is plain data.
+// SAFETY: the raw pointer is only dereferenced as described above; the
+// handle itself is plain data and may move between threads. (It is not
+// `Sync`, and needs not be: every use takes it by `&mut` or by value.)
 unsafe impl Send for FilterFactory {}
-// SAFETY: as above.
-unsafe impl Sync for FilterFactory {}
 
 impl FilterFactory {
     /// Adds a filter factory to the device: filters described by `spec`,
@@ -220,8 +248,11 @@ impl FilterFactory {
     /// The factory is freed by AVStream when the device stops, unless it is
     /// deleted first. Its device interfaces are registered but off; see
     /// [`set_enabled`](Self::set_enabled).
+    ///
+    /// Takes the device mutex for the calls that create the factory, and
+    /// only for those.
     pub fn create<H: FilterHandler>(
-        guard: &DeviceGuard<'_>,
+        device: &Device,
         spec: &FilterSpec<'_>,
         reference: &[u16],
         context: Shared<H::Context>,
@@ -229,18 +260,22 @@ impl FilterFactory {
         if reference.last() != Some(&0) || reference[..reference.len() - 1].contains(&0) {
             return Err(NtStatus::INVALID_PARAMETER);
         }
+        let calls = device.factory_calls().ok_or(NtStatus::INVALID_DEVICE_REQUEST)?;
         let storage = Storage::build::<H>(spec)?;
         let descriptor = storage.descriptor();
         let state = Shared::try_new(FactoryState {
             alive: AtomicBool::new(true),
-            deleted: AtomicBool::new(false),
         })?;
+        let release = WorkItem::try_new(device.functional_device_object())?;
         let block = try_box(FactoryBlock::<H> {
             header: Header::new::<H>(Kind::Factory),
             user: context,
             _storage: storage,
+            release: Some(release),
         })?;
+        let gone = state.clone().into_context();
 
+        let guard = device.lock();
         let fdo = guard.device().functional_device_object();
         let mut raw: sys::PKSFILTERFACTORY = core::ptr::null_mut();
         // SAFETY: the device mutex is held (`guard`). The descriptor lives
@@ -260,10 +295,15 @@ impl FilterFactory {
                 &mut raw,
             )
         };
-        NtStatus(status).into_result()?;
+        if let Err(status) = NtStatus(status).into_result() {
+            drop(guard);
+            // SAFETY: the reference was not handed to a bag; it is taken
+            // back once.
+            drop(unsafe { Shared::<FactoryState>::from_context(gone) });
+            return Err(status);
+        }
 
         let block = Box::into_raw(block).cast::<c_void>();
-        let gone = state.clone().into_context();
         // SAFETY: `raw` is the factory just created; the device mutex is
         // still held, so AVStream cannot have created a filter from it or
         // destroyed it, and its bag may be added to. Two items go in:
@@ -280,87 +320,113 @@ impl FilterFactory {
         //
         // Only then is the Context published (until that store the factory
         // carries the device's context, which the trampolines reject).
-        unsafe {
+        //
+        // What has to be freed after a failure is freed once the mutex has
+        // been released.
+        let failed = unsafe {
             let status = sys::KsAddItemToObjectBag((*raw).Bag, block, Some(free_block::<H>));
             if !NtStatus(status).is_success() {
-                drop(Shared::<FactoryState>::from_context(gone));
                 let _ = sys::KsDeleteFilterFactory(raw);
-                drop(Box::from_raw(block.cast::<FactoryBlock<H>>()));
-                return Err(NtStatus(status));
+                Some((status, Some(block)))
+            } else {
+                let status = sys::KsAddItemToObjectBag((*raw).Bag, gone, Some(factory_gone));
+                if !NtStatus(status).is_success() {
+                    let _ = sys::KsDeleteFilterFactory(raw);
+                    Some((status, None))
+                } else {
+                    (*raw).Context = block;
+                    None
+                }
             }
-            let status = sys::KsAddItemToObjectBag((*raw).Bag, gone, Some(factory_gone));
-            if !NtStatus(status).is_success() {
+        };
+        drop(guard);
+        if let Some((status, block)) = failed {
+            // SAFETY: neither failure left the state's reference in a bag,
+            // and the first left the block in none; each is taken back once.
+            unsafe {
                 drop(Shared::<FactoryState>::from_context(gone));
-                let _ = sys::KsDeleteFilterFactory(raw);
-                return Err(NtStatus(status));
+                if let Some(block) = block {
+                    drop(Box::from_raw(block.cast::<FactoryBlock<H>>()));
+                }
             }
-            (*raw).Context = block;
+            return Err(NtStatus(status));
         }
-        Ok(Self { raw, state })
+        Ok(Self { raw, state, calls })
     }
 
-    fn usable(&self) -> bool {
-        self.state.alive.load(Ordering::Acquire) && !self.state.deleted.load(Ordering::Acquire)
+    /// Runs a kernel streaming call on the factory without the device
+    /// mutex, if the factory still exists.
+    fn call<R>(&mut self, call: impl FnOnce(sys::PKSFILTERFACTORY) -> R) -> Result<R, NtStatus> {
+        let raw = self.raw;
+        let state = &self.state;
+        self.calls
+            .run(|| {
+                // Looked at inside the gate: AVStream destroys a factory
+                // the driver has not deleted only when the device stops,
+                // and a stop waits at the gate.
+                state.alive.load(Ordering::Acquire).then(|| call(raw))
+            })
+            .flatten()
+            .ok_or(NtStatus::NOT_FOUND)
     }
 
     /// The kernel path of the factory's device interface in its first
     /// category.
-    pub fn symbolic_link(&self, _guard: &DeviceGuard<'_>) -> Result<Vec<u16>, NtStatus> {
-        if !self.usable() {
-            return Err(NtStatus::NOT_FOUND);
-        }
-        // SAFETY: the factory exists: it is alive and not deleted, and
-        // AVStream destroys such a factory only under the device mutex,
-        // which the caller holds.
-        let link = unsafe { sys::KsFilterFactoryGetSymbolicLink(self.raw) };
-        if link.is_null() {
-            return Err(NtStatus::NOT_FOUND);
-        }
-        // SAFETY: a non-null result points to the factory's own
-        // UNICODE_STRING, valid while the factory is.
-        let units = unsafe {
-            let s = &*link;
-            if s.Buffer.is_null() {
-                &[][..]
-            } else {
-                core::slice::from_raw_parts(s.Buffer, usize::from(s.Length / 2))
+    pub fn symbolic_link(&mut self) -> Result<Vec<u16>, NtStatus> {
+        self.call(|raw| {
+            // SAFETY: the factory exists for the duration of the call (type
+            // documentation).
+            let link = unsafe { sys::KsFilterFactoryGetSymbolicLink(raw) };
+            if link.is_null() {
+                return Err(NtStatus::NOT_FOUND);
             }
-        };
-        try_vec_from_slice(units)
+            // SAFETY: a non-null result points to the factory's own
+            // UNICODE_STRING, valid while the factory is.
+            let units = unsafe {
+                let s = &*link;
+                if s.Buffer.is_null() {
+                    &[][..]
+                } else {
+                    core::slice::from_raw_parts(s.Buffer, usize::from(s.Length / 2))
+                }
+            };
+            try_vec_from_slice(units)
+        })?
     }
 
     /// Has AVStream write the factory's cached filter data (the `FilterData`
     /// value and the medium cache that Windows keeps with the factory's
     /// device interfaces) from the factory's own descriptor.
-    pub fn update_cache_data(&self, _guard: &DeviceGuard<'_>) -> Result<(), NtStatus> {
-        if !self.usable() {
-            return Err(NtStatus::NOT_FOUND);
-        }
-        // SAFETY: the factory exists (see `symbolic_link`). A null
-        // descriptor is allowed: AVStream then reads the factory's own,
-        // which lives in the factory's block and so as long as the factory.
-        let status = unsafe { sys::KsFilterFactoryUpdateCacheData(self.raw, core::ptr::null()) };
+    pub fn update_cache_data(&mut self) -> Result<(), NtStatus> {
+        // SAFETY: the factory exists for the duration of the call (type
+        // documentation). A null descriptor is allowed: AVStream then reads
+        // the factory's own, which lives in the factory's block and so as
+        // long as the factory.
+        let status = self.call(|raw| unsafe { sys::KsFilterFactoryUpdateCacheData(raw, core::ptr::null()) })?;
         NtStatus(status).into_result()
     }
 
     /// Switches the factory's device interfaces on or off.
-    pub fn set_enabled(&self, _guard: &DeviceGuard<'_>, enabled: bool) -> Result<(), NtStatus> {
-        if !self.usable() {
-            return Err(NtStatus::NOT_FOUND);
-        }
-        // SAFETY: the factory exists (see `symbolic_link`).
-        let status = unsafe { sys::KsFilterFactorySetDeviceClassesState(self.raw, u8::from(enabled)) };
+    pub fn set_enabled(&mut self, enabled: bool) -> Result<(), NtStatus> {
+        // SAFETY: the factory exists for the duration of the call (type
+        // documentation).
+        let status =
+            self.call(|raw| unsafe { sys::KsFilterFactorySetDeviceClassesState(raw, u8::from(enabled)) })?;
         NtStatus(status).into_result()
     }
 
     /// Deletes the factory: no new filter can be opened from it. Filters
-    /// that are open keep working until they are closed.
-    pub fn delete(&self, _guard: &DeviceGuard<'_>) {
-        if !self.state.alive.load(Ordering::Acquire) || self.state.deleted.swap(true, Ordering::AcqRel) {
+    /// that are open keep working until they are closed. Takes the device
+    /// mutex for the call.
+    pub fn delete(self, device: &Device) {
+        let _guard = device.lock();
+        if !self.state.alive.load(Ordering::Acquire) {
             return;
         }
-        // SAFETY: the factory exists (alive, not deleted before, device
-        // mutex held) and is deleted exactly once.
+        // SAFETY: the factory exists: it is alive, the handle is consumed
+        // here so it has not been deleted before, and AVStream destroys a
+        // factory that has not been deleted only under the device mutex,
+        // which is held. It is deleted exactly once.
         unsafe {
             let _ = sys::KsDeleteFilterFactory(self.raw);
         }
@@ -379,13 +445,28 @@ unsafe extern "C" fn factory_gone(data: *mut c_void) {
 /// Free routine of a factory's block: it has left the last bag it was in,
 /// so the factory and every filter and pin created from it have been
 /// deleted.
+///
+/// AVStream calls this while it destroys the last of those objects, as a
+/// rule with the device mutex held, and every open and close of a filter on
+/// the device waits for that. Freeing a block means freeing the descriptor
+/// tables and, often, the last reference to the driver's state for the
+/// factory, with whatever that state owns. So the block is not freed here:
+/// it is handed to a system worker thread, through a work item that was
+/// allocated with the block (which is why this cannot fail), and that keeps
+/// the device, and with it the driver, in place until the block has been
+/// freed.
 unsafe extern "C" fn free_block<H: FilterHandler>(data: *mut c_void) {
     // SAFETY: `data` is the block `FilterFactory::create` gave to the
     // factory's bag. AVStream calls an item's free routine once, when no bag
     // holds the item any more; the bags that held it are those of the
     // objects whose descriptor and Context point into it, and all of them
     // are gone.
-    drop(unsafe { Box::from_raw(data.cast::<FactoryBlock<H>>()) });
+    let mut block = unsafe { Box::from_raw(data.cast::<FactoryBlock<H>>()) };
+    match block.release.take() {
+        Some(release) => release.queue_drop(block),
+        // Cannot happen: a block gets its work item when it is created.
+        None => drop(block),
+    }
 }
 
 /// The factory block behind an AVStream object's `Context`, if it is one

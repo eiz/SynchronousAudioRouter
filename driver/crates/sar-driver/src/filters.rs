@@ -342,7 +342,7 @@ impl FilterHandler for WaveFilter {
     type Context = Endpoint;
 
     fn filter_create(endpoint: &Endpoint) -> Result<(), NtStatus> {
-        endpoint.check_not_withdrawn()
+        endpoint.check_can_open_filter()
     }
 
     fn filter_close(_endpoint: &Endpoint) {}
@@ -376,7 +376,7 @@ impl FilterHandler for TopologyFilter {
     type Context = Endpoint;
 
     fn filter_create(endpoint: &Endpoint) -> Result<(), NtStatus> {
-        endpoint.check_not_withdrawn()
+        endpoint.check_can_open_filter()
     }
 
     fn filter_close(_endpoint: &Endpoint) {}

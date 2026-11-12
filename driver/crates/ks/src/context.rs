@@ -29,6 +29,20 @@ impl Header {
     }
 }
 
+/// Whether `context` is a block of the given kind, whatever its handler.
+///
+/// # Safety
+///
+/// As for [`is`].
+pub(crate) unsafe fn is_kind(context: *mut c_void, kind: Kind) -> bool {
+    if context.is_null() {
+        return false;
+    }
+    // SAFETY: as in `is`.
+    let header = unsafe { &*context.cast::<Header>() };
+    header.kind == kind
+}
+
 /// Whether `context` is a block of the given kind, created for handler `H`.
 ///
 /// # Safety

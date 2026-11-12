@@ -13,6 +13,7 @@ use ks_sys as sys;
 use ntk::{
     alloc_ext::Shared,
     device::{DeviceObject, DriverObject},
+    sync::Rundown,
 };
 use ntstatus::NtStatus;
 use wdk_sys::{DRIVER_OBJECT, NTSTATUS, PCUNICODE_STRING, PIRP};
@@ -40,10 +41,46 @@ pub trait DeviceHandler: 'static {
     fn stop(device: &Device, context: &Shared<Self::Context>);
 }
 
+/// The part of a device's block that does not depend on the handler.
+#[repr(C)]
+struct DeviceBlockHead {
+    header: Header,
+    /// The gate around every kernel streaming call this crate makes on one
+    /// of the device's filter factories without holding the device mutex
+    /// (see [`FactoryCalls`]).
+    factory_calls: Shared<Rundown>,
+}
+
 #[repr(C)]
 struct DeviceBlock<D: DeviceHandler> {
-    header: Header,
+    head: DeviceBlockHead,
     context: Shared<D::Context>,
+}
+
+/// What keeps a filter factory in existence during a kernel streaming call
+/// that is made on it without the device mutex.
+///
+/// AVStream destroys a factory of its own accord only when the device stops
+/// (factories are created to be freed then). The calls that Microsoft
+/// documents as needing the device mutex are made under it, which rules a
+/// stop out. The others (switching a factory's device interfaces on or off,
+/// writing its cached filter data, reading its symbolic link) can take
+/// milliseconds each inside Plug and Play and the registry, and every open
+/// and close of any filter on the device would wait for them. They are made
+/// inside this gate instead: each call enters it, and the device's stop
+/// shuts it and so waits, before AVStream frees anything, until the calls
+/// that are under way have returned. Later calls are refused until the
+/// device starts again.
+#[derive(Clone)]
+pub(crate) struct FactoryCalls(Shared<Rundown>);
+
+impl FactoryCalls {
+    /// Runs `call` inside the gate, or returns `None` if the device has
+    /// stopped. Must be called at `PASSIVE_LEVEL`.
+    pub(crate) fn run<R>(&self, call: impl FnOnce() -> R) -> Option<R> {
+        let _inside = self.0.enter()?;
+        Some(call())
+    }
 }
 
 /// The registry path argument of `DriverEntry`.
@@ -167,6 +204,13 @@ impl Device {
         Some(block.context.clone())
     }
 
+    /// The gate for calls on this device's filter factories that are made
+    /// without the device mutex.
+    pub(crate) fn factory_calls(&self) -> Option<FactoryCalls> {
+        // SAFETY: as in `context`.
+        unsafe { head_of(self.0.Context) }.map(|head| FactoryCalls(head.factory_calls.clone()))
+    }
+
     /// Takes the device mutex, which serialises changes to the device's
     /// filter factories with AVStream's own use of them.
     pub fn lock(&self) -> DeviceGuard<'_> {
@@ -208,8 +252,15 @@ unsafe extern "C" fn add<D: DeviceHandler>(device: sys::PKSDEVICE) -> NTSTATUS {
         Ok(user) => user,
         Err(status) => return status.0,
     };
+    let factory_calls = match Shared::try_new(Rundown::new()) {
+        Ok(factory_calls) => factory_calls,
+        Err(status) => return status.0,
+    };
     let block = match Shared::try_new(DeviceBlock::<D> {
-        header: Header::new::<D>(Kind::Device),
+        head: DeviceBlockHead {
+            header: Header::new::<D>(Kind::Device),
+            factory_calls,
+        },
         context: user,
     }) {
         Ok(block) => block,
@@ -228,6 +279,24 @@ unsafe extern "C" fn add<D: DeviceHandler>(device: sys::PKSDEVICE) -> NTSTATUS {
         (*device).Context = raw;
     }
     NtStatus::SUCCESS.0
+}
+
+/// The handler-independent part of the block behind a device's `Context`.
+///
+/// # Safety
+///
+/// `context` must be null or the `Context` of a live KSDEVICE of this driver.
+unsafe fn head_of<'a>(context: *mut c_void) -> Option<&'a DeviceBlockHead> {
+    // SAFETY: a device's Context is null or the block `add` stored, which
+    // the device's object bag keeps alive as long as the KSDEVICE exists.
+    // Every such block begins with a `DeviceBlockHead` whatever its handler.
+    if unsafe { context::is_kind(context, Kind::Device) } {
+        // SAFETY: the kind check proves the block is a `DeviceBlock<_>`,
+        // whose first field is the head.
+        Some(unsafe { &*context.cast::<DeviceBlockHead>() })
+    } else {
+        None
+    }
 }
 
 /// Runs `f` with the device and its context, if the context is in place.
@@ -250,6 +319,13 @@ unsafe extern "C" fn start<D: DeviceHandler>(
     _translated: wdk_sys::PCM_RESOURCE_LIST,
     _untranslated: wdk_sys::PCM_RESOURCE_LIST,
 ) -> NTSTATUS {
+    // The device is starting (again): calls on its filter factories may be
+    // made again. Start and stop are serialised by Plug and Play and by the
+    // device mutex, which AVStream holds for both.
+    // SAFETY: AVStream passes a valid KSDEVICE.
+    if let Some(head) = unsafe { head_of((*device).Context) } {
+        head.factory_calls.open();
+    }
     // SAFETY: AVStream passes a valid KSDEVICE.
     match unsafe { with_context::<D, _>(device, |device, context| D::start(device, context)) } {
         Some(Ok(())) => NtStatus::SUCCESS.0,
@@ -259,6 +335,14 @@ unsafe extern "C" fn start<D: DeviceHandler>(
 }
 
 unsafe extern "C" fn stop<D: DeviceHandler>(device: sys::PKSDEVICE, _irp: PIRP) {
+    // AVStream is about to free the device's filter factories. No call on
+    // one of them may begin from here on, and those under way have to
+    // return first (see `FactoryCalls`). They do not need the device mutex,
+    // which AVStream holds here, so waiting for them cannot deadlock.
+    // SAFETY: AVStream passes a valid KSDEVICE.
+    if let Some(head) = unsafe { head_of((*device).Context) } {
+        head.factory_calls.shut();
+    }
     // SAFETY: AVStream passes a valid KSDEVICE.
     let _ = unsafe { with_context::<D, _>(device, |device, context| D::stop(device, context)) };
 }
