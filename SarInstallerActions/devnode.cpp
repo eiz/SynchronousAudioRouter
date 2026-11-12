@@ -27,6 +27,82 @@
 
 #define ALL_USERS_ACL L"D:P(A;;GA;;;AU)"
 
+// Whether the device described by `data` has SAR's hardware ID.
+static BOOL IsSarDevice(HDEVINFO deviceInfoSet, SP_DEVINFO_DATA *data)
+{
+    DWORD requiredSize = 0;
+    DEVPROPTYPE propType;
+
+    SetLastError(0);
+    SetupDiGetDeviceProperty(
+        deviceInfoSet, data, &DEVPKEY_Device_HardwareIds,
+        &propType, nullptr, 0, &requiredSize, 0);
+
+    if (GetLastError() != ERROR_INSUFFICIENT_BUFFER || requiredSize < sizeof(WCHAR)) {
+        return FALSE;
+    }
+
+    WCHAR *buffer = (WCHAR *)malloc(requiredSize);
+
+    if (!buffer) {
+        return FALSE;
+    }
+
+    BOOL found = FALSE;
+
+    // Make sure the buffer is null terminated to avoid an overrun. It is a
+    // REG_MULTI_SZ: strings separated by one null, ended by two.
+    if (SetupDiGetDeviceProperty(
+            deviceInfoSet, data, &DEVPKEY_Device_HardwareIds,
+            &propType, (BYTE *)buffer, requiredSize, &requiredSize, 0) &&
+        buffer[requiredSize / sizeof(WCHAR) - 1] == L'\0') {
+
+        for (WCHAR *p = buffer;
+            p < buffer + requiredSize / sizeof(WCHAR) && *p;
+            p += lstrlen(p) + 1) {
+
+            if (!lstrcmpi(p, HARDWARE_ID)) {
+                found = TRUE;
+                break;
+            }
+        }
+    }
+
+    free(buffer);
+    return found;
+}
+
+// Whether a SAR device node exists already.
+//
+// Every device is looked at, not just those of SAR's class: a device has no
+// class until a driver is installed on it. That is the state it is in when
+// RemoveDeviceNode runs as the rollback of a failed install, after the driver
+// package has been taken away again, the state a device left behind by an
+// earlier failed install is in, and the state an upgrade leaves the device
+// in between taking the old driver package away and installing the new one.
+static BOOL SarDeviceExists()
+{
+    HDEVINFO deviceInfoSet = SetupDiGetClassDevsEx(
+        nullptr, nullptr, nullptr, DIGCF_ALLCLASSES,
+        nullptr, nullptr, nullptr);
+
+    if (deviceInfoSet == INVALID_HANDLE_VALUE) {
+        return FALSE;
+    }
+
+    SP_DEVINFO_DATA data = {};
+    BOOL found = FALSE;
+
+    data.cbSize = sizeof(SP_DEVINFO_DATA);
+
+    for (int i = 0; !found && SetupDiEnumDeviceInfo(deviceInfoSet, i, &data); ++i) {
+        found = IsSarDevice(deviceInfoSet, &data);
+    }
+
+    SetupDiDestroyDeviceInfoList(deviceInfoSet);
+    return found;
+}
+
 UINT __stdcall CreateDeviceNode(MSIHANDLE hInstall)
 {
     HRESULT hr = S_OK;
@@ -43,6 +119,15 @@ UINT __stdcall CreateDeviceNode(MSIHANDLE hInstall)
 
     if (FAILED(hr)) {
         return WcaFinalize(hr);
+    }
+
+    // An upgrade leaves the device node of the version it replaces in place
+    // (RemoveDeviceNode is not run for it), so that Windows sees the same
+    // device with a new driver and not a new device. A second node would be
+    // a second SAR device.
+    if (SarDeviceExists()) {
+        WcaLog(LOGMSG_STANDARD, "A SAR device node exists already; using it.");
+        return WcaFinalize(S_OK);
     }
 
     IIDFromString(CLASS_GUID, &classGuid);
@@ -108,8 +193,6 @@ UINT __stdcall RemoveDeviceNode(MSIHANDLE hInstall)
     UINT er = ERROR_SUCCESS;
     HDEVINFO deviceInfoSet;
     SP_DEVINFO_DATA data;
-    DWORD requiredSize;
-    DEVPROPTYPE propType;
 
     hr = WcaInitialize(hInstall, "RemoveDeviceNode");
 
@@ -117,11 +200,7 @@ UINT __stdcall RemoveDeviceNode(MSIHANDLE hInstall)
         return WcaFinalize(ERROR_INSTALL_FAILURE);
     }
 
-    // Every device, not just those of SAR's class: a device has no class
-    // until a driver is installed on it. That is the state it is in when
-    // this runs as the rollback of a failed install, after the driver package
-    // has been taken away again, and the state a device left behind by an
-    // earlier failed install is in.
+    // Every device, not just those of SAR's class: see SarDeviceExists.
     deviceInfoSet = SetupDiGetClassDevsEx(
         nullptr, nullptr, nullptr, DIGCF_ALLCLASSES,
         nullptr, nullptr, nullptr);
@@ -133,45 +212,7 @@ UINT __stdcall RemoveDeviceNode(MSIHANDLE hInstall)
     data.cbSize = sizeof(SP_DEVINFO_DATA);
 
     for (int i = 0; SetupDiEnumDeviceInfo(deviceInfoSet, i, &data); ++i) {
-        SetLastError(0);
-        SetupDiGetDeviceProperty(
-            deviceInfoSet, &data, &DEVPKEY_Device_HardwareIds,
-            &propType, nullptr, 0, &requiredSize, 0);
-
-        if (GetLastError() != ERROR_INSUFFICIENT_BUFFER) {
-            continue;
-        }
-
-        WCHAR *buffer = (WCHAR *)malloc(requiredSize);
-
-        if (!SetupDiGetDeviceProperty(
-            deviceInfoSet, &data, &DEVPKEY_Device_HardwareIds,
-            &propType, (BYTE *)buffer, requiredSize, &requiredSize, 0)) {
-
-            free(buffer);
-            continue;
-        }
-
-        // Make sure buffer is null terminated to avoid overrun
-        if (buffer[requiredSize / sizeof(WCHAR) - 1] != L'\0') {
-            free(buffer);
-            continue;
-        }
-
-        BOOL found = FALSE;
-
-        // A REG_MULTI_SZ: strings separated by one null, ended by two.
-        for (WCHAR *p = buffer;
-            p < buffer + requiredSize / sizeof(WCHAR) && *p;
-            p += lstrlen(p) + 1) {
-
-            if (!lstrcmpi(p, HARDWARE_ID)) {
-                found = TRUE;
-                break;
-            }
-        }
-
-        free(buffer);
+        BOOL found = IsSarDevice(deviceInfoSet, &data);
 
         if (found) {
             BOOL needReboot = FALSE;
