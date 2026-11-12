@@ -49,7 +49,7 @@ use wdk_sys::{IRP, IRP_MJ_DEVICE_CONTROL, NTSTATUS, PIRP};
 use crate::{
     context::{self, Header, Kind},
     descriptor::{FilterSpec, Storage},
-    device::{Device, FactoryCalls},
+    device::{DeviceGuard, FactoryCalls},
 };
 
 /// A driver's behavior for the filters of one kind of filter factory.
@@ -207,21 +207,16 @@ struct FactoryState {
 /// handle is told through an item of its own in the factory's bag, and turns
 /// its methods into no-ops from then on.
 ///
-/// # Which calls are made under the device mutex
+/// # The device mutex
 ///
-/// Every open and close of any filter on the device waits for the device
-/// mutex, so it is held for the calls Microsoft documents as needing it and
-/// for nothing else: creating the factory and filling its bag
-/// (`KsCreateFilterFactory`, `KsAddItemToObjectBag`) and deleting it
-/// (`KsDeleteFilterFactory`; "Device Mutex in AVStream": the creation and
-/// destruction of filter factories is what the mutex synchronises). The
-/// allocations a new factory needs are made before the mutex is taken.
-///
-/// The other calls are made without it. Their reference pages name no mutex
-/// ("Mutexes in AVStream": a function's page says so if one has to be held),
-/// and each of them works in the registry or in Plug and Play for
-/// milliseconds at a time. What they do need is the factory to exist for the
-/// duration of the call, and that is arranged here instead:
+/// Creating a factory and deleting it need the device mutex (Microsoft's
+/// page for `KsCreateFilterFactory`; "Device Mutex in AVStream"), and the
+/// caller proves that it holds it. The other calls neither need it nor
+/// mind it: their reference pages name no mutex, and they return while
+/// another thread holds it. A driver may therefore make them inside a
+/// longer hold, so that Windows sees several of them as one step, or
+/// outside any. What they do need is the factory to exist for the duration
+/// of the call, and that is arranged here:
 ///
 /// * The handle cannot be copied, the calls take it by `&mut` and `delete`
 ///   consumes it. So no call can overlap the driver's own deletion of the
@@ -249,10 +244,9 @@ impl FilterFactory {
     /// deleted first. Its device interfaces are registered but off; see
     /// [`set_enabled`](Self::set_enabled).
     ///
-    /// Takes the device mutex for the calls that create the factory, and
-    /// only for those.
+    /// The caller holds the device mutex, which creating a factory needs.
     pub fn create<H: FilterHandler>(
-        device: &Device,
+        guard: &DeviceGuard<'_>,
         spec: &FilterSpec<'_>,
         reference: &[u16],
         context: Shared<H::Context>,
@@ -260,6 +254,7 @@ impl FilterFactory {
         if reference.last() != Some(&0) || reference[..reference.len() - 1].contains(&0) {
             return Err(NtStatus::INVALID_PARAMETER);
         }
+        let device = guard.device();
         let calls = device.factory_calls().ok_or(NtStatus::INVALID_DEVICE_REQUEST)?;
         let storage = Storage::build::<H>(spec)?;
         let descriptor = storage.descriptor();
@@ -275,8 +270,7 @@ impl FilterFactory {
         })?;
         let gone = state.clone().into_context();
 
-        let guard = device.lock();
-        let fdo = guard.device().functional_device_object();
+        let fdo = device.functional_device_object();
         let mut raw: sys::PKSFILTERFACTORY = core::ptr::null_mut();
         // SAFETY: the device mutex is held (`guard`). The descriptor lives
         // in `block`, which is handed to the factory's object bag below and
@@ -296,7 +290,6 @@ impl FilterFactory {
             )
         };
         if let Err(status) = NtStatus(status).into_result() {
-            drop(guard);
             // SAFETY: the reference was not handed to a bag; it is taken
             // back once.
             drop(unsafe { Shared::<FactoryState>::from_context(gone) });
@@ -320,9 +313,6 @@ impl FilterFactory {
         //
         // Only then is the Context published (until that store the factory
         // carries the device's context, which the trampolines reject).
-        //
-        // What has to be freed after a failure is freed once the mutex has
-        // been released.
         let failed = unsafe {
             let status = sys::KsAddItemToObjectBag((*raw).Bag, block, Some(free_block::<H>));
             if !NtStatus(status).is_success() {
@@ -339,7 +329,6 @@ impl FilterFactory {
                 }
             }
         };
-        drop(guard);
         if let Some((status, block)) = failed {
             // SAFETY: neither failure left the state's reference in a bag,
             // and the first left the block in none; each is taken back once.
@@ -416,10 +405,9 @@ impl FilterFactory {
     }
 
     /// Deletes the factory: no new filter can be opened from it. Filters
-    /// that are open keep working until they are closed. Takes the device
-    /// mutex for the call.
-    pub fn delete(self, device: &Device) {
-        let _guard = device.lock();
+    /// that are open keep working until they are closed. The caller holds
+    /// the device mutex, which deleting a factory needs.
+    pub fn delete(self, _guard: &DeviceGuard<'_>) {
         if !self.state.alive.load(Ordering::Acquire) {
             return;
         }

@@ -860,17 +860,23 @@ handle. Whatever the driver does while it holds that mutex therefore delays
 every client that is opening or closing a filter on any endpoint, including
 the endpoints of other hosts.
 
-- **Only for what needs it.** The driver holds the device mutex around the
-  kernel streaming calls that need it and around nothing else. In particular
-  the registry values of an endpoint's interfaces (A.10) are written without
-  it: writing them needs the device and the endpoint's reference strings,
-  nothing that kernel streaming owns.
-- **One endpoint at a time.** When the driver has several endpoints to deal
-  with, it releases the device mutex between one endpoint and the next. This
-  matters most when a control handle closes (section 11): a host with many
-  endpoints is withdrawn endpoint by endpoint, so a client's open or close
-  waits for the kernel streaming calls of at most one endpoint, however many
-  the host had.
+An earlier version of this section asked the driver to hold the device mutex
+only around the calls that need it and to release it between one endpoint and
+the next. That is superseded. It made a second host's clients wait less, and
+it made the common case worse: with Windows free to react in between, a host
+took several times longer to start and to stop, and clients of a restarted
+host had their streams invalidated. What counts is that one host opens and
+closes as quickly as possible, with clean audio.
+
+- **Closing is one hold.** While a control handle's endpoints are withdrawn
+  (section 11) the device mutex is held from the first endpoint to the last.
+  Windows sees the host's endpoints go together, and the close is quick.
+- **So is each endpoint's creation, and its publication.** One "create
+  endpoint" request holds the device mutex from its first filter factory to
+  the last thing it does to them, and the publication of the endpoint holds
+  it from the first registry value (A.10) to the last interface switched on.
+  Windows cannot open a filter of an endpoint that is half made or half
+  published.
 
 ### The driver's own locks
 
