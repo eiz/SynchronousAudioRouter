@@ -170,6 +170,31 @@ learn.microsoft.com, to find any documentation of `ksthunk.sys`. They found
 none. The result lists named some question-and-answer threads hosted there;
 none was opened. Every page above was fetched by its address.
 
+## Holding each other up, and locked memory (sections 6 and 14)
+
+The same engineer, in the same session, then made the driver stop holding
+locks across slow calls and lock its section in physical memory
+(`SPEC-GAPS.md`, section L). What was consulted for that, beyond the above:
+
+| Source | What was taken |
+|---|---|
+| `docs/behavior.md`, section 14, "It stays in physical memory" in section 6, and the last entry of section 13 | The rules. |
+| The brief for the task | Numbers, and nothing else, about the existing driver: how long the `contention` scenario's probe waited with it on the two test machines (while a second host closes, never more than 0.3 ms and 1.7 ms; while one is created, a median open of 7 and 12 ms, a longest of 62 and 85 ms, and a median close of 0.2 and 0.5 ms). They were used as a target, and as evidence that kernel streaming can be driven without the device mutex being held while device interfaces are switched off. How the existing driver arranges that was not said and is not known. Also the numbers of this driver before the change, which the runs below reproduce. |
+| learn.microsoft.com `.../ddi/wdm/nf-wdm-mmprobeandlockpages` | Makes the pages of an MDL resident and locks them in memory until `MmUnlockPages`; reports failure by raising an exception, so the call has to be made under an exception handler; pageable addresses need IRQL at or below `APC_LEVEL`. |
+| `.../ddi/wdm/nf-wdm-mmunlockpages`, `.../ddi/wdm/nf-wdm-ioallocatemdl` | Unlocking; allocating an MDL for a range of virtual addresses and freeing it with `IoFreeMdl`. |
+| `.../ddi/wdm/nf-wdm-mmmaplockedpagesspecifycache` | Maps the pages of a locked MDL into system address space; with kernel access and no bugcheck on failure it returns null when it cannot; `MdlMappingNoExecute`; undone with `MmUnmapLockedPages`. |
+| `.../ddi/ks/nf-ks-ksfilterfactorygetsymboliclink` | `PASSIVE_LEVEL`; names no mutex. |
+| `.../ddi/ks/nf-ks-ksfilterfactorysetdeviceclassesstate`, `.../nf-ks-ksfilterfactoryupdatecachedata`, `.../nf-ks-kscreatefilterfactory`, `.../nf-ks-ksdeletefilterfactory`, `.../stream/mutexes-in-avstream`, `.../stream/device-mutex-in-avstream` | As recorded above, read again from these notes for the question which calls need the device mutex: only the page of `KsCreateFilterFactory` asks for it, the device mutex synchronises the creation and destruction of filter factories, and a function's page says so if a mutex has to be held. |
+| `.../kernel/run-down-protection`, `.../ddi/wdm/nf-wdm-exacquirerundownprotection`, `.../nf-wdm-exwaitforrundownprotectionrelease`, `.../nf-wdm-exrundowncompleted`, `.../nf-wdm-exreinitializerundownprotection` | How run-down protection is used: acquiring fails once the wait for release has been called; the wait returns when everybody has released; waiting on an object that is already run down does nothing; a structure is re-initialised after the wait (and, optionally, `ExRundownCompleted`); the holder should be in a critical region so that it cannot be suspended; the IRQL each routine allows. |
+| `.../ddi/ks/nc-ks-pfnksdeviceirpvoid`, `.../ddi/ks/ns-ks-_ksdevice_dispatch` | Which Plug and Play requests the device callbacks stand for. Nothing about the device mutex in them, and nothing about when factories are freed relative to them. |
+| This build's generated `wdk-sys` bindings (in the Windows build directory) | The declarations and structure layouts of the routines above, of `KeEnterCriticalRegion`, `KfRaiseIrql`, `KeLowerIrql`, `KeGetCurrentIrql` and of the fast mutex (the last four for the temporary probes only). |
+| WDK 10.0.26100.0 `km/wdm.h` | What the inline `ExInitializeFastMutex` stores (`FM_LOCK_BIT` in `Count`, no owner, no contention, a synchronisation event that is not signalled), which the lock wrapper reproduces (`SPEC-GAPS.md`, item 66). |
+| The coordinator's messages during the task | The project owner's decision that the driver's own locks are fast mutexes, and the paragraph of section 14 that says so, which was put into `docs/behavior.md` on the coordinator's behalf. |
+| The result files of the rig runs `cleanroom-rt-*` under `rig-results/` (console output, scenario logs, the text file this driver's own probe builds wrote into the results directory) | The measurements recorded in `SPEC-GAPS.md`, section L. |
+
+The pages were fetched as before: by address, from learn.microsoft.com only,
+with no web search. No crate source was opened.
+
 ## Accidental exposure log
 
 - At session start the agent's context contained an automatically attached
@@ -234,3 +259,18 @@ For the session that made the cached filter data change:
   SarAsio's user-mode ASIO wrapper. They were read as test output and say
   nothing about the kernel driver. Shell commands, `--out` and the
   background output files were handled as before.
+- For the work on section 14 and locked memory, still the same session
+  (continued from a summary after it ran out of room): the context again
+  held an automatically attached git status block for `<the existing
+  repository>` (a branch name, an untracked `docs/` entry and five commit
+  subject lines about repository housekeeping, tests, the README and
+  SarAsio). It was ignored. The summary also named the path of the session's
+  own transcript under `<the agent's configuration directory>`, which the
+  brief puts off limits; it was not opened. Shell commands, `--out` and the
+  background output files under `/tmp/claude-1000/...` were handled as
+  before: every command began with `cd <the workspace> &&`, and the
+  notifications that name those output files were not followed.
+- A write-location slip in the same work, not an exposure: one command
+  redirected a `git diff` of this workspace into a file directly under
+  `/tmp/claude-1000`, and the next command deleted that file by name.
+  Nothing there was listed or read.
