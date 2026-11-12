@@ -28,6 +28,10 @@ independently confirmed.
    `ZwMapViewOfSection` documentation (SectionOffset is rounded down to the
    allocation granularity). [doc]
 
+   *Later (item 61).* The driver's own mapping of the register table is no
+   longer a view. It is a mapping of the table's locked pages and starts at
+   `registerBase` exactly. A client's view is as described here.
+
 2. **[A.9] `KSPIN_PHYSICALCONNECTION` sizes.** "`Size` = 12 + path bytes ...
    Reports 12 + path bytes + 2." The structure's string starts at offset 8,
    so the bytes actually meaningful are 8 + path + 2; `Size` and the reported
@@ -412,6 +416,12 @@ written. The items continue the numbering of sections A to F.
     `cleanroom-cachedata-final-20261111-135739`: `issues`, `matrix`, `race`,
     `kill`).
 
+    *Later (items 55 and 58).* Still on the requesting thread, straight
+    after the second factory has been created and before either one's
+    interfaces are switched on, but no longer under any lock: the control
+    handle's and the publish queue's are not held while an endpoint's
+    factories are created, and the device mutex is not held for this call.
+
 39. **[A.9] Whether the device mutex is held for the call.** The
     specification does not say, and neither does Microsoft: the function's
     page mentions no mutex, although "Mutexes in AVStream" says that the
@@ -425,6 +435,12 @@ written. The items continue the numbering of sections A to F.
     `KsFilterFactorySetDeviceClassesState` always has been here (its page is
     just as silent). **[rig]** In the runs of item 38 the call returned, and
     succeeded, with the mutex held.
+
+    *Decided again (item 55).* Section 14 asks that the device mutex be held
+    "around the kernel streaming calls that need it and around nothing
+    else". This call, and the switching of a factory's interfaces, are now
+    made without it. The first of the two facts above is met another way
+    (item 56); the second never said that the mutex is needed.
 
 40. **[A.9] What else "the results are not checked" covers.** Decided as
     follows. [guess]
@@ -565,6 +581,10 @@ run had created.
     streaming could be holding. **[rig]** Every release in the runs of item
     42 happened this way, under Driver Verifier's IRQL checking and deadlock
     detection.
+
+    *Later (item 63).* Not there any more. The routine kernel streaming
+    calls to free a factory's block now hands the block to a system worker
+    thread, and the endpoint and the section go on that thread.
 
 45. **[section 11] Shown: released at the last close, not when the device
     stops.** A clean unload shows only that nothing is left at the end. Run
@@ -793,3 +813,383 @@ exclusive-mode stream.
     32-bit process outside the exclusive-mode stream), so nothing the driver
     is asked on their behalf depends on the client being a 32-bit one. Why a
     32-bit client is sometimes that slow to start was not found.
+
+## L. How long requests hold each other up, and locked memory (sections 6 and 14)
+
+Section 14, "It stays in physical memory" in section 6 and the last entry of
+section 13 were added after the `contention` scenario showed what the driver
+did to its clients: while a host with 64 endpoints was being closed, a client
+opening a filter of another host waited for up to a third of a second, and
+while one was being created, half of all opens and closes waited 40 ms or
+more. The driver held kernel streaming's device mutex for the whole of each
+endpoint's creation, for its publication, registry writes included, and for
+the withdrawal of all of a closing handle's endpoints together.
+
+55. **[section 14; item 39] Which kernel streaming calls "need" the device
+    mutex.** The specification leaves that to the reader, and names only what
+    does not: writing the registry values of A.10. Decided from Microsoft's
+    pages. "Mutexes in AVStream" says that a function's reference page states
+    whether a mutex has to be held for it. The page of
+    `KsCreateFilterFactory` does; so does that of `KsAddItemToObjectBag`,
+    for the bag's mutex, which for a factory's bag is the device mutex. And
+    "Device Mutex in AVStream" says that the mutex synchronises the creation
+    and destruction of filter factories, which covers
+    `KsDeleteFilterFactory`. The pages of
+    `KsFilterFactorySetDeviceClassesState`, `KsFilterFactoryUpdateCacheData`
+    and `KsFilterFactoryGetSymbolicLink` name no mutex. [doc]
+
+    Resolved: the device mutex is held for creating a factory and filling
+    its bag, and for deleting it, one factory at a time, and for nothing
+    else. It is taken inside the kernel streaming wrapper, which no longer
+    gives the driver a way to hold it across anything. Switching a factory's
+    interfaces on or off, writing its cached filter data and reading its
+    symbolic link are done without it, as are the registry values. What a
+    factory's creation needs in memory is allocated before the mutex is
+    taken, and what a failed creation leaves is freed after it is released.
+
+    That the three calls work without the mutex is not something Microsoft
+    says in so many words. **[rig]** A build made for the purpose had one
+    thread hold the device mutex while another made all three calls on a
+    factory, switching it both on and off. In every one of five loads of
+    that build (runs `cleanroom-rt-a1-20261111-230858`,
+    `cleanroom-rt-a2-20261111-231529`, `cleanroom-rt-a3-20261111-232259`,
+    Windows 11; the Windows 10 run is in item 66) all four calls succeeded
+    and returned, in between 0.05 and 6.9 ms each, while the other thread
+    still held the mutex. They do not take it themselves, then, and they do
+    not need it. The suite, which runs on the result, is the rest of the
+    evidence.
+
+56. **[section 14; item 39] What keeps a factory in existence during a call
+    that is made without the device mutex.** Item 39 held the mutex for
+    these calls because a factory is only certain to exist under it. Two
+    things can destroy one, and each is now ruled out by other means.
+
+    - *The driver's own deletion of it.* A factory's handle cannot be
+      copied, the calls take it exclusively and deletion consumes it; and an
+      endpoint's two factories are in one place at a time: at rest in the
+      endpoint's state, or in the hands of the one thread that is creating,
+      publishing or withdrawing the endpoint (item 57). The compiler holds
+      the driver to this; nothing is checked at run time.
+    - *Kernel streaming's, when the device stops* (factories are created to
+      be freed then). Every call that is made without the mutex is made
+      inside a gate, Windows' run-down protection, one per device. The
+      device's stop, remove and surprise-removal callbacks shut the gate
+      first: that refuses later calls and waits for those under way. A
+      device that starts again opens it.
+
+    The gate rests on two things Microsoft does not document. First, that
+    kernel streaming calls the device's stop callbacks before it frees the
+    factories, not after. **[rig]** In the runs of item 55 a factory that
+    the build never deleted still existed at the first of the two such
+    callbacks a device removal makes, and was gone at the second; all 773
+    factories of a run had been destroyed by then. Second, that the calls
+    under way do not need the device mutex, which kernel streaming holds
+    during those callbacks: shown in item 55. If the first were otherwise on
+    some version of Windows, a call under way while the device is stopped
+    could be working on a freed factory. That needs the device to be stopped
+    while a control handle is open or still closing, which Plug and Play
+    does not do for an ordinary removal (section 11) and which no scenario
+    does (item 46).
+
+57. **[sections 11 and 14] Withdrawing "endpoint by endpoint", and what had
+    to change with it.** Each of these was implied by the one hold of the
+    device mutex that is gone.
+
+    - *Who may touch an endpoint's factories.* Publication (worker thread)
+      and withdrawal (the thread closing the handle) used to exclude each
+      other through the device mutex. Now the thread that has kernel
+      streaming calls to make takes the two factories out of the endpoint's
+      state, under the endpoint's lock, and puts them back or deletes them.
+      A close that finds them taken removes the endpoint's owner and waits,
+      holding nothing, for the other thread to notice and delete them.
+    - *In which order an endpoint goes.* Section 11's order: its
+      interfaces are switched off, then it loses its owner, then its
+      factories are deleted. The driver used to take the owner away first,
+      which nobody could see while the device mutex kept Windows out. Now
+      Windows asks in between, and should find an endpoint gone, not
+      present and refusing everything. For the same reason a closing
+      handle's endpoints go on working until their turn comes. What all of
+      them are told at the start of the close (memory only) is that they
+      are going, so that nothing new is begun on them and a request for
+      the same identity waits (below).
+    - *What a close waits for.* It returns when none of the handle's
+      factories is left, as before. An endpoint whose factories another
+      thread is still creating is one of them: the endpoint joins the
+      handle's endpoints before its factories exist (item 58), so the close
+      sees it. The close withdraws every endpoint it can withdraw itself
+      before it waits for any other, because the thread it waits for may be
+      waiting for one of those (next point).
+    - *The same identity, asked for while it is being withdrawn.* A host
+      that is started while its predecessor's handle is still closing asks
+      for endpoints whose factories may not have been deleted yet. Under the
+      single hold its request simply waited for the whole close. Kernel
+      streaming refuses a second factory with the same reference string, so
+      without care the request would now fail. Resolved: the device keeps
+      the reference strings of the endpoints whose factories exist. A
+      request for one that is being withdrawn waits, holding no lock, until
+      those factories are gone; one that collides with a live endpoint is
+      left to kernel streaming to refuse, as before. Reference strings are
+      compared without regard to the case of ASCII letters (erring towards
+      "same" costs a short wait). [guess] for the comparison; no scenario
+      is known to depend on it, but `recovery-after-kill` starts a host
+      right after killing one.
+
+58. **[sections 5 and 14] "Create endpoint" without the control handle's
+    lock.** The request used to hold the device mutex, the control handle's
+    lock and the publish queue's lock from its checks to the moment it was
+    queued. Now:
+
+    - The checks (closed, no layout, index in use) are made under the
+      control handle's lock, the endpoint is allocated with no lock held,
+      and it is put among the handle's endpoints under the lock, after the
+      same checks again. That is what reserves its index.
+    - Its factories are created with no lock of the driver's held.
+    - A filter cannot be opened on it until both factories exist and their
+      paths are known (`STATUS_NOT_FOUND` before). The single hold used to
+      guarantee that; a client that knows a path from an earlier host could
+      otherwise open a half-made endpoint.
+    - It is marked pending and queued under the publish queue's lock alone.
+    - If the handle closed while the factories were being created, the
+      request deletes them and fails with `STATUS_FILE_CLOSED` at once (the
+      row "the handle closed meanwhile" of A.5). If it closes after that,
+      the request is already pending and completes with that status from
+      the worker thread, as it always could.
+    - Requests are still "finished in the order they were made". The device
+      mutex no longer puts the worker threads in line, so one of them
+      publishes at a time: a work item that finds another publishing
+      returns, and the one that is publishing goes on until the queue is
+      empty.
+
+    Statuses are those of A.5. Where two refusals apply at once the order
+    is: closed, no layout, index in use, a name that does not fit, out of
+    memory, kernel streaming's refusal, closed meanwhile.
+
+59. **[section 14] "Refused without looking at an endpoint's state": which
+    requests, and what a request that is wrong twice now gets.** Section 11
+    says that every property request on a withdrawn endpoint fails as if the
+    endpoint were not found; section 14 says that some requests are refused
+    without a look at the endpoint, which cannot then know that it has been
+    withdrawn. The second is followed where the two meet. Refused before
+    the endpoint's lock is taken, whatever the endpoint's state:
+
+    | Request | Status | Before |
+    |---|---|---|
+    | Unregister notification event, clock register, packet count, presentation position | `STATUS_NOT_IMPLEMENTED` | `STATUS_NOT_FOUND` on a withdrawn endpoint |
+    | Buffer request naming an address | `STATUS_NOT_IMPLEMENTED` | the same |
+    | Buffer or event request too short to hold its fields | `STATUS_INVALID_PARAMETER` | the same |
+    | Format matching on a pin other than the streaming pin | `STATUS_NO_MATCH` | the same |
+    | A pin, node or property the filter does not have | `STATUS_NOT_FOUND` | unchanged |
+
+    Every other property request still answers `STATUS_NOT_FOUND` on a
+    withdrawn endpoint. The requests that are answered from the endpoint's
+    fixed properties alone (proposed format, channel configuration, pin
+    name) take the lock only to see that it still has an owner.
+
+60. **[section 14] The notification queue under its spin lock.** The queue
+    was a growable ring: registering an event could reallocate it under the
+    lock, collecting events allocated a batch under it, and closing moved
+    everything. Resolved, in `sar-core`, where it is unit-tested:
+
+    - Events are kept in chunks of 128. The list of chunks is given room
+      for the fullest queue (item G: 18,720 events) when the control handle
+      is opened, so it never grows. A chunk is allocated, with no lock held,
+      by the registration that finds the newest one full: the queue says so,
+      and the event is offered a second time together with the chunk.
+    - A wait request takes at most 32 events under one hold of the lock,
+      into a batch on its own stack (512 bytes), and takes the lock again
+      for the next 32 while its buffer has room. "As many as fit, oldest
+      first" still holds; an event registered between two holds can now be
+      delivered by the request that was already collecting. Existing hosts
+      ask for 32 at a time.
+    - A chunk that a collection empties leaves the queue with the batch and
+      is freed after the lock is released; so are a refused event, a chunk
+      that turned out not to be needed, and everything nobody collected
+      when the queue closes (which is one pointer swap under the lock).
+
+    Under the lock, then: no allocation, no free, and at most 32 events
+    copied. **[rig]** In the runs of item 55 the lock was never held longer
+    than 11 microseconds.
+
+61. **[section 6] How the section is locked.** The specification says what
+    is to be true, not how. A section's pages can only be locked through a
+    view. Resolved: when the buffer layout is set the driver maps the whole
+    section into system address space, describes the audio area and the
+    register table by one memory descriptor list each, and has the memory
+    manager make their pages resident and lock them (`MmProbeAndLockPages`,
+    which raises an exception when it cannot; the one C file gained a fifth
+    function for that). The view is then removed again: the locks are on the
+    pages, not on the view. The register table's locked pages are mapped
+    into system address space a second time (`MmMapLockedPagesSpecifyCache`,
+    not executable), and that mapping, which starts at `registerBase`
+    exactly, is the only one the driver reads and writes through. The audio
+    area's pages are locked and never mapped: the temporary view is the one
+    moment at which they appear in kernel address space, and nothing is read
+    or written through it. [doc]
+
+    Any failure on that path (the temporary view, either lock, the second
+    mapping) is reported as `STATUS_INSUFFICIENT_RESOURCES`, and whatever
+    had been made is undone before the request is answered: no section, no
+    mapping, and the request can be repeated. The section's creation itself
+    still reports the memory manager's status (A.5).
+
+62. **[section 6] How it was checked.** "That the section is locked in
+    physical memory cannot be seen from user mode, and the test suite does
+    not check it." **[rig]** The builds of item 55 checked it from inside:
+
+    - For every section, every page was read with the IRQL raised to
+      `DISPATCH_LEVEL`: the audio area's through a mapping of its locked
+      pages made for the test and removed again, the register table's
+      through the mapping the driver uses. A page fault at that level stops
+      the machine, and with Driver Verifier's IRQL checking, which the rig
+      has on, pageable memory is thrown out of the working set whenever the
+      level is raised. 33,024 such reads in each of the three runs; none
+      faulted. Every descriptor list said its pages were locked, and every
+      page read as zero.
+    - No lock failed, and at the time the device was removed every section
+      had been released and as many pages unlocked as locked (8 sections
+      and 32,896 pages in each of the runs with `kill`, in which hosts are
+      killed while clients are streaming).
+    - The streaming scenarios pass only if the host sees what the driver
+      writes through its own mapping, so that mapping is of the section's
+      pages and of no copy.
+
+    Not checked: that nothing is ever written to the paging file, and that
+    the pages stay locked between the checks. Both are what Microsoft
+    documents a locked descriptor list to mean.
+
+63. **[sections 6 and 11] Views in other processes; what the lock belongs
+    to; where it ends.** The driver locks no view into any process's working
+    set: section 6 leaves that to the host. The locks belong to the section
+    as the driver holds it and to nothing else, so they are taken once and
+    last until the section is released by the rule of section 11: the
+    control handle closed and the last endpoint gone. A host that dies with
+    clients streaming changes nothing about them. Its handle closes, its
+    endpoints are withdrawn, and the clients' streams go on working on
+    memory that is still locked until the last of them closes its filter;
+    then the pages are unlocked, the driver's mapping removed and the
+    section closed (the counts in item 62 are from such runs).
+
+    Where that happens changed. The last reference to an endpoint, and with
+    it to its section, usually goes when kernel streaming frees a factory's
+    block, inside its close of the endpoint's last filter (item 44), with
+    the device mutex held. Freeing a block took 0.8 ms on average and up to
+    5.6 ms in the runs of item 55, more than anything the driver itself now
+    does under that mutex when a host closes, and unlocking a large section
+    would add to it. Resolved: the free routine does not free. It hands the
+    block to a system worker thread, through a work item allocated with the
+    block, which also keeps the device and the driver in place until the
+    block is freed. So "released once ... the last filter and pin opened
+    from it has been closed" now means shortly after, on another thread.
+
+64. **[sections 5 and 14] "Start registry filter" without a lock.** The
+    request held a lock while it read the caller's user and registered the
+    callback. Now the first request stakes a claim (one atomic flag), does
+    both with nothing held, and gives the claim up again if either fails. A
+    request that arrives while another is still registering the callback is
+    answered `STATUS_RESOURCE_IN_USE`, as if it had come afterwards; if the
+    first then fails, the second was told "in use" about a filter that was
+    never started. [guess] that this is acceptable: the registration fails
+    for lack of memory or because another driver has the altitude, and then
+    the second would have failed too.
+
+65. **[section 14] What is done under each of the driver's own locks now.**
+    Reads and writes of the driver's own memory, of the register table
+    (locked), and of the request and reply buffers kernel streaming hands a
+    property handler; allocation of non-paged pool for the lists the locks
+    guard; nothing else. None of the calls section 14 lists
+    is made under one, and neither is a wait, the completion of a request
+    or the release of a reference whose going could free something: each of
+    those is done after the lock has been dropped. The device mutex is not
+    the driver's lock; what the driver does under it is in item 55.
+
+66. **[section 14] The kind of lock.** Section 14 first left it open; the
+    project owner then decided it, and the section now says: fast mutexes
+    wherever possible. Every lock of the driver's own is one now: the
+    control handle's, the endpoint's, the section's cell allocator's, the
+    publish queue's, the list of identities, the control interface's slot
+    and the registry filter's slot. None had to stay a kernel mutex,
+    because by item 65 nothing done under any of them needs
+    `PASSIVE_LEVEL`. Where two are held at once (an endpoint's, then its
+    section's cell allocator's) they are released in the reverse order,
+    which a lock that restores the IRQL on release needs. The notification
+    queue keeps its spin lock, and the device mutex and the filter control
+    mutex are kernel streaming's.
+
+    `ExInitializeFastMutex` is an inline function of `wdm.h`; the wrapper
+    stores what it stores. A fast mutex cannot be taken twice by one
+    thread (the second attempt waits for ever), so the wrapper's refusal
+    of recursive locking now works by knowing which thread holds the lock,
+    and panics before it would wait.
+
+    **[rig]** Two full runs of the suite on Windows 11 with the locks as
+    fast mutexes, under Driver Verifier with its IRQL checking on:
+    `cleanroom-rt-fm1-20261111-234630` (an experiment, before the decision)
+    and `cleanroom-rt-f64-20261112-011459` (the committed code). Neither
+    stopped or hung the machine, and conformance, fuzzing, contention and
+    the unload passed in both. The scenarios that failed are those of item
+    67, which fail the same way with kernel mutexes.
+
+67. **[section 14] What the `contention` scenario measured, and what the
+    rest of the suite did.** **[rig]** Windows 11, longest open and close
+    of the first host's filter, in milliseconds (median in brackets):
+
+    | Run | while creating | while closing |
+    |---|---|---|
+    | Before (`cleanroom-rt-base-20261111-222712`) | open 100.72 (39.51), close 109.29 (44.87) | open 357.44, close 0.76 |
+    | Before, again, later the same night (`cleanroom-rt-old-20261112-003428`) | open 178.12 (68.65), close 224.62 (80.72) | open 241.18, close 131.43 |
+    | Committed code (`cleanroom-rt-f64-20261112-011459`) | open 74.87 (0.15), close 88.15 (0.22) | open 0.66, close 1.16 |
+
+    What is left while a host is created is one `KsCreateFilterFactory`,
+    which has to be made under the device mutex and took 20 ms on average
+    and up to 74 ms in the runs with timers. On Windows 10 a build with
+    timers (`cleanroom-rt-a4w10-20261111-232928`, kernel mutexes, before the
+    order of withdrawal was changed) measured open 28.23 and close 23.75
+    while creating, open 1.12 and close 0.99 while closing.
+
+    The suite as a whole did not pass. In run f64 six streaming scenarios
+    failed (`run-16x2`, `kill-host`, `channels-32`, `run-after-fuzz`,
+    `run-after-reload`, `run-after-device-disable`), all in the same way:
+    Windows' own calls (`Activate`, `Initialize`, `GetMixFormat`) took 4 s
+    or a multiple of it and the stream did not start in its window, or the
+    endpoints were not built in time. The driver as it was before this work,
+    run in the same guest between two runs of the new one (run old above),
+    failed four the same way (`channels-32` and the three `run-after-*`),
+    and its own numbers were twice what they had been two hours earlier. So
+    those four are not this change's. `run-16x2` failed in all four full
+    runs of the new code and passed in the one of the old; `kill-host`
+    failed in three of the four. Those two are probably this change's,
+    though not through anything the driver gets wrong that was found: with
+    Windows no longer held up while a host starts and stops, starting 32
+    endpoints took 1 to 2 s where it took 0.4 to 0.9 s, the audio service
+    works at the same time, and the scenarios' windows are missed. Not
+    settled.
+
+68. **[sections 6 and 14] Not settled, or not exercised.**
+
+    - The order in which kernel streaming calls the stop callbacks and
+      frees the factories, on versions of Windows other than the rig's two
+      (item 56).
+    - A device that is stopped while a host is creating, publishing or
+      withdrawing endpoints: the gate of item 56 has only ever been shut
+      with nobody inside.
+    - A host that closes its handle from one thread while another is in
+      "create endpoint", and a new host that asks for an identity whose
+      old factories are still being deleted (item 57). In the runs with
+      timers no wait for an endpoint's factories lasted longer than
+      0.05 ms: none had to wait.
+    - A second "start registry filter" while the first is in progress
+      (item 64).
+    - Memory that cannot be locked (item 61): no run produced the failure.
+      The largest layout a scenario asks for is not known; 16 MiB sections
+      were locked in every run.
+    - How long closing a host takes. Withdrawing 64 endpoints took up to
+      1.6 s in the runs with timers (0.35 s before), almost all of it in
+      switching interfaces off, a call that took four to five times longer
+      than it did when everything else on the device was held up for its
+      duration. The time is no longer spent with the device mutex held,
+      which is what section 14 asks for; that it is longer in all was not
+      pursued.
+    - Freeing a factory's block on a worker thread (item 63) means that an
+      endpoint and its section outlive the last close of their filters by
+      the time a work item takes to run. Nothing is known to depend on the
+      old timing; the `unload` scenarios pass.
