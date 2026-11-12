@@ -896,10 +896,11 @@ Two places where this shows from outside:
   "wait for notification events" request arriving meanwhile is answered or
   parked as usual.
 
-With this rule the kind of lock stops mattering for correctness: none of the
-calls above is ever made with one held, so a kind that raises the IRQL to
-`APC_LEVEL` while held would work as well as one that does not. Which kind
-the driver uses is not specified here.
+The driver's own locks are of the kind that raises the IRQL to `APC_LEVEL`
+while held (fast mutexes) wherever that is possible. None of the calls above
+can be made at that level, so Driver Verifier turns a violation of this rule
+into a stop instead of a slow request. A lock that cannot be of that kind is
+an exception to be justified one by one.
 
 ### Refusals that need no lock
 

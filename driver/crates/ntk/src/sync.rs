@@ -9,35 +9,48 @@ use core::{
     marker::PhantomData,
     mem::MaybeUninit,
     ops::{Deref, DerefMut},
-    sync::atomic::{AtomicBool, Ordering},
+    sync::atomic::{AtomicBool, AtomicUsize, Ordering},
 };
 
 use ntstatus::NtStatus;
 use wdk_sys::{
     ntddk::{
         ExAcquireRundownProtection, ExReInitializeRundownProtection, ExReleaseRundownProtection,
-        ExRundownCompleted, ExWaitForRundownProtectionRelease, KeAcquireSpinLockRaiseToDpc,
-        KeEnterCriticalRegion, KeInitializeEvent, KeInitializeMutex, KeLeaveCriticalRegion,
-        KeReleaseMutex, KeReleaseSpinLock, KeSetEvent, KeWaitForSingleObject,
+        ExAcquireFastMutex, ExReleaseFastMutex, ExRundownCompleted,
+        ExWaitForRundownProtectionRelease, KeAcquireSpinLockRaiseToDpc, PsGetCurrentThreadId,
+        KeEnterCriticalRegion, KeInitializeEvent, KeLeaveCriticalRegion,
+        KeReleaseSpinLock, KeSetEvent, KeWaitForSingleObject,
     },
-    EX_RUNDOWN_REF, KEVENT, KIRQL, KMUTEX, KSPIN_LOCK,
+    EX_RUNDOWN_REF, KEVENT, KIRQL, KSPIN_LOCK,
     _EX_RUNDOWN_REF__bindgen_ty_1 as EX_RUNDOWN_REF_VALUE,
 };
 
 use crate::alloc_ext::{try_box, Shared};
 
-/// A mutual-exclusion lock for use at `PASSIVE_LEVEL`, built on a kernel
-/// mutex (`KMUTEX`). The holder stays at `PASSIVE_LEVEL` and may touch
-/// pageable memory and call `Zw` routines.
+/// A mutual-exclusion lock built on a fast mutex (`FAST_MUTEX`). It is
+/// taken at or below `APC_LEVEL`, and the holder runs at `APC_LEVEL` until
+/// it lets go.
 ///
-/// A kernel mutex is recursive; this type is not. Locking it again on the
-/// thread that already holds it panics, because handing out a second
-/// `&mut T` would be unsound.
+/// That is the point of the kind. At `APC_LEVEL` a thread may read and
+/// write memory, pageable memory included, and allocate; it may not make
+/// the calls that have to wait for another part of the system (a registry
+/// call, a handle, a view of a section, a device interface, anything that
+/// waits for its own I/O to complete), and Driver Verifier stops the
+/// machine when one is made. So what may be done under one of these locks
+/// is what the driver is supposed to do under a lock anyway (section 14 of
+/// the specification), and a violation shows as a stop, not as a slow
+/// request.
+///
+/// A fast mutex cannot be taken twice by one thread: the second attempt
+/// would wait for ever. This type refuses instead. Locking it again on the
+/// thread that already holds it panics.
 pub struct Mutex<T> {
-    // The kernel object lives in its own allocation: a KMUTEX contains
-    // list links and must never move, while a `Mutex<T>` may.
-    raw: Box<UnsafeCell<MaybeUninit<KMUTEX>>>,
-    held: AtomicBool,
+    // The kernel object lives in its own allocation: a FAST_MUTEX contains
+    // an event, with list links, and must never move, while a `Mutex<T>`
+    // may.
+    raw: Box<UnsafeCell<MaybeUninit<wdk_sys::FAST_MUTEX>>>,
+    /// The id of the thread that holds the lock, or zero.
+    owner: AtomicUsize,
     value: UnsafeCell<T>,
 }
 
@@ -49,47 +62,64 @@ unsafe impl<T: Send> Sync for Mutex<T> {}
 
 impl<T> Mutex<T> {
     pub fn try_new(value: T) -> Result<Self, NtStatus> {
-        let raw = try_box(UnsafeCell::new(MaybeUninit::<KMUTEX>::uninit()))?;
-        // SAFETY: `raw` is writable storage for a KMUTEX at its final
-        // address; KeInitializeMutex initialises it.
-        unsafe { KeInitializeMutex(raw.get().cast::<KMUTEX>(), 0) };
+        let raw = try_box(UnsafeCell::new(MaybeUninit::<wdk_sys::FAST_MUTEX>::uninit()))?;
+        // SAFETY: `raw` is writable storage for a FAST_MUTEX at its final
+        // address. This is what wdm.h's inline ExInitializeFastMutex does:
+        // Count = FM_LOCK_BIT (1), no owner, no contention, and a
+        // synchronisation event that is not signalled.
+        unsafe {
+            let fast = raw.get().cast::<wdk_sys::FAST_MUTEX>();
+            core::ptr::addr_of_mut!((*fast).Count).write(1);
+            core::ptr::addr_of_mut!((*fast).Owner).write(core::ptr::null_mut());
+            core::ptr::addr_of_mut!((*fast).Contention).write(0);
+            core::ptr::addr_of_mut!((*fast).OldIrql).write(0);
+            KeInitializeEvent(
+                core::ptr::addr_of_mut!((*fast).Event),
+                wdk_sys::_EVENT_TYPE::SynchronizationEvent,
+                0,
+            );
+        }
         Ok(Self {
             raw,
-            held: AtomicBool::new(false),
+            owner: AtomicUsize::new(0),
             value: UnsafeCell::new(value),
         })
     }
 
-    fn raw(&self) -> *mut KMUTEX {
-        self.raw.get().cast::<KMUTEX>()
+    fn raw(&self) -> *mut wdk_sys::FAST_MUTEX {
+        self.raw.get().cast::<wdk_sys::FAST_MUTEX>()
     }
 
-    /// Waits for the lock. Must be called below `DISPATCH_LEVEL`.
+    /// Waits for the lock. Must be called at or below `APC_LEVEL`. The
+    /// thread is at `APC_LEVEL` until the guard is dropped; guards of
+    /// several locks must be dropped in the reverse of the order in which
+    /// they were taken, since each restores the level it found.
     pub fn lock(&self) -> MutexGuard<'_, T> {
-        // SAFETY: `raw` is an initialised KMUTEX that outlives the call. A
-        // non-alertable kernel-mode wait without timeout returns only once
-        // the mutex is owned (STATUS_SUCCESS, or STATUS_ABANDONED which
-        // also grants ownership).
-        let _ = unsafe {
-            KeWaitForSingleObject(
-                self.raw().cast(),
-                wdk_sys::_KWAIT_REASON::Executive,
-                wdk_sys::_MODE::KernelMode as i8,
-                0,
-                core::ptr::null_mut(),
-            )
-        };
-        if self.held.swap(true, Ordering::Acquire) {
-            // The kernel granted the mutex although it is held: this thread
-            // already owns it. A second guard must not exist.
+        // SAFETY: no pointer is involved; a thread id is never zero.
+        let me = unsafe { PsGetCurrentThreadId() } as usize;
+        if self.owner.load(Ordering::Acquire) == me {
+            // Only this thread can have stored its own id, so it holds the
+            // lock. Waiting would never end, and a second guard must not
+            // exist.
             panic!("ntk::sync::Mutex locked recursively");
         }
-        MutexGuard { mutex: self }
+        // SAFETY: `raw` is an initialised FAST_MUTEX in non-paged memory
+        // that outlives the call; the caller is at or below APC_LEVEL and
+        // does not hold it (checked above).
+        unsafe { ExAcquireFastMutex(self.raw()) };
+        self.owner.store(me, Ordering::Release);
+        MutexGuard {
+            mutex: self,
+            _same_thread: PhantomData,
+        }
     }
 }
 
+/// Proof of holding a [`Mutex`]. It stays on the thread that took the
+/// lock, which is the one that has to release it.
 pub struct MutexGuard<'a, T> {
     mutex: &'a Mutex<T>,
+    _same_thread: PhantomData<*mut ()>,
 }
 
 impl<T> Deref for MutexGuard<'_, T> {
@@ -111,9 +141,10 @@ impl<T> DerefMut for MutexGuard<'_, T> {
 
 impl<T> Drop for MutexGuard<'_, T> {
     fn drop(&mut self) {
-        self.mutex.held.store(false, Ordering::Release);
-        // SAFETY: this thread owns the mutex (the guard exists).
-        unsafe { KeReleaseMutex(self.mutex.raw(), 0) };
+        self.mutex.owner.store(0, Ordering::Release);
+        // SAFETY: this thread owns the mutex (the guard exists), and is at
+        // the APC_LEVEL the acquisition left it at.
+        unsafe { ExReleaseFastMutex(self.mutex.raw()) };
     }
 }
 
