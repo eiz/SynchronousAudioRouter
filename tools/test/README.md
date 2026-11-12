@@ -149,6 +149,15 @@ channels), with a hardware interface whose samples are 32-bit float and one
 whose samples are 24-bit, and with 64 endpoints. SarAsio refuses a period longer than the
 audio engine's 10 ms, so nothing longer is tried.
 
+`bursts` runs the clock the way a hardware interface behaves that polls its
+device every 10 ms: it makes the callbacks those 10 ms amount to back to back
+and carries the remainder over. With a callback size that divides 10 ms (240
+and 120 frames at 48 kHz) the streams are clean. With one that does not (256,
+128, 64) they have discontinuities, more or fewer depending on where in the
+pattern a stream starts, so each case starts its streams four times. SAR has
+always behaved this way with such an interface, with either driver; the group
+measures it and is not part of the default run.
+
 `contention` keeps one host up while another with 64 endpoints is created and
 closed five times, and times every open and close of the first host's
 playback filter. Kernel streaming serializes filter opens across the whole
@@ -181,8 +190,8 @@ recorded as tolerated, and only a hang (or a bugcheck) fails the run.
 started.
 
 `Invoke-SarTest.ps1 -Scenarios` selects any of `issues`, `conformance`,
-`matrix`, `race`, `kill`, `formats`, `contention`, `fuzz`, `unload`, `device`
-and `browser`.
+`matrix`, `race`, `kill`, `formats`, `contention`, `fuzz`, `unload`, `device`,
+`browser` and `bursts`.
 
 ## Commands
 
@@ -229,7 +238,8 @@ report's `priorityClass` say which it was.
 The clock reads `SAR_TEST_CLOCK_RATE`, `SAR_TEST_CLOCK_FRAMES`,
 `SAR_TEST_CLOCK_INPUTS`, `SAR_TEST_CLOCK_OUTPUTS` and
 `SAR_TEST_CLOCK_SAMPLES` (`int32`, `int24` or `float32`, the sample type of
-its channels) from the environment.
+its channels) from the environment, and `SAR_TEST_CLOCK_BURST`: a device
+period in frames to deliver as one burst of callbacks instead of evenly.
 Set `--no-sarasio-log` to stop SarAsio from logging to
 `%APPDATA%\SynchronousAudioRouter\logs`.
 

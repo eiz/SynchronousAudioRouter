@@ -35,7 +35,8 @@ param(
     [switch]$SkipInstall,
     [switch]$SkipKillTest,
     # Any of issues, conformance, matrix, race, kill, formats, contention,
-    # fuzz, unload, device, browser. Installation always runs.
+    # fuzz, unload, device, browser, and bursts, which is not in the default
+    # list. Installation always runs.
     [string[]]$Scenarios = @('issues', 'conformance', 'matrix', 'race', 'kill', 'formats', 'contention', 'fuzz', 'unload', 'device', 'browser'),
     [int]$RaceCycles = 10,
     # Extra idle time between the race and the kill scenario, on top of
@@ -132,7 +133,7 @@ if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administra
 # A misspelled group would otherwise be skipped without a word, and the run
 # would pass having tested nothing. Accept "a,b" as one argument too, which
 # is how the list arrives through powershell -File.
-$knownScenarios = 'issues', 'conformance', 'matrix', 'race', 'kill', 'formats', 'contention', 'fuzz', 'unload', 'device', 'browser'
+$knownScenarios = 'issues', 'conformance', 'matrix', 'race', 'kill', 'formats', 'bursts', 'contention', 'fuzz', 'unload', 'device', 'browser'
 $Scenarios = @($Scenarios | ForEach-Object { $_ -split ',' } |
     ForEach-Object { $_.Trim() } | Where-Object { $_ })
 $unknownScenarios = @($Scenarios | Where-Object { $knownScenarios -notcontains $_ })
@@ -788,6 +789,33 @@ if ($Scenarios -contains 'formats') {
     $summary.scenarios += Invoke-Scenario 'endpoints-32x2' (
         @('run', '--endpoints', 32, '--iterations', 1, '--duration', $Duration) + $common)
     $null = Wait-EndpointBuilderIdle -TimeoutSeconds 180
+}
+
+if ($Scenarios -contains 'bursts') {
+    # A hardware interface that makes its callbacks in bursts: a driver that
+    # polls its device every 10 ms hands the host those 10 ms as several
+    # callbacks back to back, and carries over what does not fill one. The
+    # endpoints' position then moves in jumps instead of evenly.
+    #
+    # With a callback size that divides 10 ms (240 and 120 frames at 48 kHz)
+    # every burst is exactly the half buffer Windows refills at a time, and
+    # the streams are clean. With one that does not (256, 128, 64) Windows
+    # loses track and the streams have discontinuities; how many depends on
+    # where in the pattern a stream happens to start, which is why each case
+    # starts its streams four times. That is how SAR has always behaved, with
+    # either driver, and these cases are here to measure it: the group is not
+    # part of the default run.
+    $burst = @('run', '--endpoints', 1, '--iterations', 4, '--duration', 3, '--prefix', 'SarTestBursts',
+        '--sarasio', "`"$sarAsio`"", '--rate', 48000, '--channels', 2)
+    try {
+        $env:SAR_TEST_CLOCK_BURST = '480'
+        foreach ($frames in 240, 120, 256, 128, 64) {
+            $env:SAR_TEST_CLOCK_FRAMES = "$frames"
+            $summary.scenarios += Invoke-Scenario "burst-$frames" $burst
+        }
+    } finally {
+        Remove-Item Env:SAR_TEST_CLOCK_BURST, Env:SAR_TEST_CLOCK_FRAMES -ErrorAction SilentlyContinue
+    }
 }
 
 if ($Scenarios -contains 'contention') {
