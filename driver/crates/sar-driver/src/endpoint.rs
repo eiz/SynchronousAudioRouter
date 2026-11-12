@@ -26,7 +26,7 @@ use alloc::vec::Vec;
 use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 use ks::{
-    device::Device,
+    device::{Device, DeviceGuard},
     filter::{DataFormat, FilterFactory, Pin, PropertyCall, Target},
     guids, ids,
 };
@@ -80,18 +80,16 @@ struct Factories {
 }
 
 impl Factories {
-    /// Switches the interfaces of both off. Made without the device mutex
-    /// (section 14).
+    /// Switches the interfaces of both off.
     fn switch_off(&mut self) {
         let _ = self.wave.set_enabled(false);
         let _ = self.topology.set_enabled(false);
     }
 
-    /// Deletes both. The device mutex is taken inside, for each deletion
-    /// and for nothing else.
-    fn delete(self, device: &Device) {
-        self.wave.delete(device);
-        self.topology.delete(device);
+    /// Deletes both, under the device mutex.
+    fn delete(self, guard: &DeviceGuard<'_>) {
+        self.wave.delete(guard);
+        self.topology.delete(guard);
     }
 }
 
@@ -322,18 +320,22 @@ impl Endpoint {
             Err(status) => (status, None),
         };
         endpoint.disown();
-        endpoint.take_down(device, identities, factories);
+        endpoint.take_down(&device.lock(), identities, factories);
         Err(status)
     }
 
-    /// The kernel streaming part of [`create_factories`](Self::create_factories).
-    /// The device mutex is taken inside, once for each factory and only
-    /// around its creation (section 14).
+    /// The kernel streaming part of [`create_factories`](Self::create_factories),
+    /// under one hold of the device mutex.
     fn build_factories(endpoint: &Shared<Self>, device: &Device) -> Result<(Factories, Vec<u16>, Vec<u16>), NtStatus> {
         let range = PinAudioRange::of(&endpoint.format());
+        // One hold of the device mutex from the first factory to the
+        // interface paths (section 14): Windows cannot open a filter of an
+        // endpoint that is half made, and the host's start is not slowed
+        // by the audio service working on its earlier endpoints in between.
+        let guard = &device.lock();
         let wave = filters::with_wave_spec(endpoint.direction, range, |spec| {
             FilterFactory::create::<WaveFilter>(
-                device,
+                guard,
                 spec,
                 endpoint.wave_reference.as_units_with_nul(),
                 endpoint.clone(),
@@ -341,7 +343,7 @@ impl Endpoint {
         })?;
         let topology = filters::with_topology_spec(endpoint.direction, |spec| {
             FilterFactory::create::<TopologyFilter>(
-                device,
+                guard,
                 spec,
                 endpoint.topology_reference.as_units_with_nul(),
                 endpoint.clone(),
@@ -350,7 +352,7 @@ impl Endpoint {
         let topology = match topology {
             Ok(topology) => topology,
             Err(status) => {
-                wave.delete(device);
+                wave.delete(guard);
                 return Err(status);
             }
         };
@@ -359,8 +361,7 @@ impl Endpoint {
         // `FilterData` value and medium cache from the factory's own
         // descriptor, the wave factory first, before any interface is
         // switched on. The results are not checked: a failure here does not
-        // fail the request. These are registry writes, and are made without
-        // the device mutex.
+        // fail the request.
         let _ = factories.wave.update_cache_data();
         let _ = factories.topology.update_cache_data();
         let links = factories
@@ -370,7 +371,7 @@ impl Endpoint {
         match links {
             Ok((wave_link, topology_link)) => Ok((factories, wave_link, topology_link)),
             Err(status) => {
-                factories.delete(device);
+                factories.delete(guard);
                 Err(status)
             }
         }
@@ -413,8 +414,8 @@ impl Endpoint {
 
     /// Writes the registry values of every interface instance of both
     /// filters, then switches the interfaces on (section 7, A.10). Runs on
-    /// a system worker thread, with no lock held and without the device
-    /// mutex.
+    /// a system worker thread, with no lock of the driver's held, under one
+    /// hold of the device mutex.
     ///
     /// On failure the endpoint no longer exists: its factories have been
     /// deleted. `STATUS_FILE_CLOSED` if it lost its owner before or while
@@ -434,9 +435,13 @@ impl Endpoint {
             return Err(NtStatus::FILE_CLOSED);
         };
 
+        // One hold of the device mutex for the whole publication (section
+        // 14): Windows finds both filters there when it first gets in.
+        //
         // The topology filter is switched on first, so that when the wave
         // filter (the one with the streaming pin) arrives, the whole path
         // to the jack can be followed.
+        let guard = device.lock();
         let published = self
             .write_all_interface_values(device.physical_device_object())
             .and_then(|()| factories.topology.set_enabled(true))
@@ -459,7 +464,7 @@ impl Endpoint {
         };
         drop(owner);
         self.identity.withdrawing.store(true, Ordering::Release);
-        self.take_down(device, identities, Some(factories));
+        self.take_down(&guard, identities, Some(factories));
         Err(status)
     }
 
@@ -545,8 +550,8 @@ impl Endpoint {
     ///
     /// In that order: an endpoint that has lost its owner refuses whatever
     /// Windows asks of it, and Windows should find it gone by then, not
-    /// present and broken. With the device mutex no longer held for the
-    /// duration (section 14), Windows does ask in between.
+    /// present and broken. The caller holds the device mutex, for all of
+    /// a closing handle's endpoints together (section 14).
     ///
     /// Returns `true` when that has been done. If another thread has the
     /// factories (it is creating or publishing the endpoint), the endpoint
@@ -554,14 +559,14 @@ impl Endpoint {
     /// switches off and deletes what it has when it finds the endpoint
     /// without an owner, and [`wait_withdrawn`](Self::wait_withdrawn) waits
     /// for it.
-    pub fn withdraw(&self, device: &Device, identities: &Identities) -> bool {
+    pub fn withdraw(&self, guard: &DeviceGuard<'_>, identities: &Identities) -> bool {
         self.announce_withdrawal();
         let factories = self.state.lock().factories.take();
         match factories {
             Some(mut factories) => {
                 factories.switch_off();
                 self.disown();
-                factories.delete(device);
+                factories.delete(guard);
                 identities.release(&self.identity);
                 true
             }
@@ -583,10 +588,10 @@ impl Endpoint {
     /// owner, on the thread that has its factories: switches their
     /// interfaces off and deletes them, then lets go whoever waits for
     /// that. With no factories, only the last.
-    fn take_down(&self, device: &Device, identities: &Identities, factories: Option<Factories>) {
+    fn take_down(&self, guard: &DeviceGuard<'_>, identities: &Identities, factories: Option<Factories>) {
         if let Some(mut factories) = factories {
             factories.switch_off();
-            factories.delete(device);
+            factories.delete(guard);
         }
         identities.release(&self.identity);
     }

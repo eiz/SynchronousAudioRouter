@@ -86,28 +86,32 @@ impl ControlHandle {
             (core::mem::take(&mut state.endpoints), state.host_view.take())
         };
 
-        // 2. Each endpoint is withdrawn, one at a time, the device mutex
-        // being taken and released inside for each kernel streaming call
-        // that needs it, so that a client's open or close of any filter on
-        // the device never waits for more than one such call (section 14).
-        // Until its turn comes an endpoint goes on working. What all of
-        // them are told first, which touches memory only, is that they are
-        // going: nothing new is begun on them, and a request for an
-        // endpoint with the identity of one of them waits for it to go.
+        // 2. Each endpoint is withdrawn, all of them under one hold of the
+        // device mutex (section 14). What all of them are told first, which
+        // touches memory only, is that they are going: nothing new is begun
+        // on them, and a request for an endpoint with the identity of one
+        // of them waits for it to go.
         //
         // An endpoint that another thread is still creating or publishing
         // is taken down by that thread. This one waits for it, so that when
         // the close has finished nothing of the handle's is left in kernel
         // streaming; but only after it has withdrawn every endpoint it can
-        // withdraw itself, because the other thread may in turn be waiting
-        // for one of those to go (`Identities`).
+        // withdraw itself and has released the device mutex, because the
+        // other thread needs the mutex and may in turn be waiting for one
+        // of those to go (`Identities`).
         for endpoint in &endpoints {
             endpoint.announce_withdrawal();
         }
         if let Some(device) = Device::of(device) {
             if let Some(device_state) = device.context::<Sar>() {
-                for endpoint in &endpoints {
-                    let _ = endpoint.withdraw(device, &device_state.identities);
+                {
+                    // One hold of the device mutex from the first endpoint
+                    // to the last (section 14): Windows sees the host's
+                    // endpoints go together, and the close is quick.
+                    let guard = device.lock();
+                    for endpoint in &endpoints {
+                        let _ = endpoint.withdraw(&guard, &device_state.identities);
+                    }
                 }
                 for endpoint in &endpoints {
                     endpoint.wait_withdrawn();
@@ -336,7 +340,7 @@ fn create_endpoint(device: &DeviceObject, control: &Shared<ControlHandle>, irp: 
     let mut queue = device_state.publish_queue.lock();
     if queue.jobs.try_reserve(1).is_err() {
         drop(queue);
-        if !endpoint.withdraw(ks_device, &device_state.identities) {
+        if !endpoint.withdraw(&ks_device.lock(), &device_state.identities) {
             // The control handle is closing and has taken it over.
             endpoint.wait_withdrawn();
         }
