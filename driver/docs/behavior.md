@@ -928,9 +928,9 @@ The test suite's `contention` scenario keeps one host up while a second host
 with 64 endpoints is created and closed five times, and times every open and
 close of the first host's playback filter. Its log gives the median, the 99th
 percentile and the longest of those times while the second host was idle,
-being created, and being closed. The longest time while the second host is
-being created or closed is the number these rules exist to keep small: it
-should be on the order of one endpoint's worth of work, not one host's.
+being created, and being closed, and how long the second host itself took to
+create its endpoints and to close. The second host's own times are the ones
+these rules put first; the first host's waits show what they cost.
 
 That the section is locked in physical memory (section 6) cannot be seen from
 user mode, and the test suite does not check it.
