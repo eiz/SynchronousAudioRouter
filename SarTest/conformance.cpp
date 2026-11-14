@@ -17,10 +17,12 @@
 
 #include "conformance.h"
 #include "control.h"
+#include "install.h"
 #include "wasapi.h"
 
 #include <winioctl.h>
 #include <winternl.h>
+#include <cfgmgr32.h>
 #include <audioclient.h>
 #include <mmreg.h>
 #include <ks.h>
@@ -1214,6 +1216,201 @@ void relativeOpenCases(Report& report, const std::wstring& path)
     CloseHandle(device);
 }
 
+typedef LONG (NTAPI *NtCreateFileRoutine)(
+    HANDLE *file, ACCESS_MASK access, OBJECT_ATTRIBUTES *attributes, IO_STATUS_BLOCK *status,
+    LARGE_INTEGER *allocationSize, ULONG fileAttributes, ULONG shareAccess,
+    ULONG createDisposition, ULONG createOptions, void *ea, ULONG eaLength);
+
+// The interface path of the enabled wave filter of the endpoint with this
+// ID; empty while Windows doesn't list one.
+std::wstring enabledWaveFilter(const std::wstring& endpointId)
+{
+    std::wstring instanceId = sarDeviceInstanceId();
+    ULONG length = 0;
+    GUID category = KSCATEGORY_AUDIO;
+
+    if (instanceId.empty() ||
+        CM_Get_Device_Interface_List_SizeW(&length, &category, (DEVINSTID_W)instanceId.c_str(),
+            CM_GET_DEVICE_INTERFACE_LIST_PRESENT) != CR_SUCCESS || length == 0) {
+        return L"";
+    }
+
+    std::vector<wchar_t> buffer(length + 1, L'\0');
+
+    if (CM_Get_Device_Interface_ListW(&category, (DEVINSTID_W)instanceId.c_str(), buffer.data(),
+            length, CM_GET_DEVICE_INTERFACE_LIST_PRESENT) != CR_SUCCESS) {
+        return L"";
+    }
+
+    std::wstring wanted = L"\\" + endpointId + L"_";
+
+    for (const wchar_t *p = buffer.data(); *p; p += wcslen(p) + 1) {
+        std::wstring path = p;
+        std::wstring folded = path;
+
+        for (wchar_t& c : folded) {
+            c = (wchar_t)towlower(c);
+        }
+
+        if (folded.find(wanted) != std::wstring::npos && folded.find(L"_topology") == std::wstring::npos) {
+            return path;
+        }
+    }
+
+    return L"";
+}
+
+// Kernel streaming requests that carry a handle: a pin connection that names
+// another pin to connect to, and the properties that give a pin a clock or
+// an allocator. Given a control handle where a kernel streaming object is
+// expected, each has to fail or be ignored, and the control handle has to
+// work afterwards (section 5: kernel streaming is never given the driver's
+// own context).
+void foreignHandleCases(Report& report, const std::wstring& path)
+{
+    NtCreateFileRoutine create = (NtCreateFileRoutine)GetProcAddress(
+        GetModuleHandleW(L"ntdll.dll"), "NtCreateFile");
+    HANDLE device = openControlDevice(path);
+
+    if (!report.check("the control device opens", device != INVALID_HANDLE_VALUE && create != nullptr)) {
+        return;
+    }
+
+    LayoutRequest layout = validLayout(16 << 20);
+    LayoutReply reply = {};
+    EndpointRequest endpoint = {};
+
+    endpoint.type = 2;
+    endpoint.index = 0;
+    endpoint.channelCount = 2;
+    wcscpy_s(endpoint.id, L"sarconformancehandles");
+    wcscpy_s(endpoint.name, L"SarConformance Handles");
+
+    bool ready =
+        controlRequest(device, kSetBufferLayout, &layout, sizeof(layout), &reply, sizeof(reply)).status == kStatusSuccess &&
+        controlRequest(device, kCreateEndpoint, &endpoint, sizeof(endpoint), nullptr, 0, 60000).status == kStatusSuccess;
+    std::wstring filterPath;
+
+    for (int i = 0; ready && i < 150 && filterPath.empty(); ++i) {
+        filterPath = enabledWaveFilter(endpoint.id);
+
+        if (filterPath.empty()) {
+            Sleep(100);
+        }
+    }
+
+    HANDLE filter = filterPath.empty() ? INVALID_HANDLE_VALUE : CreateFileW(
+        filterPath.c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_EXISTING,
+        FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OVERLAPPED, nullptr);
+
+    if (!report.check("an endpoint's wave filter opens", filter != INVALID_HANDLE_VALUE)) {
+        CloseHandle(device);
+        return;
+    }
+
+    struct ConnectBlob
+    {
+        KSPIN_CONNECT connect;
+        KSDATAFORMAT format;
+        WAVEFORMATEXTENSIBLE wave;
+    };
+    ConnectBlob blob = {};
+
+    blob.connect.Interface.Set = KSINTERFACESETID_Standard;
+    blob.connect.Interface.Id = KSINTERFACE_STANDARD_LOOPED_STREAMING;
+    blob.connect.Medium.Set = KSMEDIUMSETID_Standard;
+    blob.connect.Medium.Id = KSMEDIUM_TYPE_ANYINSTANCE;
+    blob.connect.PinId = 0;
+    blob.connect.Priority.PriorityClass = KSPRIORITY_NORMAL;
+    blob.connect.Priority.PrioritySubClass = 1;
+    blob.format.FormatSize = sizeof(KSDATAFORMAT) + sizeof(WAVEFORMATEXTENSIBLE);
+    blob.format.MajorFormat = KSDATAFORMAT_TYPE_AUDIO;
+    blob.format.SubFormat = KSDATAFORMAT_SUBTYPE_PCM;
+    blob.format.Specifier = KSDATAFORMAT_SPECIFIER_WAVEFORMATEX;
+    blob.format.SampleSize = 8;
+    blob.wave.Format.wFormatTag = WAVE_FORMAT_EXTENSIBLE;
+    blob.wave.Format.nChannels = 2;
+    blob.wave.Format.nSamplesPerSec = 48000;
+    blob.wave.Format.wBitsPerSample = 32;
+    blob.wave.Format.nBlockAlign = 8;
+    blob.wave.Format.nAvgBytesPerSec = 48000 * 8;
+    blob.wave.Format.cbSize = 22;
+    blob.wave.Samples.wValidBitsPerSample = 32;
+    blob.wave.SubFormat = KSDATAFORMAT_SUBTYPE_PCM;
+
+    auto openPin = [&](HANDLE pinToHandle, LONG *status) -> HANDLE {
+        const wchar_t *prefix = KSSTRING_Pin L"\\";
+        std::vector<wchar_t> name(prefix, prefix + wcslen(prefix));
+        ConnectBlob request = blob;
+
+        request.connect.PinToHandle = pinToHandle;
+        name.resize(name.size() + (sizeof(request) + 1) / 2);
+        memcpy(name.data() + wcslen(prefix), &request, sizeof(request));
+
+        UNICODE_STRING string = {};
+        OBJECT_ATTRIBUTES attributes = {};
+        IO_STATUS_BLOCK iosb = {};
+        HANDLE pin = nullptr;
+
+        string.Buffer = name.data();
+        string.Length = (USHORT)(name.size() * sizeof(wchar_t));
+        string.MaximumLength = string.Length;
+        attributes.Length = sizeof(attributes);
+        attributes.RootDirectory = filter;
+        attributes.ObjectName = &string;
+        attributes.Attributes = OBJ_CASE_INSENSITIVE;
+        *status = create(&pin, GENERIC_READ | GENERIC_WRITE, &attributes, &iosb, nullptr, 0, 0,
+            1 /* FILE_OPEN */, 0, nullptr, 0);
+        return *status >= 0 ? pin : nullptr;
+    };
+
+    LONG status = 0;
+    HANDLE pin = openPin(device, &status);
+
+    // Refused or not, the machine is still here to say so.
+    report.check("a pin connection naming a control handle as its target is survived", true,
+        statusText((uint32_t)status));
+
+    if (pin) {
+        CloseHandle(pin);
+    }
+
+    pin = openPin(nullptr, &status);
+
+    if (report.check("a pin opens on the wave filter", pin != nullptr, statusText((uint32_t)status))) {
+        const struct { ULONG id; const char *name; } properties[] = {
+            { KSPROPERTY_STREAM_MASTERCLOCK, "master clock" },
+            { KSPROPERTY_STREAM_ALLOCATOR, "allocator" },
+        };
+
+        for (const auto& item : properties) {
+            KSPROPERTY property = {};
+            HANDLE value = device;
+
+            property.Set = KSPROPSETID_Stream;
+            property.Id = item.id;
+            property.Flags = KSPROPERTY_TYPE_SET;
+
+            ControlResult result = controlRequest(
+                pin, IOCTL_KS_PROPERTY, &property, sizeof(property), &value, sizeof(value));
+
+            report.check(std::string("setting a pin's ") + item.name + " to a control handle is survived", true,
+                statusText(result.status));
+        }
+
+        CloseHandle(pin);
+    }
+
+    CloseHandle(filter);
+    endpoint.type = 1;
+    endpoint.index = 1;
+    wcscpy_s(endpoint.id, L"sarconformancehandles2");
+    report.spec("create endpoint on that control handle afterwards",
+        controlRequest(device, kCreateEndpoint, &endpoint, sizeof(endpoint), nullptr, 0, 60000),
+        kStatusSuccess);
+    CloseHandle(device);
+}
+
 } // namespace
 
 int cmdConformance(const Args& args)
@@ -1225,10 +1422,14 @@ int cmdConformance(const Args& args)
     logf("Control interface conformance (%d-bit process%s)", (int)sizeof(void *) * 8,
         legacy ? ", expecting the quirks of releases up to 0.13" : "");
 
-    if (args.has(L"only-relative-open")) {
-        // Just the one case, for a driver the rest of this test is not for.
+    if (args.has(L"only-relative-open") || args.has(L"only-handle-cases")) {
+        // Just these, for a driver the rest of this test is not written for.
         if (report.check("the control device is present", !path.empty())) {
             relativeOpenCases(report, path);
+
+            if (args.has(L"only-handle-cases")) {
+                foreignHandleCases(report, path);
+            }
         }
     } else if (report.check("the control device is present", !path.empty())) {
         accessCases(report, path);
@@ -1239,6 +1440,7 @@ int cmdConformance(const Args& args)
 
         if (!legacy) {
             relativeOpenCases(report, path);
+            foreignHandleCases(report, path);
         }
     }
 
