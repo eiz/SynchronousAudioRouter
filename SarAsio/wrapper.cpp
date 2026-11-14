@@ -468,6 +468,7 @@ AsioStatus SarAsioWrapper::createBuffers(
 
     _bufferConfig.periodFrameSize = bufferFrameSize;
     _bufferConfig.sampleSize = getSampleSize(_sampleType);
+    _bufferConfig.floatSamples = _sampleType == Float32LSB;
     _bufferConfig.sampleRate = (int)sampleRate;
 
 
@@ -746,6 +747,11 @@ inline int SarAsioWrapper::getSampleSize(AsioSampleType sampleType)
 
     case Int24LSB:
         return 3;
+
+    // The size of the endpoints' samples, which are 32-bit integers when the
+    // host's are 32-bit float (see sarclient.cpp).
+    case Float32LSB:
+        return 4;
 
     default:
         return 0;

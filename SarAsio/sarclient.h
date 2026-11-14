@@ -27,6 +27,9 @@ struct BufferConfig
     int periodFrameSize;
     int sampleRate;
     int sampleSize;
+    // The host's ASIO buffers hold 32-bit float samples. The endpoints'
+    // buffers are integer PCM either way.
+    bool floatSamples = false;
 
     std::array<std::vector<std::vector<void *>>, 2> asioBuffers;
 };
@@ -71,12 +74,12 @@ private:
         void *muxBufferFirst, size_t firstSize,
         void *muxBufferSecond, size_t secondSize,
         void **targetBuffers, int ntargets, int nsources,
-        size_t targetSize, int sampleSize);
+        size_t targetSize, int sampleSize, bool floatSamples);
     void mux(
         void *muxBufferFirst, size_t firstSize,
         void *muxBufferSecond, size_t secondSize,
         void **targetBuffers, int ntargets, int nsources,
-        size_t targetSize, int sampleSize);
+        size_t targetSize, int sampleSize, bool floatSamples);
 
     DriverConfig _driverConfig;
     BufferConfig _bufferConfig;
