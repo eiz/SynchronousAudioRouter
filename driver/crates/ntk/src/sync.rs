@@ -9,7 +9,7 @@ use core::{
     marker::PhantomData,
     mem::MaybeUninit,
     ops::{Deref, DerefMut},
-    sync::atomic::{AtomicBool, AtomicUsize, Ordering},
+    sync::atomic::{AtomicU8, AtomicUsize, Ordering},
 };
 
 use ntstatus::NtStatus;
@@ -18,10 +18,10 @@ use wdk_sys::{
         ExAcquireRundownProtection, ExReInitializeRundownProtection, ExReleaseRundownProtection,
         ExAcquireFastMutex, ExReleaseFastMutex, ExRundownCompleted,
         ExWaitForRundownProtectionRelease, KeAcquireSpinLockRaiseToDpc, PsGetCurrentThreadId,
-        KeEnterCriticalRegion, KeInitializeEvent, KeLeaveCriticalRegion,
+        KeDelayExecutionThread, KeEnterCriticalRegion, KeInitializeEvent, KeLeaveCriticalRegion,
         KeReleaseSpinLock, KeSetEvent, KeWaitForSingleObject,
     },
-    EX_RUNDOWN_REF, KEVENT, KIRQL, KSPIN_LOCK,
+    EX_RUNDOWN_REF, KEVENT, KIRQL, KSPIN_LOCK, LARGE_INTEGER,
     _EX_RUNDOWN_REF__bindgen_ty_1 as EX_RUNDOWN_REF_VALUE,
 };
 
@@ -214,12 +214,35 @@ impl Completion {
 /// succeeds at once or, once the gate is being shut, fails at once.
 pub struct Rundown {
     raw: UnsafeCell<EX_RUNDOWN_REF>,
-    /// Whether the gate has been shut and not opened again.
-    shut: AtomicBool,
+    /// Where the gate is: one of the `GATE_*` values. Only the thread that
+    /// moved it to `GATE_SHUTTING` or `GATE_OPENING` waits on or
+    /// re-initialises `raw`, and it moves it on when it has; a `shut` or
+    /// `open` that finds either value waits for that.
+    state: AtomicU8,
+}
+
+const GATE_OPEN: u8 = 0;
+const GATE_SHUTTING: u8 = 1;
+const GATE_SHUT: u8 = 2;
+const GATE_OPENING: u8 = 3;
+
+/// Lets another thread finish a transition of a gate: a millisecond's
+/// wait. Only a `shut` or `open` that comes while another is under way
+/// gets here.
+fn wait_for_transition() {
+    let mut interval = LARGE_INTEGER {
+        // Relative, in units of 100 ns.
+        QuadPart: -10_000,
+    };
+    // SAFETY: a non-alertable kernel-mode delay with a valid interval, at
+    // or below APC_LEVEL (the callers' contract).
+    let _ = unsafe { KeDelayExecutionThread(wdk_sys::_MODE::KernelMode as i8, 0, &mut interval) };
 }
 
 // SAFETY: the structure is only ever handed to the run-down routines, which
-// use interlocked operations on it.
+// use interlocked operations on it; the wait and the re-initialisation,
+// which must not overlap each other, are made by one thread at a time
+// (`state`).
 unsafe impl Send for Rundown {}
 // SAFETY: as above.
 unsafe impl Sync for Rundown {}
@@ -234,7 +257,7 @@ impl Rundown {
             raw: UnsafeCell::new(EX_RUNDOWN_REF {
                 __bindgen_anon_1: EX_RUNDOWN_REF_VALUE { Count: 0 },
             }),
-            shut: AtomicBool::new(false),
+            state: AtomicU8::new(GATE_OPEN),
         }
     }
 
@@ -266,31 +289,53 @@ impl Rundown {
     /// everybody who was inside has left. Shutting a gate that is shut does
     /// nothing.
     ///
-    /// Must be called at or below `APC_LEVEL`, and never at the same time
-    /// as another `shut` or [`open`](Self::open) of the same gate.
+    /// Must be called at or below `APC_LEVEL`. If another `shut` or an
+    /// [`open`](Self::open) of the same gate is under way, this one waits
+    /// for it to finish first; so it never returns before the gate is shut
+    /// and empty.
     pub fn shut(&self) {
-        if self.shut.swap(true, Ordering::AcqRel) {
-            return;
+        loop {
+            match self
+                .state
+                .compare_exchange(GATE_OPEN, GATE_SHUTTING, Ordering::AcqRel, Ordering::Acquire)
+            {
+                Ok(_) => break,
+                Err(GATE_SHUT) => return,
+                Err(_) => wait_for_transition(),
+            }
         }
-        // SAFETY: an initialised run-down structure; the caller's contract
-        // rules out a concurrent wait or re-initialisation.
+        // SAFETY: an initialised run-down structure. This thread moved the
+        // gate to shutting, so no other wait or re-initialisation of it is
+        // under way, and none can begin until the state moves on below.
         unsafe {
             ExWaitForRundownProtectionRelease(self.raw.get());
             ExRundownCompleted(self.raw.get());
         }
+        self.state.store(GATE_SHUT, Ordering::Release);
     }
 
     /// Opens a gate that was shut. Opening one that is open does nothing.
     ///
-    /// Must be called at or below `APC_LEVEL`, and never at the same time
-    /// as a [`shut`](Self::shut) or another `open` of the same gate.
+    /// Must be called at or below `APC_LEVEL`. If a [`shut`](Self::shut) or
+    /// another `open` of the same gate is under way, this one waits for it
+    /// to finish first.
     pub fn open(&self) {
-        if !self.shut.swap(false, Ordering::AcqRel) {
-            return;
+        loop {
+            match self
+                .state
+                .compare_exchange(GATE_SHUT, GATE_OPENING, Ordering::AcqRel, Ordering::Acquire)
+            {
+                Ok(_) => break,
+                Err(GATE_OPEN) => return,
+                Err(_) => wait_for_transition(),
+            }
         }
-        // SAFETY: the structure was run down by `shut` (the flag was set),
-        // which is what re-initialising it requires.
+        // SAFETY: the structure was run down by a `shut` that has finished
+        // (the state was GATE_SHUT), which is what re-initialising it
+        // requires, and this thread moved the gate to opening, so nothing
+        // else waits on or re-initialises it meanwhile.
         unsafe { ExReInitializeRundownProtection(self.raw.get()) };
+        self.state.store(GATE_OPEN, Ordering::Release);
     }
 }
 
