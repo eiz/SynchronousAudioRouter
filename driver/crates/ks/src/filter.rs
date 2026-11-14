@@ -157,14 +157,26 @@ impl Pin {
 
     /// The format the stream was opened with: a `KSDATAFORMAT` and whatever
     /// follows it, `FormatSize` bytes in all.
+    ///
+    /// Empty unless the pin was declared with `KSPIN_FLAG_FIXED_FORMAT`.
+    /// Only then can the format not be changed (and its memory replaced)
+    /// while the slice is borrowed: "Any attempt to set the data format
+    /// returns STATUS_INVALID_DEVICE_REQUEST."
     pub fn connection_format(&self) -> &[u8] {
+        let descriptor = self.0.Descriptor;
+        // SAFETY: a pin's Descriptor is null or points to its descriptor in
+        // the filter's description, which lives at least as long as the pin
+        // (in this crate, in the factory's block).
+        let fixed = unsafe { descriptor.as_ref() }
+            .is_some_and(|descriptor| descriptor.Flags & sys::KSPIN_FLAG_FIXED_FORMAT != 0);
         let format = self.0.ConnectionFormat;
-        if format.is_null() {
+        if !fixed || format.is_null() {
             return &[];
         }
         // SAFETY: AVStream validated the connection request before creating
         // the pin: ConnectionFormat points to a format of FormatSize bytes
-        // (at least a KSDATAFORMAT) that lives as long as the pin.
+        // (at least a KSDATAFORMAT) that lives as long as the pin, and with a
+        // fixed format it is not replaced while the pin exists.
         unsafe {
             // FormatSize is the first field of a KSDATAFORMAT.
             let size = format.cast::<u32>().read() as usize;
