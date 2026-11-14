@@ -1193,3 +1193,41 @@ the withdrawal of all of a closing handle's endpoints together.
       endpoint and its section outlive the last close of their filters by
       the time a work item takes to run. Nothing is known to depend on the
       old timing; the `unload` scenarios pass.
+
+## M. Files kernel streaming must not be given (section 5)
+
+"Opening and access" gained its last paragraph after a review of the
+dispatch layer.
+
+69. **[section 5] Which file a request names.** The layer in front of kernel
+    streaming decided by the name of the file a request is for, and passed
+    everything else on. A create request names a second file, its parent.
+    Resolved: a create request whose parent is a file the driver claims is
+    refused with `STATUS_OBJECT_NAME_NOT_FOUND` before the driver's handler
+    or kernel streaming sees it, whatever name it carries, a claimed name
+    included. A parent is claimed exactly when its name is, like any file.
+    **[rig]** Run `cleanroom-rt-rel1-20261113-221937` (`conformance`): both
+    such opens are answered with that status and the control handle sets
+    its buffer layout afterwards.
+
+70. **[section 5] "Neither as the file of a request nor as the parent or
+    target named by one": the targets.** Not settled. Microsoft documents
+    kernel streaming requests that carry a handle which kernel streaming
+    itself turns into a file object: a pin creation that names the pin to
+    connect to (`KSPIN_CONNECT`, `PinToHandle`: "the handle of the pin
+    instance to establish a connection to"), and setting a pin's master
+    clock ("the pin references the underlying file object and can later
+    perform queries against that file object"); an allocator handle is of
+    the same kind. What is documented in the driver's favour: a connection
+    request is validated against the pin's "communication requirements"
+    (`KsValidateConnectRequest`), and no pin of an endpoint is a source, so
+    a request that names a target should be refused there. What no page
+    says: whether AVStream offers the clock and allocator properties on
+    these pins at all (they do not use the standard transport and have no
+    clock), whether kernel streaming checks that a handle it is given is a
+    file of its own kind before it reads the file's context, and what
+    `ksthunk` does with file objects on the way. Nothing was changed for
+    these: the driver sees such a request only as bytes in a request for a
+    file of kernel streaming's, in the caller's own buffer, and cannot
+    inspect the handle without racing the caller. [doc] for what is quoted;
+    the rest was not determined and no scenario exercises it.

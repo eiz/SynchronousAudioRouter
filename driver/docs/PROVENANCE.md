@@ -195,6 +195,18 @@ locks across slow calls and lock its section in physical memory
 The pages were fetched as before: by address, from learn.microsoft.com only,
 with no web search. No crate source was opened.
 
+## Files kernel streaming must not be given (section 5)
+
+Still the same engineer and session. Consulted for refusing opens relative to
+a control handle (`SPEC-GAPS.md`, section M), beyond the above:
+
+| Source | What was taken |
+|---|---|
+| `docs/behavior.md`, section 5, last paragraph of "Opening and access" | The requirement and the status. |
+| The brief for the task | Where the defect is (the dispatch layer decides by the file's name alone), and that the conformance test has cases for it. The evidence directory `rig-results/relopen-evidence/` was not opened. |
+| learn.microsoft.com `.../ddi/ks/ns-ks-kspin_connect`, `.../ddi/ks/nf-ks-ksvalidateconnectrequest` (again), `.../stream/ksproperty-stream-masterclock` | What a pin creation's `PinToHandle` is; that a connection request's communication requirements are validated; that a pin given a master clock handle references the file object behind it. |
+| The result files of rig run `cleanroom-rt-rel1-20261113-221937` | The statuses in item 69. |
+
 ## Accidental exposure log
 
 - At session start the agent's context contained an automatically attached

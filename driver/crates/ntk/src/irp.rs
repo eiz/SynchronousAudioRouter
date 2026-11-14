@@ -321,6 +321,19 @@ impl<'a> FileRef<'a> {
         self.raw.as_ptr()
     }
 
+    /// The file this one is being opened relative to, if any. Only
+    /// meaningful while the file's create request is being handled: the
+    /// I/O manager keeps the parent referenced for that long and no longer.
+    pub(crate) fn related(&self) -> Option<FileRef<'a>> {
+        // SAFETY: the file object is valid for 'a; RelatedFileObject is
+        // null or a file object the I/O manager holds for the duration of
+        // the create request.
+        NonNull::new(unsafe { (*self.raw.as_ptr()).RelatedFileObject }).map(|raw| FileRef {
+            raw,
+            _irp: PhantomData,
+        })
+    }
+
     /// The name the file was opened with, relative to the device.
     pub fn name(&self) -> &'a [u16] {
         // SAFETY: the file object is valid for 'a and its FileName is set by

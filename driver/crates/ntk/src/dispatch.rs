@@ -7,6 +7,12 @@
 //! own the dispatch table. [`install_file_handler`] puts a thin layer in
 //! front of it: requests for files whose name the handler claims are
 //! handled by the driver, everything else goes to the framework unchanged.
+//!
+//! One thing must never go to the framework: a file the handler claimed.
+//! What such a file keeps in its context slot is the handler's, and the
+//! framework would read it as an object of its own. A request names a file
+//! in two ways, as the file it is for and, for a create request, as the
+//! parent the new file is opened relative to; both are looked at here.
 
 use core::{
     ffi::c_void,
@@ -48,6 +54,10 @@ pub trait FileHandler: 'static {
 
     /// A claimed file is being opened. The returned context is attached to
     /// the file object.
+    ///
+    /// Nothing is ever opened relative to a claimed file: such a create
+    /// request is refused with `STATUS_OBJECT_NAME_NOT_FOUND` before the
+    /// handler or the framework sees it, whatever name it carries.
     fn create(device: &DeviceObject) -> Result<Shared<Self::Context>, NtStatus>;
 
     /// The last handle to the file has been closed (`IRP_MJ_CLEANUP`).
@@ -128,6 +138,20 @@ unsafe extern "C" fn dispatch<H: FileHandler>(device: PDEVICE_OBJECT, irp: PIRP)
     // SAFETY: the I/O manager calls a dispatch routine with a valid IRP that
     // the driver now owns, on the requesting thread.
     let irp = unsafe { Irp::from_raw(irp) };
+    // A file may not be opened relative to one that `H` claims: not as
+    // another claimed file, which would have no meaning, and above all not
+    // as a file of the framework's, which would take the parent's context
+    // for its own. The parent is claimed exactly when its name is, like
+    // any file.
+    let below_claimed = irp.major_function() == IRP_MJ_CREATE
+        && irp
+            .file()
+            .and_then(|file| file.related())
+            .is_some_and(|parent| H::claims(parent.name()));
+    if below_claimed {
+        return irp.complete(NtStatus::OBJECT_NAME_NOT_FOUND).into_raw();
+    }
+
     // The slot of the file's context, if `H` claims the file.
     let claimed = irp
         .file()
