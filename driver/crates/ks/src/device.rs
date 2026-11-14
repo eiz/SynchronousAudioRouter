@@ -156,7 +156,7 @@ impl Device {
         unsafe { &*raw.cast::<Self>() }
     }
 
-    fn as_raw(&self) -> sys::PKSDEVICE {
+    pub(crate) fn as_raw(&self) -> sys::PKSDEVICE {
         core::ptr::from_ref(self).cast_mut().cast()
     }
 

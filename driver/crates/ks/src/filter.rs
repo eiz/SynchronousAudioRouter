@@ -226,6 +226,9 @@ struct FactoryState {
 ///   ([`FactoryCalls`]).
 pub struct FilterFactory {
     raw: sys::PKSFILTERFACTORY,
+    /// The device the factory was created on, by address: the device whose
+    /// mutex `delete` needs.
+    device: usize,
     state: Shared<FactoryState>,
     calls: FactoryCalls,
 }
@@ -340,7 +343,12 @@ impl FilterFactory {
             }
             return Err(NtStatus(status));
         }
-        Ok(Self { raw, state, calls })
+        Ok(Self {
+            raw,
+            device: device.as_raw() as usize,
+            state,
+            calls,
+        })
     }
 
     /// Runs a kernel streaming call on the factory without the device
@@ -407,14 +415,24 @@ impl FilterFactory {
     /// Deletes the factory: no new filter can be opened from it. Filters
     /// that are open keep working until they are closed. The caller holds
     /// the device mutex, which deleting a factory needs.
-    pub fn delete(self, _guard: &DeviceGuard<'_>) {
+    ///
+    /// # Panics
+    ///
+    /// If `guard` is not for the device the factory was created on: its
+    /// mutex would not be held.
+    pub fn delete(self, guard: &DeviceGuard<'_>) {
+        assert!(
+            guard.device().as_raw() as usize == self.device,
+            "filter factory deleted under another device's mutex"
+        );
         if !self.state.alive.load(Ordering::Acquire) {
             return;
         }
         // SAFETY: the factory exists: it is alive, the handle is consumed
         // here so it has not been deleted before, and AVStream destroys a
         // factory that has not been deleted only under the device mutex,
-        // which is held. It is deleted exactly once.
+        // which is held (`guard`, checked above to be for the factory's own
+        // device). It is deleted exactly once.
         unsafe {
             let _ = sys::KsDeleteFilterFactory(self.raw);
         }
