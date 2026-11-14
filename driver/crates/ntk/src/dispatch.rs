@@ -52,6 +52,9 @@ static ORIGINAL_DISPATCH: [AtomicUsize; MAJOR_FUNCTIONS] =
     [const { AtomicUsize::new(0) }; MAJOR_FUNCTIONS];
 static ORIGINAL_UNLOAD: AtomicUsize = AtomicUsize::new(0);
 static INSTALLED: AtomicBool = AtomicBool::new(false);
+/// Set once the driver's unload routine is this module's, which also
+/// unregisters registry callbacks nobody dropped.
+static UNLOAD_HOOKED: AtomicBool = AtomicBool::new(false);
 
 /// The installed handler's [`OpenFiles`], as the context pointer of a
 /// `Shared<OpenFiles<H::Context>>`. Stored once during DriverEntry, before
@@ -199,7 +202,14 @@ pub fn install_file_handler<H: FileHandler>(driver: &mut DriverObject) -> Result
     let original_unload = object.DriverUnload.map_or(0, |f| f as usize);
     ORIGINAL_UNLOAD.store(original_unload, Ordering::Release);
     object.DriverUnload = Some(unload::<H>);
+    UNLOAD_HOOKED.store(true, Ordering::Release);
     Ok(())
+}
+
+/// Whether the driver's unload routine is this module's: it runs
+/// [`crate::registry`]'s clean-up of callbacks that were never dropped.
+pub(crate) fn unload_routine_installed() -> bool {
+    UNLOAD_HOOKED.load(Ordering::Acquire)
 }
 
 fn forward(device: PDEVICE_OBJECT, irp: Irp) -> DispatchResult {
@@ -295,6 +305,9 @@ unsafe extern "C" fn dispatch<H: FileHandler>(device: PDEVICE_OBJECT, irp: PIRP)
 
 unsafe extern "C" fn unload<H: FileHandler>(driver: *mut DRIVER_OBJECT) {
     H::unload();
+    // A registry callback whose value was leaked or forgotten would be
+    // called into this image after it has gone.
+    crate::registry::unregister_remaining();
     // Plug and Play does not unload the driver while its device has open
     // handles (section 11 of the specification): every claimed file has
     // been closed, and the table is empty.

@@ -3,6 +3,7 @@
 
 //! Registry keys and registry callbacks.
 
+use alloc::vec::Vec;
 use core::{
     ffi::c_void,
     sync::atomic::{AtomicI64, Ordering},
@@ -25,6 +26,7 @@ use crate::{
     alloc_ext::Shared,
     device::DriverObject,
     string::{units_of, UnicodeStr},
+    sync::SpinLock,
 };
 
 pub use wdk_sys::{KEY_CREATE_SUB_KEY, KEY_QUERY_VALUE, KEY_SET_VALUE};
@@ -303,8 +305,80 @@ struct Registration<F> {
     filter: F,
 }
 
+/// A callback the kernel has registered, as the driver's unload routine
+/// finds it if its [`RegistryCallback`] was never dropped.
+struct Registered {
+    cookie: i64,
+    /// The kernel's context reference, in pointer form.
+    kernel_context: usize,
+    /// Takes that reference back.
+    release: unsafe fn(usize),
+}
+
+/// Every callback that is registered. Dropping a [`RegistryCallback`] takes
+/// its entry out; whatever is left when the driver unloads is unregistered
+/// then ([`unregister_remaining`]), so that a callback whose value was
+/// leaked or forgotten cannot outlive the driver's image.
+///
+/// A spin lock, because a `static` needs a lock that can be made at compile
+/// time (section 14 of the specification allows exceptions to fast mutexes
+/// one by one). It is taken only when a callback is registered or
+/// unregistered and at unload, for a push, a search or a swap-remove.
+static REGISTERED: SpinLock<Vec<Registered>> = SpinLock::new(Vec::new());
+
+/// Takes back a kernel context reference of a `Registration<F>`.
+///
+/// # Safety
+///
+/// `kernel_context` must be the pointer form of a reference made by
+/// `Shared::<Registration<F>>::into_context`, given up once, after the
+/// callback that uses it has been unregistered.
+unsafe fn release_registration<F: RegistryFilter>(kernel_context: usize) {
+    // SAFETY: by the caller's contract.
+    drop(unsafe { Shared::<Registration<F>>::from_context(kernel_context as *mut c_void) });
+}
+
+/// Takes the entry of the callback with this kernel context out of
+/// [`REGISTERED`]. Once the list is empty its memory is handed back too, for
+/// the caller to free after the lock has been let go, so that none is left
+/// at unload.
+fn take_registered(kernel_context: usize) -> Vec<Registered> {
+    let mut registered = REGISTERED.lock();
+    if let Some(position) = registered
+        .iter()
+        .position(|entry| entry.kernel_context == kernel_context)
+    {
+        registered.swap_remove(position);
+    }
+    if registered.is_empty() {
+        core::mem::take(&mut *registered)
+    } else {
+        Vec::new()
+    }
+}
+
+/// Unregisters every callback whose [`RegistryCallback`] was never dropped.
+/// Called by the driver's unload routine, after the driver's own, when
+/// nothing else of the driver runs any more.
+pub(crate) fn unregister_remaining() {
+    let remaining = core::mem::take(&mut *REGISTERED.lock());
+    for entry in remaining {
+        let cookie = LARGE_INTEGER { QuadPart: entry.cookie };
+        // SAFETY: the cookie is one CmRegisterCallbackEx returned and that
+        // has not been unregistered (its value's drop would have taken the
+        // entry out). Once CmUnRegisterCallback has returned no call uses the
+        // context reference, which is taken back once, by the function that
+        // matches its type.
+        unsafe {
+            let _ = CmUnRegisterCallback(cookie);
+            (entry.release)(entry.kernel_context);
+        }
+    }
+}
+
 /// A registered registry callback. Dropping it unregisters the callback and
-/// waits for calls in progress to finish.
+/// waits for calls in progress to finish. One that is never dropped is
+/// unregistered when the driver unloads.
 pub struct RegistryCallback<F: RegistryFilter> {
     registration: Shared<Registration<F>>,
     /// The reference handed to the kernel as the callback's context.
@@ -319,7 +393,14 @@ unsafe impl<F: RegistryFilter> Sync for RegistryCallback<F> {}
 
 impl<F: RegistryFilter> RegistryCallback<F> {
     /// Registers `filter` at the given altitude (a decimal string).
+    ///
+    /// Refused with `STATUS_NOT_SUPPORTED` unless the driver's unload routine
+    /// is this crate's ([`crate::dispatch::install_file_handler`]), which is
+    /// what unregisters a callback whose value is never dropped.
     pub fn register(driver: DriverHandle, altitude: &[u16], filter: F) -> Result<Self, NtStatus> {
+        if !crate::dispatch::unload_routine_installed() {
+            return Err(NtStatus::NOT_SUPPORTED);
+        }
         let altitude = UnicodeStr::new(altitude).ok_or(NtStatus::INVALID_PARAMETER)?;
         let registration = Shared::try_new(Registration {
             cookie: AtomicI64::new(0),
@@ -349,7 +430,33 @@ impl<F: RegistryFilter> RegistryCallback<F> {
             return Err(status);
         }
         // SAFETY: reading the field the kernel just initialised.
-        registration.cookie.store(unsafe { cookie.QuadPart }, Ordering::Release);
+        let cookie = unsafe { cookie.QuadPart };
+        registration.cookie.store(cookie, Ordering::Release);
+
+        // Entered before the value exists, so that from here on it does
+        // not matter whether the value is ever dropped.
+        let entered = {
+            let mut registered = REGISTERED.lock();
+            let room = registered.try_reserve(1).is_ok();
+            if room {
+                registered.push(Registered {
+                    cookie,
+                    kernel_context: kernel_context as usize,
+                    release: release_registration::<F>,
+                });
+            }
+            room
+        };
+        if !entered {
+            // SAFETY: the cookie was just returned and is unregistered once;
+            // afterwards no call uses the context reference, which is taken
+            // back once.
+            unsafe {
+                let _ = CmUnRegisterCallback(LARGE_INTEGER { QuadPart: cookie });
+                drop(Shared::<Registration<F>>::from_context(kernel_context));
+            }
+            return Err(NtStatus::INSUFFICIENT_RESOURCES);
+        }
         Ok(Self {
             registration,
             kernel_context,
@@ -359,13 +466,17 @@ impl<F: RegistryFilter> RegistryCallback<F> {
 
 impl<F: RegistryFilter> Drop for RegistryCallback<F> {
     fn drop(&mut self) {
+        // The entry goes first: the callback is unregistered here, not again
+        // at unload.
+        drop(take_registered(self.kernel_context as usize));
         let cookie = LARGE_INTEGER {
             QuadPart: self.registration.cookie.load(Ordering::Acquire),
         };
-        // SAFETY: the cookie is the one CmRegisterCallbackEx returned.
-        // CmUnRegisterCallback returns only after every call of the callback
-        // has finished, so afterwards nothing uses the kernel's context
-        // reference and it can be taken back, once.
+        // SAFETY: the cookie is the one CmRegisterCallbackEx returned, and
+        // its entry is gone, so the unload routine does not unregister it
+        // too. CmUnRegisterCallback returns only after every call of the
+        // callback has finished, so afterwards nothing uses the kernel's
+        // context reference and it can be taken back, once.
         unsafe {
             let _ = CmUnRegisterCallback(cookie);
             drop(Shared::<Registration<F>>::from_context(self.kernel_context));
