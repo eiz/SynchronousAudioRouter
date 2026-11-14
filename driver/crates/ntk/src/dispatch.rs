@@ -154,7 +154,9 @@ pub trait FileHandler: 'static {
     fn create(device: &DeviceObject) -> Result<Shared<Self::Context>, NtStatus>;
 
     /// The last handle to the file has been closed (`IRP_MJ_CLEANUP`).
-    fn cleanup(device: &DeviceObject, context: &Shared<Self::Context>);
+    /// `request` is that request, which the caller completes when this
+    /// returns.
+    fn cleanup(request: &Irp, context: &Shared<Self::Context>);
 
     /// A device control request on the file. Runs on the requesting thread.
     fn device_control(
@@ -283,7 +285,7 @@ unsafe extern "C" fn dispatch<H: FileHandler>(device: PDEVICE_OBJECT, irp: PIRP)
         }
         IRP_MJ_CLEANUP => {
             if let Some(context) = files.get(file) {
-                H::cleanup(device_ref, &context);
+                H::cleanup(&irp, &context);
             }
             irp.complete(NtStatus::SUCCESS)
         }

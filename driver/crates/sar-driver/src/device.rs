@@ -133,12 +133,12 @@ impl FileHandler for Sar {
         ControlHandle::try_new()
     }
 
-    fn cleanup(device: &DeviceObject, control: &Shared<ControlHandle>) {
-        control.close(device);
+    fn cleanup(request: &Irp, control: &Shared<ControlHandle>) {
+        control.close(request);
     }
 
-    fn device_control(device: &DeviceObject, control: &Shared<ControlHandle>, irp: Irp) -> DispatchResult {
-        crate::control::dispatch(device, control, irp)
+    fn device_control(_device: &DeviceObject, control: &Shared<ControlHandle>, irp: Irp) -> DispatchResult {
+        crate::control::dispatch(control, irp)
     }
 
     /// "On unload it stops registry filtering if it was started and releases

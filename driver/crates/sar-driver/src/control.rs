@@ -11,7 +11,6 @@ use ks::device::Device;
 use ntk::{
     alloc_ext::Shared,
     csq::IrpQueue,
-    device::DeviceObject,
     irp::{DispatchResult, Irp},
     object::EventObject,
     registry::RegistryCallback,
@@ -78,7 +77,7 @@ impl ControlHandle {
     }
 
     /// The last handle to this open has been closed (section 11).
-    pub fn close(&self, device: &DeviceObject) {
+    pub fn close(&self, request: &Irp) {
         // 1. New control requests fail from here on.
         let (endpoints, host_view) = {
             let mut state = self.state.lock();
@@ -102,7 +101,7 @@ impl ControlHandle {
         for endpoint in &endpoints {
             endpoint.announce_withdrawal();
         }
-        if let Some(device) = Device::of(device) {
+        if let Some(device) = Device::of_request(request) {
             if let Some(device_state) = device.context::<Sar>() {
                 {
                     // One hold of the device mutex from the first endpoint
@@ -155,13 +154,13 @@ impl ControlHandle {
 }
 
 /// A device control request on a control handle.
-pub fn dispatch(device: &DeviceObject, control: &Shared<ControlHandle>, irp: Irp) -> DispatchResult {
+pub fn dispatch(control: &Shared<ControlHandle>, irp: Irp) -> DispatchResult {
     if control.state.lock().closing {
         return irp.complete(NtStatus::FILE_CLOSED);
     }
     match Request::decode(irp.control_code()) {
         Some(Request::SetBufferLayout) => set_buffer_layout(control, irp),
-        Some(Request::CreateEndpoint) => create_endpoint(device, control, irp),
+        Some(Request::CreateEndpoint) => create_endpoint(control, irp),
         Some(Request::WaitNotifications) => wait_notifications(control, irp),
         Some(Request::StartRegistryFilter) => {
             let status = start_registry_filter();
@@ -245,7 +244,7 @@ fn set_buffer_layout(control: &ControlHandle, irp: Irp) -> DispatchResult {
 
 /// "Create endpoint": builds the endpoint's filters now and queues its
 /// publication; the request completes when that is done.
-fn create_endpoint(device: &DeviceObject, control: &Shared<ControlHandle>, irp: Irp) -> DispatchResult {
+fn create_endpoint(control: &Shared<ControlHandle>, irp: Irp) -> DispatchResult {
     if let Err(refusal) = check_input_length(irp.input_length(), EndpointRequest::SIZE) {
         return irp.complete(refusal);
     }
@@ -257,7 +256,9 @@ fn create_endpoint(device: &DeviceObject, control: &Shared<ControlHandle>, irp: 
         Ok(request) => request,
         Err(status) => return irp.complete(status),
     };
-    let Some(ks_device) = Device::of(device) else {
+    // The device is borrowed from the request: it is not used once the
+    // request has been completed or handed on.
+    let Some(ks_device) = Device::of_request(&irp) else {
         return irp.complete(NtStatus::INVALID_DEVICE_REQUEST);
     };
     let Some(device_state) = ks_device.context::<Sar>() else {

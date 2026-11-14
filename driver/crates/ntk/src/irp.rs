@@ -19,7 +19,7 @@ use wdk_sys::{
     IRP_MJ_DEVICE_CONTROL, NTSTATUS, PIRP, SL_PENDING_RETURNED,
 };
 
-use crate::string::units_of;
+use crate::{device::DeviceObject, string::units_of};
 
 /// `IRP_BUFFERED_IO`: the I/O manager allocated `AssociatedIrp.SystemBuffer`.
 const IRP_BUFFERED_IO: u32 = 0x0000_0010;
@@ -98,6 +98,52 @@ fn buffered_output<'a>(irp: NonNull<IRP>) -> &'a mut [u8] {
     // the IRP until completion. The caller's `&mut` token makes the borrow
     // unique.
     unsafe { core::slice::from_raw_parts_mut(buffer.cast::<u8>(), length) }
+}
+
+/// The device object a request for a file was sent to: `None` for a request
+/// that is for no file (a Plug and Play or power request, for one).
+fn file_device<'a>(irp: NonNull<IRP>) -> Option<&'a DeviceObject> {
+    let stack = current_stack(irp);
+    if stack.FileObject.is_null() || stack.DeviceObject.is_null() {
+        return None;
+    }
+    // SAFETY: the current stack location names the device object the
+    // request was sent to, which exists at least until the request is
+    // completed. The callers bound `'a` by their borrow of the request.
+    Some(unsafe { DeviceObject::from_raw(stack.DeviceObject) })
+}
+
+mod sealed {
+    pub trait Sealed {}
+    impl Sealed for super::Irp {}
+    impl Sealed for super::PendingIrp {}
+}
+
+/// A request that has not been completed: an [`Irp`] in its dispatch
+/// routine, or a [`PendingIrp`].
+///
+/// A borrow of one, when the request is for a file, shows that the file is
+/// still open: the I/O manager closes a file only when every request for it
+/// has been completed, and completing a request consumes the value. That in
+/// turn holds off the removal of the file's device, which Plug and Play
+/// carries out only once the device's files are closed. So what belongs to
+/// the device may be lent out for as long as such a borrow lasts.
+pub trait FileRequest: sealed::Sealed {
+    /// The device object the request was sent to, if the request is for a
+    /// file.
+    fn file_device(&self) -> Option<&DeviceObject>;
+}
+
+impl FileRequest for Irp {
+    fn file_device(&self) -> Option<&DeviceObject> {
+        file_device(self.raw)
+    }
+}
+
+impl FileRequest for PendingIrp {
+    fn file_device(&self) -> Option<&DeviceObject> {
+        file_device(self.raw)
+    }
 }
 
 /// An IRP inside the dispatch routine it was delivered to, on the thread

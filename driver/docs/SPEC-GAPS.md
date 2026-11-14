@@ -1314,17 +1314,13 @@ memory. None was reachable from the driver as written. The specification
 says nothing about the wrappers; these are the decisions their fixes
 needed.
 
-72. **[section 14] Two more locks that are not fast mutexes.** The list of
-    registered registry callbacks (`ntk::registry`) and the list of
-    devices that can be found from their device object (`ks::device`) are
-    `static`s, which need a lock that can be made at compile time; both are
-    spin locks, like the existing `Global`. Each is held for a search, a
-    push or a swap-remove of a list with an entry per callback or per
-    device, and is taken only when a callback is registered or
-    unregistered, at unload, when a device is added or removed, and once
-    per `Device::of` (a "create endpoint", a host's close, a publication).
-    Both lists give their memory back when they empty, so none is left at
-    unload. [guess]
+72. **[section 14] One more lock that is not a fast mutex.** The list of
+    registered registry callbacks (`ntk::registry`) is a `static`, which
+    needs a lock that can be made at compile time; it is a spin lock, like
+    the existing `Global`. It is held for a search, a push or a swap-remove
+    of a list with an entry per callback, and is taken only when a callback
+    is registered or unregistered and at unload. The list gives its memory
+    back when it empties, so none is left at unload. [guess]
 
 73. **A run-down gate's transitions wait for each other.** A `shut` or an
     `open` that finds the other (or another of its kind) under way waits
@@ -1358,20 +1354,29 @@ needed.
     routine. The leaked value's own memory stays allocated; Driver
     Verifier reports that at unload as a leak. [guess]
 
-77. **Finding a device after its removal.** `Device::of` returns a guard,
-    and the device's `Remove` callback, which AVStream calls with the
-    device mutex held, waits for every such guard before the `KSDEVICE` is
-    freed. A guard holder that waited for the device mutex at that moment
-    would never be let go. In the driver every holder runs while a file
-    of the device is open (a request on a control handle, or the
-    publication of a pending request), and a device is taken to be removed
-    only when no file is open on it (section 11 says as much of unloading;
-    of removal it is assumed), so this cannot arise there. That AVStream frees
-    the `KSDEVICE` after `Remove` and not before is what the `Remove` page
-    implies ("minidrivers that must free device-associated resources upon
-    device removal"); it is not stated. The device's `Add` runs when "the
-    KSDEVICE structure has been instantiated and initialized", so its
-    functional device object is known then. [doc] for the quotes.
+77. **Finding a device after its removal.** The device is found from a
+    request, not from a device object: `Device::of_request` takes a borrow
+    of a request that has not been completed (`ntk::irp::FileRequest`: an
+    `Irp` in its dispatch routine or a `PendingIrp`), reads the device
+    object from the request itself, and lends the device for as long as the
+    borrow lasts. Completing a request, or handing it on, consumes it, so
+    the compiler refuses a use of the device after that; a request for no
+    file (Plug and Play, power) finds no device. (The owner's design, in
+    place of a first fix that listed the live devices and made a removal
+    wait for everyone who had found one: that was more machinery than the
+    hazard is worth, and it traded the hazard for a wait that could hang.)
+    It rests on a device not being removed while a file is open on it:
+    "Windows 2000 and later versions of Windows track open handles and
+    fail the query if there are open handles after the
+    IRP_MN_QUERY_REMOVE_DEVICE completes", and after a surprise removal
+    "After this IRP succeeds and all open handles to the device are closed,
+    the PnP manager sends an IRP_MN_REMOVE_DEVICE request". The pages
+    speak of handles; that a request still pending after the last handle
+    has gone holds the removal off as well is taken from the file object
+    it keeps, and in the driver the one such request (a "create endpoint"
+    being published) is waited for by the handle's close in any case.
+    The control handle's close now receives its request for this. [doc]
+    for the quotes.
 
 78. **Misuse that is refused, and misuse that stops the machine.**
     `FilterFactory::delete` with another device's guard panics (a
@@ -1385,7 +1390,7 @@ needed.
 
 **[rig]** Run `cleanroom-cleanroom-wrap1-20261113-233952` (`issues`,
 `conformance`, `race`, `kill`, `unload`, under Driver Verifier), on the
-code with all ten fixes: every scenario passed (16 of 16, after the
+code with all ten fixes (item 77 in its first form): every scenario passed (16 of 16, after the
 install), and the guest neither stopped nor hung. That exercises the
 closing of hosts with parked waits, a host killed while streaming, the
 registry filter, publication on worker threads, and the driver's unload

@@ -50,7 +50,7 @@ impl WorkRoutine for PublishWork {
     /// meanwhile, one after the other; that keeps completion in request
     /// order no matter how the worker threads are scheduled, without a
     /// lock being held while an endpoint is published.
-    fn run(device: &DeviceObject, state: &DeviceState) {
+    fn run(_device: &DeviceObject, state: &DeviceState) {
         loop {
             let job = {
                 let mut queue = state.publish_queue.lock();
@@ -63,7 +63,9 @@ impl WorkRoutine for PublishWork {
                 queue.draining = true;
                 job
             };
-            let status = match Device::of(device) {
+            // The device is borrowed from the job's request, which is not
+            // completed until the endpoint has been published.
+            let status = match Device::of_request(&job.request) {
                 Some(device) => {
                     let result = job.endpoint.publish(device, &state.identities);
                     if result.is_err() {

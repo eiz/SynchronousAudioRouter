@@ -13,6 +13,7 @@ use ks_sys as sys;
 use ntk::{
     alloc_ext::Shared,
     device::{DeviceObject, DriverObject},
+    irp::FileRequest,
     sync::Rundown,
 };
 use ntstatus::NtStatus;
@@ -160,9 +161,33 @@ impl Device {
         core::ptr::from_ref(self).cast_mut().cast()
     }
 
+    /// The AVStream device a request for one of its files was sent to, if
+    /// the device belongs to the driver that called [`initialize_driver`].
+    /// `None` for a request that is for no file.
+    ///
+    /// The device is lent for as long as the request is borrowed, and so
+    /// not past its completion: see [`FileRequest`] for why the device
+    /// cannot be removed in that time.
+    pub fn of_request<R: FileRequest>(request: &R) -> Option<&Self> {
+        let device_object = request.file_device()?;
+        // SAFETY: the request is for a file of the device and has not been
+        // completed, so the file is open and the device has not been
+        // removed; that stays so while `request` is borrowed, which is as
+        // long as the result may be used.
+        unsafe { Self::of(device_object) }
+    }
+
     /// The AVStream device behind a device object, if the device object
     /// belongs to the driver that called [`initialize_driver`].
-    pub fn of(device_object: &DeviceObject) -> Option<&Self> {
+    ///
+    /// # Safety
+    ///
+    /// The device must not have been removed, and must not be removed while
+    /// the returned reference is in use. AVStream frees the `KSDEVICE` when
+    /// Plug and Play removes the device, and the device object can exist for
+    /// longer than that (anything that holds a reference to it keeps it), so
+    /// a valid device object alone is not enough.
+    unsafe fn of(device_object: &DeviceObject) -> Option<&Self> {
         let driver = DRIVER.load(Ordering::Acquire);
         // SAFETY: `device_object` is a valid device object.
         let owner = unsafe { (*device_object.as_raw()).DriverObject };
@@ -171,10 +196,11 @@ impl Device {
         }
         // SAFETY: every device object of this driver was created by
         // AVStream's AddDevice (the driver never creates one itself), which
-        // is what KsGetDeviceForDeviceObject requires.
+        // is what KsGetDeviceForDeviceObject requires; the device has not
+        // been removed (the caller's contract), so what it reads is there.
         let raw = unsafe { sys::KsGetDeviceForDeviceObject(device_object.as_raw()) };
         // SAFETY: a non-null result is the KSDEVICE of that device object,
-        // valid as long as the device object is.
+        // valid until the device is removed, which the caller holds off.
         (!raw.is_null()).then(|| unsafe { Self::from_raw(raw) })
     }
 

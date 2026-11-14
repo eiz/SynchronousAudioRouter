@@ -254,6 +254,19 @@ beyond the above:
 The pages were fetched by address with the agent's web fetch tool, from
 learn.microsoft.com only, with no web search. No crate source was opened.
 
+One of the ten was then settled differently, by the owner's design and
+outside that session: instead of the first fix for finding a device after
+its removal (a list of live devices and a wait at removal), the device is
+found from a borrow of a request that has not been completed
+(`Device::of_request`), which the compiler does not let outlive the
+request. Consulted for that, beyond the table above: the pages "Handling
+an IRP_MN_QUERY_REMOVE_DEVICE Request", "Handling an
+IRP_MN_SURPRISE_REMOVAL Request" and "Handling an IRP_MN_REMOVE_DEVICE
+Request" of Microsoft's driver documentation (the `kernel` folder of
+github.com/MicrosoftDocs/windows-driver-docs, which the owner pointed
+to), for when a device with open handles is removed. `SPEC-GAPS.md`,
+item 77.
+
 ## Accidental exposure log
 
 - At session start the agent's context contained an automatically attached
