@@ -409,13 +409,25 @@ unsafe extern "C" fn callback<F: RegistryFilter>(
         // SAFETY: for this notification class the registry passes a valid
         // REG_QUERY_VALUE_KEY_INFORMATION that lives for the call.
         let info = unsafe { &*argument2.cast::<REG_QUERY_VALUE_KEY_INFORMATION>() };
-        // SAFETY: ValueName is an input parameter; since Windows 8 the
-        // registry hands callbacks a captured kernel copy (or null).
-        let name = unsafe { units_of(info.ValueName.cast_const()) };
+        // Only the name's length is wanted, and it is read from the counted
+        // string itself: the characters are not looked at, so nothing is
+        // assumed about where they are or how they are aligned.
+        // SAFETY: ValueName is null or points to the UNICODE_STRING the
+        // registry passes for the call (an input parameter, which since
+        // Windows 8 the registry hands callbacks as a captured kernel copy).
+        let name = unsafe { info.ValueName.as_ref() };
+        let name_length = name.map_or(0, |name| {
+            if name.Buffer.is_null() || name.Length < 2 {
+                0
+            } else {
+                // Whole UTF-16 units, as the name was counted before.
+                usize::from(name.Length / 2) * 2
+            }
+        });
         ValueRead {
             cookie: &registration.cookie,
             key_object: info.Object,
-            name_length: Some(name.len() * 2),
+            name_length: Some(name_length),
             index: None,
             information_class: info.KeyValueInformationClass,
             output: info.KeyValueInformation,
