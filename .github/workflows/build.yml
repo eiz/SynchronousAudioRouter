@@ -27,16 +27,15 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  # Keep in lockstep with <WindowsTargetPlatformVersion> in the driver .vcxproj
-  # and with the defaults in tools/Install-WdkBuildEnv.ps1.
+  # Keep in lockstep with the defaults in tools/Install-WdkBuildEnv.ps1.
   SDK_VERSION: "10.0.22621.0"
 
 jobs:
   # ---------------------------------------------------------------------------
-  # Kernel driver: needs the WDK + its VS extension installed on the runner.
-  # ARM64 is intentionally omitted for now: the INF has no [Standard.NTARM64]
-  # model yet, so Inf2Cat cannot package it. Add that section first (see
-  # BUILDING.md) before enabling an ARM64 matrix entry.
+  # Kernel driver (driver/, Rust): needs the WDK, a Rust toolchain and a
+  # libclang for bindgen on the runner. ARM64 is intentionally omitted for
+  # now: the INF has no ARM64 models section yet, so Inf2Cat cannot package
+  # it (see BUILDING.md).
   # ---------------------------------------------------------------------------
   driver:
     name: driver (${{ matrix.platform }})
@@ -52,15 +51,9 @@ jobs:
       matrix:
         platform: [x64]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0   # the whole history, for the version and build label
-
-      - name: Add MSBuild to PATH
-        uses: microsoft/setup-msbuild@v2
-        with:
-          vs-version: "[17.0,18.0)"
-          msbuild-architecture: x64
 
       - name: Install WDK build environment
         shell: pwsh
@@ -87,35 +80,58 @@ jobs:
           "numeric=$numeric" | Out-File $env:GITHUB_OUTPUT -Append
           Write-Host "version: $desc  (DriverVer numeric: $numeric)"
 
+      - name: Install the pinned Rust toolchain
+        shell: pwsh
+        working-directory: driver
+        run: |
+          # driver/rust-toolchain.toml names the compiler. With no arguments
+          # rustup installs the toolchain that file selects.
+          rustup toolchain install
+          if ($LASTEXITCODE -ne 0) { throw "rustup toolchain install failed (exit $LASTEXITCODE)" }
+          rustup show active-toolchain
+          rustc --version
+          cargo --version
+
+      - name: Test the driver's kernel-independent logic
+        shell: pwsh
+        working-directory: driver
+        run: |
+          cargo test --locked
+          if ($LASTEXITCODE -ne 0) { throw "cargo test failed (exit $LASTEXITCODE)" }
+
       - name: Build driver
         shell: pwsh
+        working-directory: driver
         run: |
-          # Pin to whatever 10.0.22621.x SDK the runner actually has installed,
-          # so the build doesn't fail if the image carries a different revision
-          # than the .0 hard-coded in the .vcxproj.
+          # Microsoft's WDK crates take the newest SDK folder unless told
+          # otherwise, and the image's newest plain SDK can come without the
+          # kernel headers. Pick the highest version that has them
+          # (km\ntifs.h): the matching kernel import libraries are then
+          # present too.
           $inc = 'C:\Program Files (x86)\Windows Kits\10\Include'
-          # Pick the highest SDK version that ALSO ships the WDK kernel headers
-          # (km\ntifs.h). The image's plain SDK and its matching WDK can live under
-          # different version folders, so requiring km\ntifs.h guarantees both the
-          # headers and the matching kernel import libs are present for $sdk.
           $sdk = (Get-ChildItem $inc -Directory |
                   Where-Object { Test-Path (Join-Path $_.FullName 'km\ntifs.h') } |
                   Sort-Object { [version]$_.Name } -Descending |
                   Select-Object -First 1).Name
           if (-not $sdk) { throw "No SDK carrying WDK kernel headers (km\ntifs.h) under $inc" }
           Write-Host "Using Windows SDK+WDK: $sdk"
+          $env:Version_Number = $sdk
 
-          # SignMode=Off: leave the binary unsigned for attestation/OSSign to sign.
-          # Spectre mitigations stay at the WDK default (on), which needs the
-          # Spectre-mitigated libraries on the build machine (BUILDING.md).
-          & msbuild SynchronousAudioRouter.sln `
-              /t:SynchronousAudioRouter `
-              /p:Configuration=Release `
-              /p:Platform=${{ matrix.platform }} `
-              /p:WindowsTargetPlatformVersion=$sdk `
-              /p:SignMode=Off `
-              /m /verbosity:minimal /nologo
-          if ($LASTEXITCODE -ne 0) { throw "msbuild failed (exit $LASTEXITCODE)" }
+          # bindgen needs a libclang.dll.
+          if (-not $env:LIBCLANG_PATH) {
+            $candidates = @("$env:ProgramFiles\LLVM\bin") +
+              @(Get-ChildItem "$env:ProgramFiles\Microsoft Visual Studio\2022\*\VC\Tools\Llvm\x64\bin" `
+                  -Directory -ErrorAction SilentlyContinue | ForEach-Object FullName)
+            $env:LIBCLANG_PATH = $candidates |
+              Where-Object { Test-Path (Join-Path $_ 'libclang.dll') } | Select-Object -First 1
+            if (-not $env:LIBCLANG_PATH) { throw 'libclang.dll not found; set LIBCLANG_PATH' }
+          }
+          Write-Host "Using libclang from: $env:LIBCLANG_PATH"
+
+          # The image is left unsigned for attestation signing.
+          $triple = '${{ matrix.platform == 'x64' && 'x86_64-pc-windows-msvc' || 'aarch64-pc-windows-msvc' }}'
+          cargo build --locked --release --target $triple -p sar-driver
+          if ($LASTEXITCODE -ne 0) { throw "cargo build failed (exit $LASTEXITCODE)" }
 
       - name: Package + hash
         shell: pwsh
@@ -166,7 +182,7 @@ jobs:
           "@ | Out-File "$signed/README.txt" -Encoding ascii
 
       - name: Upload test-signed package
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: sar-driver-${{ matrix.platform }}-testsigned
           path: artifacts/${{ matrix.platform }}-testsigned/
@@ -174,12 +190,12 @@ jobs:
 
       - name: Attest build provenance
         if: github.event_name != 'pull_request'   # OIDC token isn't writable on fork PRs
-        uses: actions/attest-build-provenance@v1
+        uses: actions/attest-build-provenance@ef244123eb79f2f7a7e75d99086184180e6d0018 # v1.4.4
         with:
           subject-path: artifacts/${{ matrix.platform }}/SynchronousAudioRouter.sys
 
       - name: Upload driver package
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: sar-driver-${{ matrix.platform }}
           path: artifacts/${{ matrix.platform }}/
@@ -197,10 +213,10 @@ jobs:
       matrix:
         platform: [x64, x86]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Add MSBuild to PATH
-        uses: microsoft/setup-msbuild@v2
+        uses: microsoft/setup-msbuild@6fb02220983dee41ce7ae257b6f4d8f9bf5ed4ce # v2.0.0
         with:
           vs-version: "[17.0,18.0)"
 
@@ -246,7 +262,7 @@ jobs:
           $lines | Out-File "$stage/SHA256SUMS.txt" -Encoding ascii
 
       - name: Upload SarAsio
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: sar-asio-${{ matrix.platform }}
           path: artifacts/${{ matrix.platform }}/
@@ -262,27 +278,27 @@ jobs:
     needs: [driver, usermode]
     runs-on: windows-2022
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
       - name: Add MSBuild to PATH
-        uses: microsoft/setup-msbuild@v2
+        uses: microsoft/setup-msbuild@6fb02220983dee41ce7ae257b6f4d8f9bf5ed4ce # v2.0.0
         with:
           vs-version: "[17.0,18.0)"
 
       - name: Download test-signed driver
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: sar-driver-x64-testsigned
           path: stage/driver
 
       - name: Download SarAsio (x64)
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: sar-asio-x64
           path: stage/x64
 
       - name: Download SarAsio (x86)
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: sar-asio-x86
           path: stage/x86
@@ -316,7 +332,7 @@ jobs:
           "@ | Out-File "$out/README.txt" -Encoding ascii
 
       - name: Upload installer
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: sar-installer-x64-testsigned
           path: artifacts/installer-x64-testsigned/

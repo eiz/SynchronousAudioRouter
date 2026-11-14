@@ -16,20 +16,20 @@
     <IntermediateOutputPath>obj\$(Platform)\$(Configuration)\</IntermediateOutputPath>
     <DefineConstants>Debug</DefineConstants>
     <SuppressSpecificWarnings>61</SuppressSpecificWarnings>
-    <SuppressIces>ICE61;ICE69</SuppressIces>
+    <SuppressIces>ICE34;ICE61;ICE69</SuppressIces>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|x86' ">
     <OutputPath>bin\$(Platform)\$(Configuration)\</OutputPath>
     <IntermediateOutputPath>obj\$(Platform)\$(Configuration)\</IntermediateOutputPath>
     <SuppressSpecificWarnings>61</SuppressSpecificWarnings>
-    <SuppressIces>ICE61;ICE69</SuppressIces>
+    <SuppressIces>ICE34;ICE61;ICE69</SuppressIces>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|x64' ">
     <OutputPath>bin\$(Platform)\$(Configuration)\</OutputPath>
     <IntermediateOutputPath>obj\$(Platform)\$(Configuration)\</IntermediateOutputPath>
     <DefineConstants>Debug</DefineConstants>
     <SuppressSpecificWarnings>61</SuppressSpecificWarnings>
-    <SuppressIces>ICE61;ICE69</SuppressIces>
+    <SuppressIces>ICE34;ICE61;ICE69</SuppressIces>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|x64' ">
     <OutputPath>bin\$(Platform)\$(Configuration)\</OutputPath>
@@ -37,7 +37,7 @@
     <SuppressSpecificWarnings>
     </SuppressSpecificWarnings>
     <SuppressValidation>False</SuppressValidation>
-    <SuppressIces>ICE61;ICE69</SuppressIces>
+    <SuppressIces>ICE34;ICE61;ICE69</SuppressIces>
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="Product.wxs" />
@@ -51,6 +51,10 @@
     <WixExtension Include="WixDifxAppExtension">
       <HintPath>$(WixExtDir)\WixDifxAppExtension.dll</HintPath>
       <Name>WixDifxAppExtension</Name>
+    </WixExtension>
+    <WixExtension Include="WixUtilExtension">
+      <HintPath>$(WixExtDir)\WixUtilExtension.dll</HintPath>
+      <Name>WixUtilExtension</Name>
     </WixExtension>
   </ItemGroup>
   <ItemGroup Condition="'$(Platform)' == 'x64'">

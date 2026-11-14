@@ -53,15 +53,19 @@ bool EndpointConfig::load(picojson::object& obj)
     }
 
     // The file can be edited by hand or come from a build whose dialog took
-    // any number. A count the driver can't create is dropped here, where
-    // nothing has been sized by it yet.
+    // any number. A count the driver can't create is brought into range
+    // here, where nothing has been sized by it yet. The endpoint itself is
+    // kept: leaving it out would also delete it, with its name, ID and any
+    // application routed to it, the next time the control panel saves.
     auto count = poChannelCount->second.get<double>();
 
     if (!(count >= 1 && count <= SAR_MAX_CHANNEL_COUNT)) {
-        LOG(ERROR) << "Ignoring endpoint " << poId->second.get<std::string>()
-            << ": its channel count must be from 1 to "
-            << SAR_MAX_CHANNEL_COUNT << ".";
-        return false;
+        double inRange = count > SAR_MAX_CHANNEL_COUNT ? SAR_MAX_CHANNEL_COUNT : 1;
+
+        LOG(ERROR) << "Endpoint " << poId->second.get<std::string>()
+            << " has a channel count of " << count << "; using " << inRange
+            << ". It must be from 1 to " << SAR_MAX_CHANNEL_COUNT << ".";
+        count = inRange;
     }
 
     id = poId->second.get<std::string>();

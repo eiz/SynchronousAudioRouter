@@ -107,6 +107,33 @@ void logf(const char *fmt, ...)
     fflush(stdout);
 }
 
+std::string setProcessPriority(const Args& args)
+{
+    std::wstring wanted = args.get(L"priority", L"realtime");
+    DWORD priorityClass =
+        wanted == L"normal" ? NORMAL_PRIORITY_CLASS :
+        wanted == L"high" ? HIGH_PRIORITY_CLASS : REALTIME_PRIORITY_CLASS;
+
+    if (!SetPriorityClass(GetCurrentProcess(), priorityClass)) {
+        logf("SetPriorityClass failed: %s", lastErrorText(GetLastError()).c_str());
+    }
+
+    DWORD actual = GetPriorityClass(GetCurrentProcess());
+    const char *name =
+        actual == REALTIME_PRIORITY_CLASS ? "realtime" :
+        actual == HIGH_PRIORITY_CLASS ? "high" :
+        actual == NORMAL_PRIORITY_CLASS ? "normal" : "other";
+
+    if (actual != priorityClass) {
+        logf("Priority class: %s (asked for %s; realtime needs an elevated process)",
+            name, narrow(wanted).c_str());
+    } else {
+        logf("Priority class: %s", name);
+    }
+
+    return name;
+}
+
 std::string narrow(const std::wstring& s)
 {
     if (s.empty()) {

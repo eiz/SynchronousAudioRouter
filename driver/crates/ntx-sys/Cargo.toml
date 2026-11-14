@@ -1,0 +1,20 @@
+# Copyright (c) 2026 Itty Bitty Binaries, Inc.
+# SPDX-License-Identifier: MIT
+
+[package]
+name = "ntx-sys"
+description = "Raw kernel declarations that wdk-sys lacks, and the C shim for structured exception handling around user memory"
+version.workspace = true
+license.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+links = "sar_seh_shim"
+build = "build.rs"
+
+[dependencies]
+wdk-sys = { workspace = true }
+
+[build-dependencies]
+wdk-build = { workspace = true }
+cc = { workspace = true }

@@ -1,0 +1,12 @@
+# Copyright (c) 2026 Itty Bitty Binaries, Inc.
+# SPDX-License-Identifier: MIT
+
+# The compiler the driver is built and tested with. rustup reads this file
+# and installs that toolchain beside the machine's default one, so a local
+# build, CI and a release build all use the same compiler. Raise it together
+# with the wdk crates in Cargo.toml, and rerun the test suite when you do.
+[toolchain]
+channel = "1.99.1"
+profile = "minimal"
+components = ["clippy", "rustfmt"]
+targets = ["x86_64-pc-windows-msvc"]

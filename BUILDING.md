@@ -45,19 +45,28 @@ the MSI's product version. A `v*` tag has to match `VERSION` (`v0.14.0`, or
 
 ## Local build
 
+The driver is a Rust workspace under `driver/` ([driver/README.md](driver/README.md)).
+It builds on a Windows host with Visual Studio 2022, the WDK, rustup, and a
+`libclang.dll` for bindgen (Visual Studio's "C++ Clang tools" component, or an
+LLVM install with `LIBCLANG_PATH` pointing at it). The compiler version is
+pinned in `driver/rust-toolchain.toml`; rustup installs it on the first cargo
+command, beside your default toolchain.
+
 ```powershell
-# One-time: install the WDK + its VS extension (needs VS2022 already present,
-# with the "MSVC v143 Spectre-mitigated libs" component:
-# Microsoft.VisualStudio.Component.VC.Runtimes.x86.x64.Spectre)
+# One-time: install the WDK + its VS extension (needs VS2022 already present)
 ./tools/Install-WdkBuildEnv.ps1
 
-# Build the driver (unsigned)
-msbuild SynchronousAudioRouter.sln /t:SynchronousAudioRouter `
-    /p:Configuration=Release /p:Platform=x64 /p:SignMode=Off
+# Test the kernel-independent logic, then build the driver (unsigned)
+cd driver
+cargo test --locked
+cargo build --locked --release --target x86_64-pc-windows-msvc -p sar-driver
+cd ..
 
 # Stage, version-stamp, catalog, cab and hash it
 ./tools/Package-SarDriver.ps1 -Platform x64 -DriverVersion 0.14.0.0 -Describe local
 ```
+
+The user-mode projects still build with MSBuild from `SynchronousAudioRouter.sln`.
 
 ## Signing
 
@@ -121,6 +130,27 @@ to get a driver that loads:
   | variable | `SM_HOST` | `https://clientauth.one.digicert.com` |
   | variable | `SM_CODE_SIGNING_CERT_SHA1_HASH` | the certificate's SHA-1 thumbprint |
 
+### Repository settings the release relies on
+
+The workflow only keeps the signing key safe if the repository is set up to
+match. These are settings, not files, so they have to be made by hand:
+
+- **Rulesets.** `.github/rulesets/branches.json` and `release-tags.json` can be
+  imported under Settings > Rules > Rulesets. The first requires a pull
+  request, the code owner's approval and the four CI jobs for `master` and
+  `vnext`. The second lets only the owner create, move or delete `v*` tags.
+- **The `signing` environment** should allow deployments from `master` and
+  `v*` tags only, besides requiring a reviewer. Otherwise anyone who can push
+  a branch can ask for a signature on whatever that branch's workflow does,
+  and the reviewer's approval is the only thing in the way.
+- **Actions.** Allow only GitHub's own actions and `microsoft/setup-msbuild`,
+  require actions to be pinned to a full commit SHA, give `GITHUB_TOKEN` read
+  access by default, and require approval before workflows run for outside
+  contributors' pull requests.
+- **Collaborators** can do everything short of changing settings, including
+  starting the release workflow. Keep the list to people who should be able
+  to.
+
 ### Signing by hand
 
 `tools/Sign-SarFiles.ps1 -Files <file> -Thumbprint <sha1>` signs with the same
@@ -133,13 +163,18 @@ the 64-bit `signtool` can use it; the script picks that one.
 
 These are tracked here so nothing is silently missing:
 
-- **ARM64.** The INF has only `[Standard.NTamd64]` / `[Standard.NTx86]` models,
-  so `Inf2Cat` cannot package ARM64. Add `[Standard.NTARM64]` (and the matching
-  install/service sections) before enabling an ARM64 matrix entry. This is the
-  step that matters for the Windows-on-Arm direction.
-- **`DriverVer` in source.** The committed INF still has the placeholder
-  `DriverVer=0.1`; the pipeline stamps a valid value at build time but the source
-  value should eventually be fixed too.
+- **ARM64.** The INF has only an `NTamd64` models section, so `Inf2Cat` cannot
+  package ARM64, and the driver has only been built for x64. Add an `NTarm64`
+  section and an `aarch64-pc-windows-msvc` build before enabling an ARM64
+  matrix entry. This is the step that matters for the Windows-on-Arm direction.
+- **Speculation barriers.** The C++ driver was built with MSVC's `/Qspectre`.
+  Rust has no equivalent, so only the C shim is compiled with it (Control
+  Flow Guard is on for the whole image). The exposure is small: the only
+  caller-supplied value the driver addresses kernel memory with is an
+  endpoint's slot in the register table. It is range-checked when the
+  endpoint is created and used by later requests, and nothing read through it
+  is used as an address. Revisit if a table indexed by a caller's value is
+  ever added.
 - **EWDK alternative.** For maximum reproducibility you can swap the
   `Install-WdkBuildEnv.ps1` step for a pinned **Enterprise WDK** ISO (a fully
   self-contained, version-locked build environment). That removes the dependency
@@ -147,9 +182,8 @@ These are tracked here so nothing is silently missing:
 
 > Note on WDK/SDK version: the CI build does **not** hard-pin a version. The
 > `Build driver` step auto-selects the highest SDK under `Windows Kits\10\Include`
-> that actually carries the WDK kernel headers (`km\ntifs.h`) and passes it as
-> `WindowsTargetPlatformVersion`. On today's `windows-2022` image that resolves to
-> `10.0.26100` (the SDK pinned in the `.vcxproj`, `10.0.22621.0`, ships without the
-> matching kernel headers, which is why pinning it broke the build). `SDK_VERSION`
-> in the workflow and the param in `tools/Install-WdkBuildEnv.ps1` are only a
+> that actually carries the WDK kernel headers (`km\ntifs.h`) and hands it to
+> the build in `Version_Number`, which Microsoft's WDK crates read. On today's
+> `windows-2022` image that resolves to `10.0.26100`. `SDK_VERSION` in the
+> workflow and the param in `tools/Install-WdkBuildEnv.ps1` are only a
 > fallback-download hint for machines that have no WDK at all.

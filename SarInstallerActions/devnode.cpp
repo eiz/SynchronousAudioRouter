@@ -36,7 +36,8 @@ UINT __stdcall CreateDeviceNode(MSIHANDLE hInstall)
     SP_DEVINFO_DATA deviceInfoData = {};
     WCHAR *hardwareId = HARDWARE_ID;
     TCHAR requireAdminBuf[32] = {};
-    DWORD requireAdminBufSz = sizeof(requireAdminBuf);
+    // A count of characters, not bytes.
+    DWORD requireAdminBufSz = ARRAYSIZE(requireAdminBuf);
 
     hr = WcaInitialize(hInstall, "CreateDeviceNode");
 
@@ -105,7 +106,6 @@ UINT __stdcall RemoveDeviceNode(MSIHANDLE hInstall)
 {
     HRESULT hr = S_OK;
     UINT er = ERROR_SUCCESS;
-    GUID classGuid;
     HDEVINFO deviceInfoSet;
     SP_DEVINFO_DATA data;
     DWORD requiredSize;
@@ -117,9 +117,13 @@ UINT __stdcall RemoveDeviceNode(MSIHANDLE hInstall)
         return WcaFinalize(ERROR_INSTALL_FAILURE);
     }
 
-    IIDFromString(CLASS_GUID, &classGuid);
+    // Every device, not just those of SAR's class: a device has no class
+    // until a driver is installed on it. That is the state it is in when
+    // this runs as the rollback of a failed install, after the driver package
+    // has been taken away again, and the state a device left behind by an
+    // earlier failed install is in.
     deviceInfoSet = SetupDiGetClassDevsEx(
-        &classGuid, nullptr, nullptr, 0,
+        nullptr, nullptr, nullptr, DIGCF_ALLCLASSES,
         nullptr, nullptr, nullptr);
 
     if (deviceInfoSet == INVALID_HANDLE_VALUE) {

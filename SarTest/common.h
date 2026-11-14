@@ -49,6 +49,14 @@ Args parseArgs(int argc, wchar_t **argv);
 // hang is always present in captured output.
 void logf(const char *fmt, ...);
 
+// Puts the process in the priority class --priority names: "realtime" (the
+// default), "high" or "normal". The commands that stand in for a DAW and for
+// audio applications use it: at normal priority the dropouts they count are
+// mostly the scheduler's, not the driver's. Realtime needs the "increase
+// scheduling priority" privilege, which an elevated process has; without it
+// Windows silently gives "high". Returns the class the process ended up in.
+std::string setProcessPriority(const Args& args);
+
 std::string narrow(const std::wstring& s);
 std::wstring widen(const std::string& s);
 std::string hresultText(HRESULT hr);

@@ -42,9 +42,13 @@ silence before it, and the raw values recorded in the results show the
 scaling. Other undecodable frames are corruption, except right next to
 silence where the gain is too small for the scaling to survive rounding. A
 run longer than `--max-transition` frames (100 ms) is corruption regardless. A capture stream
-passes when it received the signal, saw no corruption, and at least half of
-the frames after the initial silence were valid (`--min-valid`;
-`--max-discontinuities` optionally bounds sequence gaps). Dropouts,
+passes when it received the signal, saw no corruption, at least half of
+the frames after the initial silence were valid (`--min-valid`), and the valid
+frames add up to at least a quarter of the stream's duration (`--min-duration`).
+The second ratio is what catches a stream that delivered a little good audio
+and then stalled. It is low because the duration includes stream setup, which
+a busy test VM can stretch to a second or more. `--max-discontinuities`
+optionally bounds sequence gaps. Dropouts,
 discontinuities, ramps, invalidations and reopens are reported for every
 stream; on a VM they vary from run to run, so compare them with a baseline
 run rather than reading one run's numbers as absolute.
@@ -122,8 +126,62 @@ check that Edge's audio session was heard. They also record the sandboxed
 audio service's mitigation policies, whether `SarAsio.dll` was loaded into
 it, and Code Integrity events naming it. They run last, and are skipped
 without Edge.
-`Invoke-SarTest.ps1 -Scenarios` selects any of `issues`, `matrix`, `race`,
-`kill` and `browser`.
+
+`unload-after-use` runs after everything above except the browser scenarios.
+It disables the SAR device, waits for the driver to unload, enables the
+device again and waits for the driver to come back; `run-after-reload` then
+streams through one endpoint pair. Driver Verifier checks a driver's pool
+allocations when it unloads and bugchecks on any that are left, so with
+Verifier on this is where memory leaked by the earlier scenarios shows.
+
+`conformance` sends the control device every request of the driver
+specification's appendix A directly, without SarAsio: each refusal with its
+status (short and misplaced buffers, pointers into read-only, inaccessible
+and kernel memory, values out of range, requests out of order), the layout
+arithmetic, the register record and the notification events, and a stream on
+a section whose audio area is not a multiple of 64 KiB, which SarAsio never
+asks for. `-LegacyDriver` makes it expect what releases up to 0.13 did where
+the current driver deliberately differs (specification, section 13).
+
+`formats` streams at sample rates, ASIO periods and channel counts the other
+scenarios never use (44.1 to 192 kHz, 64 to 256 frames, 4, 8 and 32
+channels), and with 64 endpoints. SarAsio refuses a period longer than the
+audio engine's 10 ms, so nothing longer is tried.
+
+`contention` keeps one host up while another with 64 endpoints is created and
+closed five times, and times every open and close of the first host's
+playback filter. Kernel streaming serializes filter opens across the whole
+device, so its log shows what one host's start and stop cost the clients of
+every other: the median, 99th percentile and longest wait while the other
+host was idle, being created, and being closed. `-ContentionLimitMs` turns
+the longest wait into a pass or fail.
+
+`fuzz` sends the driver malformed and badly ordered control and kernel
+streaming requests from several threads for `-FuzzSeconds`, as a user without
+administrator rights, while endpoints come and go underneath. It passes if no
+request is left hanging; `run-after-fuzz` then checks the driver still works.
+Its log names the seed, and `-FuzzSeed` repeats one. It runs before
+`unload`, so that memory its requests made the driver leak shows there.
+
+`device-disable-in-use` asks Plug and Play to disable the SAR device while a
+host and its clients are streaming. Windows refuses to remove a device that
+has a handle open, so the device is expected to stay; the scenario records
+which way it went and requires that nothing hangs and that the driver works
+afterwards (`run-after-device-disable`).
+
+`-ScenarioToolsDir` runs every scenario with another build of the tools after
+the driver is installed: the 32-bit builds, for a 32-bit host and 32-bit
+clients on the 64-bit driver.
+
+`-SurviveOnly` is for runs under Driver Verifier's low resources simulation,
+which fails the driver's allocations at random: scenarios that fail are
+recorded as tolerated, and only a hang (or a bugcheck) fails the run.
+`-StartAfterUptimeMinutes` holds the scenarios back until the simulation has
+started.
+
+`Invoke-SarTest.ps1 -Scenarios` selects any of `issues`, `conformance`,
+`matrix`, `race`, `kill`, `formats`, `contention`, `fuzz`, `unload`, `device`
+and `browser`.
 
 ## Commands
 
@@ -140,6 +198,9 @@ SarTest no-interface
 SarTest endpoint-names
 SarTest meter [--duration S] [--process <name.exe>] [--min-peak P]
 SarTest watch [--duration S] [--stop-file <path>] [--poll MS] [--probe MS]
+SarTest conformance [--legacy-quirks] [--registry-filter]
+SarTest contention [--endpoints N] [--rounds K] [--max-wait-ms M]
+SarTest fuzz [--seconds S] [--seed N] [--restricted]
 ```
 
 `install` creates the SAR software device node if needed, installs the
@@ -156,6 +217,13 @@ Layout options are shared by all commands: `--endpoints N` is the number of
 playback/recording pairs (default 2), `--channels C` the channels per
 endpoint (default 2). The reporter's 32-channel setup is roughly
 `--endpoints 16 --channels 2` or `--endpoints 4 --channels 8`.
+
+`host`, `wasapi`, `run`, `race`, `conformance` and `contention` put their
+process in the realtime priority class, as a DAW and its audio threads are
+scheduled ahead of everything else on a machine set up for audio;
+`--priority high` or `--priority normal` changes that. Realtime needs an
+elevated process: without one Windows gives "high", and the log and the
+report's `priorityClass` say which it was.
 
 The clock reads `SAR_TEST_CLOCK_RATE`, `SAR_TEST_CLOCK_FRAMES`,
 `SAR_TEST_CLOCK_INPUTS` and `SAR_TEST_CLOCK_OUTPUTS` from the environment.

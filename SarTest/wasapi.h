@@ -98,6 +98,12 @@ struct WasapiOptions
     // invalidation is the expected outcome rather than a failure.
     bool expectInvalidation = false;
     double minValidRatio = 0.5;
+    // A capture stream also has to verify at least this share of the frames
+    // the whole duration holds. minValidRatio alone is satisfied by a stream
+    // that delivered one good buffer and then nothing. A quarter, not more:
+    // the duration includes the stream's setup, and on a busy test VM a slow
+    // Activate has left a healthy stream with as little as half of it.
+    double minDurationRatio = 0.25;
     long long maxDiscontinuities = -1;   // -1: report only
     // Streams opened just as a host's endpoints appear can be invalidated
     // (SarAsio used to broadcast a format change on every endpoint

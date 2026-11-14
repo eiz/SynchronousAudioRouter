@@ -45,6 +45,13 @@ AsioBool SarAsioWrapper::init(void *sysHandle)
     _userTickWithTime = nullptr;
     _hwnd = (HWND)sysHandle;
 
+    // A configuration saved from the control panel takes effect here, where
+    // everything derived from it is rebuilt.
+    if (_hasPendingConfig) {
+        _config = _pendingConfig;
+        _hasPendingConfig = false;
+    }
+
     // A hardware interface that didn't open keeps its place in the
     // configuration. It may only be unplugged or in use, and clearing it here
     // made the control panel save the empty selection.
@@ -251,6 +258,7 @@ AsioStatus SarAsioWrapper::getClockSources(AsioClockSource *clocks, long *count)
         clocks->group = 0;
         clocks->isCurrentSource = AsioBool::True;
         strcpy_s(clocks->name, 32, kNoInterfaceSelected);
+        *count = 1;
         return AsioStatus::OK;
     }
 
@@ -554,12 +562,21 @@ AsioStatus SarAsioWrapper::disposeBuffers()
 AsioStatus SarAsioWrapper::controlPanel()
 {
     LOG(INFO) << "SarAsioWrapper::controlPanel";
+    // Show what was last saved, which may not be applied yet.
     auto sheet = std::make_shared<ConfigurationPropertyDialog>(
-        _config, _innerDriver, _innerDriverClsid);
+        _hasPendingConfig ? _pendingConfig : _config,
+        _innerDriver, _innerDriverClsid);
 
     if (sheet->show(_hwnd) > 0) {
-        _config = sheet->newConfig();
-        _config.writeFile(ConfigurationPath(L"default.json"));
+        // The channel tables and buffers in use were built from _config, and
+        // a host may go on using them: not every host reloads the driver
+        // when it is asked to reset. So the new configuration is kept aside
+        // until the next init rebuilds them. Swapping _config here left a
+        // host that only recreated its buffers indexing them by endpoints
+        // they weren't built for.
+        _pendingConfig = sheet->newConfig();
+        _hasPendingConfig = true;
+        _pendingConfig.writeFile(ConfigurationPath(L"default.json"));
 
         if (_callbacks.asioMessage) {
             _callbacks.asioMessage(

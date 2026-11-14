@@ -18,6 +18,9 @@
 // tools/test/README.md for the workflow it is designed around.
 
 #include "common.h"
+#include "conformance.h"
+#include "contention.h"
+#include "fuzz.h"
 #include "install.h"
 #include "asiohost.h"
 #include "wasapi.h"
@@ -30,6 +33,9 @@
 using namespace SarTest;
 
 namespace {
+
+// The priority class the process was put in ("" for commands that leave it).
+std::string g_priorityClass;
 
 int usage()
 {
@@ -67,6 +73,24 @@ int usage()
         "      Watch the audio sessions on every active playback endpoint and\n"
         "      report which processes played and how loud; with --process, fail\n"
         "      unless that process reached --min-peak (default 0.01).\n"
+        "  SarTest conformance [--legacy-quirks] [--registry-filter]\n"
+        "      Send the control device every request of the driver specification's\n"
+        "      appendix A directly, the refused ones included, and check each\n"
+        "      status; then run a stream on a section whose audio area is not a\n"
+        "      multiple of 64 KiB. --legacy-quirks expects what releases up to 0.13\n"
+        "      did where the current driver deliberately differs.\n"
+        "  SarTest contention [--endpoints N] [--rounds K] [--max-wait-ms M]\n"
+        "      Keep one host up while another with N endpoint pairs is created and\n"
+        "      closed K times, and time every open and close of the first host's\n"
+        "      playback filter; with --max-wait-ms, fail if one took longer while\n"
+        "      the other host was being created or closed.\n"
+        "  host, wasapi, run, race, conformance and contention run in the realtime\n"
+        "  priority class; --priority high|normal changes that.\n"
+        "  SarTest fuzz [--seconds S] [--seed N] [--restricted]\n"
+        "      Send the driver malformed control and kernel streaming requests from\n"
+        "      several threads while endpoints come and go; fail if a request is\n"
+        "      left hanging. --restricted sends them as a medium-integrity user\n"
+        "      without administrator rights.\n"
         "  SarTest watch [--duration S] [--stop-file <path>] [--poll MS] [--probe MS]\n"
         "      Log every change in which SAR KS interfaces are enabled and every\n"
         "      endpoint state change, with timestamps, until S seconds pass or\n"
@@ -83,7 +107,8 @@ int usage()
         "                and --channels)\n"
         "                --registered (use the COM-registered SarAsio instead of a path)\n"
         "                --wait S --wait-gone S --restart-delay MS --rate HZ\n"
-        "                --min-valid RATIO --max-discontinuities N\n"
+        "                --min-valid RATIO --min-duration RATIO\n"
+        "                --max-discontinuities N\n"
         "                --settle S --max-reopens N --max-transition FRAMES\n"
         "\n"
         "Exit codes: 0 pass, 1 setup or usage error, 2 test failure.\n");
@@ -130,6 +155,7 @@ WasapiOptions wasapiOptions(const Args& args, const EndpointLayout& layout)
     options.durationSeconds = args.getDouble(L"duration", 5.0);
     options.expectInvalidation = args.has(L"expect-invalidation");
     options.minValidRatio = args.getDouble(L"min-valid", 0.5);
+    options.minDurationRatio = args.getDouble(L"min-duration", 0.25);
     options.maxDiscontinuities = args.getInt(L"max-discontinuities", -1);
     options.settleSeconds = args.getDouble(L"settle", 2.0);
     options.maxReopens = args.getInt(L"max-reopens", 20);
@@ -292,6 +318,7 @@ int cmdHost(const Args& args)
     JsonObject result;
 
     result.setString("command", "host")
+        .setString("priorityClass", g_priorityClass)
         .setBool("passed", rc == 0)
         .setInt("exitCode", rc)
         .setRaw("host", host.toJson())
@@ -310,6 +337,7 @@ int cmdWasapi(const Args& args)
         JsonObject result;
 
         result.setString("command", "wasapi")
+            .setString("priorityClass", g_priorityClass)
             .setBool("passed", false)
             .setInt("exitCode", 1)
             .setString("failure", "endpoints not found");
@@ -322,6 +350,7 @@ int cmdWasapi(const Args& args)
     int rc = result.passed ? 0 : 2;
 
     json.setString("command", "wasapi")
+        .setString("priorityClass", g_priorityClass)
         .setBool("passed", result.passed)
         .setInt("exitCode", rc)
         .setRaw("wasapi", result.toJson());
@@ -416,6 +445,7 @@ int cmdRace(const Args& args)
     JsonObject result;
 
     result.setString("command", "race")
+        .setString("priorityClass", g_priorityClass)
         .setBool("passed", rc == 0)
         .setInt("exitCode", rc)
         .setInt("endpointPairs", layout.pairs)
@@ -509,6 +539,7 @@ int cmdRun(const Args& args)
     JsonObject result;
 
     result.setString("command", "run")
+        .setString("priorityClass", g_priorityClass)
         .setBool("passed", rc == 0)
         .setInt("exitCode", rc)
         .setInt("endpointPairs", layout.pairs)
@@ -898,6 +929,18 @@ int wmain(int argc, wchar_t **argv)
         return 1;
     }
 
+    // The commands that stream run in the realtime priority class, as the
+    // DAW and the audio threads they stand in for are scheduled ahead of
+    // everything else on a machine set up for audio. (The software clock's
+    // tick thread asks for time-critical priority, which only puts it at the
+    // top of whatever class its process is in.) The fuzzer stays at normal
+    // priority: it is load, not audio.
+    if (args.command == L"host" || args.command == L"wasapi" || args.command == L"run" ||
+        args.command == L"race" || args.command == L"conformance" ||
+        args.command == L"contention") {
+        g_priorityClass = setProcessPriority(args);
+    }
+
     int rc;
 
     if (args.command == L"install") {
@@ -924,6 +967,12 @@ int wmain(int argc, wchar_t **argv)
         rc = cmdMeter(args);
     } else if (args.command == L"watch") {
         rc = cmdWatch(args);
+    } else if (args.command == L"conformance") {
+        rc = cmdConformance(args);
+    } else if (args.command == L"contention") {
+        rc = cmdContention(args);
+    } else if (args.command == L"fuzz") {
+        rc = cmdFuzz(args);
     } else {
         rc = usage();
     }

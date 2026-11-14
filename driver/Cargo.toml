@@ -1,0 +1,58 @@
+# Copyright (c) 2026 Itty Bitty Binaries, Inc.
+# SPDX-License-Identifier: MIT
+
+[workspace]
+resolver = "2"
+members = [
+    "crates/ntstatus",
+    "crates/sar-core",
+    "crates/ntx-sys",
+    "crates/ks-sys",
+    "crates/ntk",
+    "crates/ks",
+    "crates/sar-driver",
+]
+# Plain `cargo test` (for example in WSL, where the WDK crates cannot be
+# built) only touches the pure-logic crate.
+default-members = ["crates/ntstatus", "crates/sar-core"]
+
+[workspace.package]
+version = "0.14.0"
+edition = "2021"
+rust-version = "1.91"
+publish = false
+license = "MIT"
+
+# Read by Microsoft's wdk-build: this is a WDM (not WDF) kernel driver.
+[workspace.metadata.wdk.driver-model]
+driver-type = "WDM"
+
+[workspace.dependencies]
+# Microsoft's driver crates, pinned exactly: they generate the kernel
+# bindings, so a new release is a change to review and retest, not to pick up
+# silently. wdk-build 0.6 needs rustc 1.91; rust-toolchain.toml pins the
+# compiler.
+wdk-sys = "=0.5.2"
+wdk-build = "=0.6.0"
+wdk-alloc = "=0.4.2"
+# Must be the bindgen release wdk-build uses: ks-sys configures its builder
+# through wdk-build's extension of bindgen's `Builder`.
+bindgen = "0.73"
+cc = "1"
+ntstatus = { path = "crates/ntstatus" }
+sar-core = { path = "crates/sar-core" }
+ntx-sys = { path = "crates/ntx-sys" }
+ks-sys = { path = "crates/ks-sys" }
+ntk = { path = "crates/ntk" }
+ks = { path = "crates/ks" }
+
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"
+opt-level = 2
+debug = true
+lto = true
+codegen-units = 1
+overflow-checks = true
