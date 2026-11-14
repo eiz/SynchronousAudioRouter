@@ -155,8 +155,15 @@
       <Custom Action="CreateDeviceNode" After="CreateDeviceNode.Rollback">
         NOT Installed AND NOT REMOVE
       </Custom>
+      <!-- Not when this version is being removed by an upgrade: the device
+           node stays for the version that replaces it, whose CreateDeviceNode
+           finds it. Windows then has the same device with a new driver,
+           where removing the node made it forget the device and keep its
+           endpoints as records of something no longer present. What happens
+           to the node in an upgrade is decided here, in the version being
+           removed, so this has to be in a release before it can help. -->
       <Custom Action="RemoveDeviceNode" Before="RemoveFiles">
-        REMOVE
+        REMOVE AND NOT UPGRADINGPRODUCTCODE
       </Custom>
     </InstallExecuteSequence>
 
