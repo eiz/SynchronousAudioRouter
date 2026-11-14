@@ -1231,3 +1231,77 @@ dispatch layer.
     file of kernel streaming's, in the caller's own buffer, and cannot
     inspect the handle without racing the caller. [doc] for what is quoted;
     the rest was not determined and no scenario exercises it.
+
+"Opening and access" then gained a further paragraph: a control handle's
+`FsContext` stays empty for the whole life of the file.
+
+71. **[section 5] "Whatever the driver needs to find from the file it finds
+    another way": which way.** The paragraph names the field to leave alone
+    and not the replacement. Resolved: the dispatch layer (`ntk::dispatch`)
+    keeps a table of the claimed files that are open, each entry the
+    address of the file object and a reference to the handler's context.
+    Nothing in a control handle's file object is written: `FsContext` and
+    `FsContext2` both stay as the I/O manager made them.
+
+    - *Why not `FsContext2`.* The `FILE_OBJECT` page gives both fields to
+      the driver ("Drivers can use the FsContext and FsContext2 members to
+      maintain driver-determined state"), so that would have been allowed.
+      But no page says what kernel streaming does with `FsContext2` of a
+      file it is handed, and a table leaves nothing in the file object for
+      it to misread, whichever field it reads. [doc] for the quote.
+    - *Why the address is a key.* A file object exists from its create
+      request to its close request, and close is the last request for it
+      ("All outstanding I/O requests have been completed or canceled"). An
+      entry is made before the create request is completed, so before any
+      other request for the file can come, and taken out by the close
+      request before that is completed, so before the object can be freed
+      and its address given to another file. A create that fails, in the
+      handler or for want of room in the table, leaves no entry; a request
+      for a claimed file that has no entry is refused with
+      `STATUS_INVALID_DEVICE_REQUEST`, as one with an empty slot was before.
+      [doc] for the quote, the rest reasoned.
+    - *The lock.* One fast mutex for the table (section 14), taken by every
+      create, cleanup, close and device control request on a control
+      handle, at `PASSIVE_LEVEL`: close "will always be sent at
+      PASSIVE_LEVEL", and a device control request on a control handle
+      already took the handle's own fast mutex. It is held for one search,
+      one push or one swap-remove of a vector as long as the number of open
+      control handles; the context a lookup finds is cloned under it and
+      used after it has been let go, and the context a close takes out is
+      released after it has been let go (item 65). Room for a new entry is
+      reserved under it, from non-paged pool, as for a control handle's
+      list of endpoints and the publish queue. So the host's real-time
+      thread can wait, behind another host's create or close, for at most
+      that much memory work. Creates and closes of different control
+      handles, which can run at the same time on different threads, wait
+      for each other only for those steps.
+    - *Where the table lives.* It is allocated in `DriverEntry`, by
+      `install_file_handler`, which can now fail with
+      `STATUS_INSUFFICIENT_RESOURCES` before it has hooked anything, and
+      freed by the unload routine, by when every file has been closed
+      (section 11), so no pool is left at unload.
+
+    **Not settled: "and the request fails".** The paragraph's last sentence
+    holds only if kernel streaming checks for an empty `FsContext` before it
+    uses one. No page says it does, and two say what it assumes:
+    `KsSetMajorFunctionHandler`'s dispatching "assumes the table and
+    FsContext structure are initialized by the device using
+    KsAllocateObjectHeader" (and for a create with a parent, "that object's
+    KSDISPATCH_TABLE.ChildCreateHandlerTable in the FsContext is looked
+    at"), and `KsGetObjectFromFileObject` "does not check that the file
+    object is associated with a KS object. If it is not, this may result in
+    a memory access error." Where kernel streaming reads the empty field of
+    a control file without such a check, what follows is an access near
+    address zero, which stops the machine, not a failed request; the
+    driver's memory is still not read. Which routes, if any, do that is not
+    documented (item 70). [doc] for the quotes.
+
+    **[rig]** Run `cleanroom-cleanroom-fsctx1-20261113-224835`
+    (`conformance`, Driver Verifier on): passed, and the guest did not
+    stop. A pin creation naming a control handle as the pin to connect to
+    failed with `0xC00000F2` (`STATUS_INVALID_PARAMETER_2`); setting a
+    pin's master clock, and its allocator, to a control handle failed with
+    `STATUS_INVALID_DEVICE_REQUEST`; the control handle created an endpoint
+    afterwards, and the opens of item 69 were refused as before. Which of
+    kernel streaming's checks refused the three requests cannot be seen
+    from user mode, so the run does not settle the point above.

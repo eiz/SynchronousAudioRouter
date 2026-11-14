@@ -76,7 +76,7 @@ pub fn driver_entry(driver: &mut DriverObject, registry_path: &RegistryPath) -> 
     // In front of it: requests on files opened with the control reference
     // string are handled here, everything else is passed on unchanged.
     driver.disable_fast_io();
-    ntk::dispatch::install_file_handler::<Sar>(driver);
+    ntk::dispatch::install_file_handler::<Sar>(driver)?;
 
     drop(DRIVER.set(state));
     Ok(())

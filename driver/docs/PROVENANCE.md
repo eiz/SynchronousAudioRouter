@@ -207,6 +207,30 @@ a control handle (`SPEC-GAPS.md`, section M), beyond the above:
 | learn.microsoft.com `.../ddi/ks/ns-ks-kspin_connect`, `.../ddi/ks/nf-ks-ksvalidateconnectrequest` (again), `.../stream/ksproperty-stream-masterclock` | What a pin creation's `PinToHandle` is; that a connection request's communication requirements are validated; that a pin given a master clock handle references the file object behind it. |
 | The result files of rig run `cleanroom-rt-rel1-20261113-221937` | The statuses in item 69. |
 
+## A control handle's `FsContext` stays empty (section 5)
+
+A later session, by an engineer working under the same rules who had not
+worked on the driver before, made the dispatch layer keep a control handle's
+state outside its file object (`SPEC-GAPS.md`, item 71). What was consulted
+for that, beyond the above:
+
+| Source | What was taken |
+|---|---|
+| `docs/behavior.md`, the last paragraph of "Opening and access" in section 5; sections 3, 4, 11 and 14 | The requirement; the rules for the driver's locks; that the driver is not unloaded while a handle is open. |
+| `README.md`, `docs/SPEC-GAPS.md` (sections L and M), this file and the driver's own sources | The conventions of the crates, and the precedent for reserving room in a vector under a fast mutex. |
+| The brief for the task | Where `FsContext` was written (the dispatch hook); that the lookup runs on every control request, the host's real-time thread's included, and that creates and closes of different control handles can run concurrently; that the conformance test has cases for a control handle given to kernel streaming. |
+| WDK 10.0.26100.0 `shared/ks.h` | Searched for `FsContext` (it does not occur) and for the routines that take a file object (`KsGetObjectFromFileObject` and its relatives, `KsDispatchIrp`, `KsAllocateObjectHeader`): declarations only. The names of the headers under `km/` and `shared/` that mention `FsContext` were listed; none of them was opened. |
+| learn.microsoft.com `.../ddi/wdm/ns-wdm-_file_object` | `FsContext` and `FsContext2` are for "whatever optional state a driver maintains about the file object; otherwise, NULL"; in a WDM stack only the functional device object uses them; `RelatedFileObject` is valid only while the create request is processed. |
+| `.../kernel/irp-mj-close` | Close is sent when the last handle has been closed and "all outstanding I/O requests have been completed or canceled"; a driver undoes on close what it did on create; close "will always be sent at PASSIVE_LEVEL". |
+| `.../ddi/ks/nf-ks-ksdispatchirp`, `.../ddi/ks/nf-ks-kssetmajorfunctionhandler`, `.../ddi/ks/nf-ks-ksallocateobjectheader`, `.../ddi/ks/nf-ks-ksgetobjectfromfileobject` | Where kernel streaming keeps its dispatch table (the first element of the structure `FsContext` points to); that its dispatching assumes that structure was set up by `KsAllocateObjectHeader` and, for a create, looks at the parent's; that `KsGetObjectFromFileObject` does not check the file and may cause a memory access error. Quoted in item 71. |
+| The result files of rig run `cleanroom-cleanroom-fsctx1-20261113-224835` under `rig-results/` (console output, the run's summary, the conformance test's log) | The outcome recorded in item 71. |
+
+The pages were fetched by address with the agent's web fetch tool, from
+learn.microsoft.com only, with no web search. No crate source was opened.
+`rustfmt` and `clippy` (the pinned toolchain's) were run on the changed
+crates; their only finding outside this change, in `section.rs`, was left
+alone.
+
 ## Accidental exposure log
 
 - At session start the agent's context contained an automatically attached
@@ -286,3 +310,21 @@ For the session that made the cached filter data change:
   redirected a `git diff` of this workspace into a file directly under
   `/tmp/claude-1000`, and the next command deleted that file by name.
   Nothing there was listed or read.
+
+For the session that kept `FsContext` empty:
+
+- Its context, too, began with an automatically attached git status block
+  for `<the existing repository>`: a branch name, an untracked `docs/` entry
+  and five commit subject lines (one-line titles about code owners and a
+  security policy, tests, the README and SarAsio's control panel
+  configuration; none describes the kernel driver). It was ignored. Nothing
+  in that directory was read, listed or searched, and no git command was run
+  there.
+- The session's tooling again named the off-limits tree as its working
+  directory and proposed a scratch directory under `/tmp/claude-1000/...`.
+  Every shell command began with `cd <the workspace> &&`, files were read
+  and edited by absolute paths in the workspace, and the scratch directory
+  was not used.
+- The workspace holds a git stash left by an earlier, unfinished attempt at
+  the same change. One `git stash list` showed its one-line title; its
+  contents were not shown, applied or otherwise inspected.
