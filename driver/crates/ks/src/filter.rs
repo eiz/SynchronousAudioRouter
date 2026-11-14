@@ -686,21 +686,36 @@ pub(crate) mod trampolines {
         // the IRP completes; the two do not overlap). That is so for a
         // request marked as coming from kernel mode as well, which is how
         // the converted request of a 32-bit process arrives.
-        let (request_bytes, data_bytes, identifier) = unsafe {
+        let (request_bytes, identifier) = unsafe {
             (
                 core::slice::from_raw_parts(request.cast::<u8>().cast_const(), request_length),
-                if data.is_null() || data_length == 0 {
-                    &mut [][..]
-                } else {
-                    core::slice::from_raw_parts_mut(data.cast::<u8>(), data_length)
-                },
                 &(*request).__bindgen_anon_1.__bindgen_anon_1,
             )
+        };
+        let is_set = identifier.Flags & sys::KSPROPERTY_TYPE_SET != 0;
+        let data_bytes = if data.is_null() || data_length == 0 {
+            &mut [][..]
+        } else {
+            // For a set the value buffer holds the caller's value. For
+            // anything else it is space for the answer, which nothing says
+            // AVStream has filled: it is zeroed before the handler sees it,
+            // so that neither a handler that reads it nor one that reports
+            // more than it wrote can see or hand out what was in that
+            // memory before.
+            if !is_set {
+                // SAFETY: the value buffer, as above: `data_length` writable
+                // bytes that no reference covers yet.
+                unsafe { core::ptr::write_bytes(data.cast::<u8>(), 0, data_length) };
+            }
+            // SAFETY: the value buffer, as above, and every byte of it
+            // initialised: by the caller for a set, by the line above
+            // otherwise.
+            unsafe { core::slice::from_raw_parts_mut(data.cast::<u8>(), data_length) }
         };
         let call = PropertyCall {
             set: identifier.Set,
             id: identifier.Id,
-            is_set: identifier.Flags & sys::KSPROPERTY_TYPE_SET != 0,
+            is_set,
             request: request_bytes,
         };
         let outcome = H::property(&block.user, target, &call, data_bytes);
