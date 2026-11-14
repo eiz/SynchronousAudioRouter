@@ -706,7 +706,11 @@ if (-not $SkipKillTest -and $Scenarios -contains 'kill') {
         wasapiExitCode = if ($wasapiExited) { $wasapiProc.ExitCode } else { $null }
         streams = $killStreams.Count
         streamsStarted = @($killStreams | Where-Object started).Count
-        streamsInvalidated = @($killStreams | Where-Object deviceInvalidated).Count
+        # A stream noticed if its device was invalidated at least once.
+        # (Its deviceInvalidated flag is only set once it has given up
+        # reopening, which the last streams to be told may not have had
+        # the time to do when the client ends.)
+        streamsInvalidated = @($killStreams | Where-Object { $_.invalidations -gt 0 }).Count
         capturesWithSignal = @($killStreams |
             Where-Object { $_.direction -eq 'capture' -and $_.validFrames -gt 0 }).Count
         log = $hostLog
