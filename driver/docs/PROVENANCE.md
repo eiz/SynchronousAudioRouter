@@ -231,6 +231,29 @@ learn.microsoft.com only, with no web search. No crate source was opened.
 crates; their only finding outside this change, in `section.rs`, was left
 alone.
 
+## What the safe API of `ntk` and `ks` promises (`SPEC-GAPS.md`, section N)
+
+The same engineer, in the same session, then closed ten places where safe
+code could have corrupted memory through the wrapper crates. Consulted,
+beyond the above:
+
+| Source | What was taken |
+|---|---|
+| The brief for the task | The ten findings of two reviews of the wrapper crates, and the owner's decision to fix those that can corrupt memory or read freed or uninitialised memory and to leave those that end in a wrong IRQL, a hang or a deadlock. Nothing about the existing driver. |
+| learn.microsoft.com `.../ddi/wdm/nf-wdm-iocsqremovenextirp` | "The routine only returns IRPs that have not yet been canceled"; the order of its callbacks. |
+| `.../ddi/wdm/nc-wdm-io_csq_complete_canceled_irp` | The system removes a cancelled IRP from the queue before it calls the routine. |
+| `.../ddi/wdm/nf-wdm-ioallocateworkitem`, `.../nf-wdm-ioqueueworkitem`, `.../nf-wdm-ioqueueworkitemex`, `.../kernel/system-worker-threads` | A work item may be freed in its own routine; the IRQLs. None says anything about references to the device object. |
+| `.../ddi/wdm/nf-wdm-kedelayexecutionthread` | `<= APC_LEVEL`; a negative interval is relative, in units of 100 ns. |
+| `.../ddi/wdm/nf-wdm-cmregistercallbackex` | Nothing about unloading with a callback registered; `<= APC_LEVEL`. |
+| `.../ddi/ks/ns-ks-_kspin_descriptor_ex` | `KSPIN_FLAG_FIXED_FORMAT`: "Any attempt to set the data format returns STATUS_INVALID_DEVICE_REQUEST." |
+| `.../ddi/ks/ns-ks-_ksdevice_dispatch`, learn.microsoft.com/previous-versions `ff554305(v=vs.85)` (AVStrMiniDeviceRemove), `.../ddi/ks/nc-ks-pfnksdevicecreate`, `.../ddi/ks/ns-ks-_ksdevice` | When `Remove` and `Add` are called and what is set up by `Add`; nothing about when the `KSDEVICE` is freed. |
+| `.../ddi/ks/nf-ks-kspropertyhandler` | Nothing about whether a get's value buffer is initialised. |
+| This build's generated `wdk-sys` bindings (in the Windows build directory) | The declarations of `KeDelayExecutionThread`, `ObfReferenceObject` and `ObfDereferenceObject`. |
+| The result files of rig run `cleanroom-cleanroom-wrap1-20261113-233952` under `rig-results/` (console output, the run's summary, the conformance test's log) | The outcome recorded in section N. |
+
+The pages were fetched by address with the agent's web fetch tool, from
+learn.microsoft.com only, with no web search. No crate source was opened.
+
 ## Accidental exposure log
 
 - At session start the agent's context contained an automatically attached
@@ -328,3 +351,12 @@ For the session that kept `FsContext` empty:
 - The workspace holds a git stash left by an earlier, unfinished attempt at
   the same change. One `git stash list` showed its one-line title; its
   contents were not shown, applied or otherwise inspected.
+- A write-location slip in the work on the wrapper crates, not an
+  exposure: one command wrote this workspace's own `HEAD` version of a
+  source file to `/tmp/x.rs`, outside the places the brief allows writes
+  to; the next command deleted it. The staging script and copies of the
+  final files used to split that work into commits were kept under the
+  workspace's ignored `target/` directory instead.
+- The rig run of that work was started in the background with its output
+  redirected into `rig-results/`; the notice naming the tooling's own
+  output file under `/tmp/claude-1000/...` was not followed.

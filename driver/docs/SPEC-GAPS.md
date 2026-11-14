@@ -1305,3 +1305,89 @@ dispatch layer.
     afterwards, and the opens of item 69 were refused as before. Which of
     kernel streaming's checks refused the three requests cannot be seen
     from user mode, so the run does not settle the point above.
+
+## N. What the safe API of `ntk` and `ks` promises (no section)
+
+Two reviews found places where code using only the safe API of the
+wrapper crates could corrupt memory or read freed or uninitialised
+memory. None was reachable from the driver as written. The specification
+says nothing about the wrappers; these are the decisions their fixes
+needed.
+
+72. **[section 14] Two more locks that are not fast mutexes.** The list of
+    registered registry callbacks (`ntk::registry`) and the list of
+    devices that can be found from their device object (`ks::device`) are
+    `static`s, which need a lock that can be made at compile time; both are
+    spin locks, like the existing `Global`. Each is held for a search, a
+    push or a swap-remove of a list with an entry per callback or per
+    device, and is taken only when a callback is registered or
+    unregistered, at unload, when a device is added or removed, and once
+    per `Device::of` (a "create endpoint", a host's close, a publication).
+    Both lists give their memory back when they empty, so none is left at
+    unload. [guess]
+
+73. **A run-down gate's transitions wait for each other.** A `shut` or an
+    `open` that finds the other (or another of its kind) under way waits
+    for it with a delay of one millisecond at a time, because the gate's
+    constructor is `const` and so cannot own an event. Only concurrent
+    transitions, which the driver never makes (Plug and Play serialises a
+    device's start, stop and removal), reach that loop. [guess]
+
+74. **When a cancelled IRP stops needing the queue.** The queue's block is
+    now counted, and a cancelled IRP's count is given up at the end of
+    `CsqCompleteCanceledIrp`. That relies on the system making no call into
+    the queue for the IRP after that one. Documented: the system "always
+    calls the queue's CsqRemoveIrp routine to remove the IRP from the queue
+    before calling CsqCompleteCanceledIrp", and nothing is documented
+    after it. That it touches nothing of the queue afterwards is not
+    stated. [doc] for the quote.
+
+75. **A work item's device object reference.** A `WorkItem` holds a
+    reference to its device object from allocation until it is freed
+    unqueued or its routine has run, so the object it is queued on and
+    handed to exists. That the driver's image stays loaded until the
+    routine has returned, after it has released that reference, is the
+    I/O manager's doing; none of the pages read (`IoAllocateWorkItem`,
+    `IoQueueWorkItem(Ex)`, "System Worker Threads") says so. [guess]
+
+76. **A registry callback nobody drops.** It is unregistered by the unload
+    routine `ntk::dispatch` installs, so registering is refused with
+    `STATUS_NOT_SUPPORTED` without that routine; the driver installs it in
+    `DriverEntry`. Not covered: a callback registered and leaked in a
+    `DriverEntry` that then fails, for which Windows runs no unload
+    routine. The leaked value's own memory stays allocated; Driver
+    Verifier reports that at unload as a leak. [guess]
+
+77. **Finding a device after its removal.** `Device::of` returns a guard,
+    and the device's `Remove` callback, which AVStream calls with the
+    device mutex held, waits for every such guard before the `KSDEVICE` is
+    freed. A guard holder that waited for the device mutex at that moment
+    would never be let go. In the driver every holder runs while a file
+    of the device is open (a request on a control handle, or the
+    publication of a pending request), and a device is taken to be removed
+    only when no file is open on it (section 11 says as much of unloading;
+    of removal it is assumed), so this cannot arise there. That AVStream frees
+    the `KSDEVICE` after `Remove` and not before is what the `Remove` page
+    implies ("minidrivers that must free device-associated resources upon
+    device removal"); it is not stated. The device's `Add` runs when "the
+    KSDEVICE structure has been instantiated and initialized", so its
+    functional device object is known then. [doc] for the quotes.
+
+78. **Misuse that is refused, and misuse that stops the machine.**
+    `FilterFactory::delete` with another device's guard panics (a
+    programming error with nothing sensible to do instead, as for locking
+    a mutex twice). `Pin::connection_format` on a pin declared without
+    `KSPIN_FLAG_FIXED_FORMAT` returns an empty slice ("Any attempt to set
+    the data format returns STATUS_INVALID_DEVICE_REQUEST" holds only with
+    that flag). A property get's value buffer is zeroed before the handler
+    sees it; no handler of the driver reads it for a get. [doc] for the
+    quote.
+
+**[rig]** Run `cleanroom-cleanroom-wrap1-20261113-233952` (`issues`,
+`conformance`, `race`, `kill`, `unload`, under Driver Verifier), on the
+code with all ten fixes: every scenario passed (16 of 16, after the
+install), and the guest neither stopped nor hung. That exercises the
+closing of hosts with parked waits, a host killed while streaming, the
+registry filter, publication on worker threads, and the driver's unload
+and reload; it does not exercise the misuse each fix guards against,
+which the driver does not commit.
