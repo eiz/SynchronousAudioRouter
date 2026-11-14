@@ -198,6 +198,15 @@ The driver makes no access decision of its own. Who may open the control
 interface is decided by the security on the device, and every control request
 requires a handle opened for both reading and writing data.
 
+Nothing can be opened relative to a control handle. A create request that
+names a control handle as its parent, whatever name it carries and an empty
+one included, is refused with `STATUS_OBJECT_NAME_NOT_FOUND`, and the control
+handle goes on working. The same holds for anything else that would hand a
+control handle's file to kernel streaming: what such a file keeps in its
+context belongs to the driver, and kernel streaming must never be given the
+file, neither as the file of a request nor as the parent or target named by
+one, because it would read that context as an object of its own.
+
 ### Lifetime
 
 Everything a control handle created ends when the last handle to that open is
@@ -1007,6 +1016,7 @@ alignment requirement.
 | `STATUS_ACCESS_VIOLATION` | `0xC0000005` | 998 |
 | `STATUS_INVALID_PARAMETER` | `0xC000000D` | 87 |
 | `STATUS_BUFFER_TOO_SMALL` | `0xC0000023` | 122 |
+| `STATUS_OBJECT_NAME_NOT_FOUND` | `0xC0000034` | 2 |
 | `STATUS_INSUFFICIENT_RESOURCES` | `0xC000009A` | 1450 |
 | `STATUS_NOT_SUPPORTED` | `0xC00000BB` | 50 |
 | `STATUS_CANCELLED` | `0xC0000120` | 995 |
