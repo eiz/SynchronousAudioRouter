@@ -347,14 +347,26 @@ impl<T> SpinLock<T> {
     pub fn lock(&self) -> SpinLockGuard<'_, T> {
         // SAFETY: `raw` is a valid spin lock in non-paged memory.
         let old_irql = unsafe { KeAcquireSpinLockRaiseToDpc(self.raw.get()) };
-        SpinLockGuard { lock: self, old_irql }
+        SpinLockGuard {
+            lock: self,
+            old_irql,
+            _same_thread: PhantomData,
+        }
     }
 }
 
+/// Proof of holding a [`SpinLock`]. It stays on the thread, and so on the
+/// processor, that took the lock: releasing it restores that processor's
+/// IRQL. It may be shared with another thread only if `T` may.
 pub struct SpinLockGuard<'a, T> {
     lock: &'a SpinLock<T>,
     old_irql: KIRQL,
+    _same_thread: PhantomData<*mut ()>,
 }
+
+// SAFETY: a shared guard hands out only `&T`, which other threads may hold
+// at the same time exactly when `T: Sync`.
+unsafe impl<T: Sync> Sync for SpinLockGuard<'_, T> {}
 
 impl<T> Deref for SpinLockGuard<'_, T> {
     type Target = T;
