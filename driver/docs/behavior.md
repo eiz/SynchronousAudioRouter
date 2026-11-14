@@ -207,6 +207,15 @@ context belongs to the driver, and kernel streaming must never be given the
 file, neither as the file of a request nor as the parent or target named by
 one, because it would read that context as an object of its own.
 
+Kernel streaming keeps its own object header in a file's `FsContext` and
+reads that field of any file it is handed, on this device or as a handle in
+one of its requests. The driver therefore keeps nothing of its own in the
+`FsContext` of a control handle's file: the field stays empty for the whole
+life of the file, and whatever the driver needs to find from the file it
+finds another way. A control handle that reaches kernel streaming by any
+route then looks to it like a file with no kernel streaming object, and the
+request fails without the driver's memory being read.
+
 ### Lifetime
 
 Everything a control handle created ends when the last handle to that open is
