@@ -20,6 +20,7 @@
 #include "wasapi.h"
 
 #include <winioctl.h>
+#include <winternl.h>
 #include <audioclient.h>
 #include <mmreg.h>
 #include <ks.h>
@@ -1160,6 +1161,59 @@ void endpointAndStreamCases(Report& report, const std::wstring& path, const Args
     report.check("the section is unmapped once the handle is closed", unmapped, unmapDetail);
 }
 
+// A file opened relative to a control handle is neither a control handle nor
+// anything kernel streaming made, so the open has to be refused, and the
+// control handle has to work afterwards.
+void relativeOpenCases(Report& report, const std::wstring& path)
+{
+    typedef LONG (NTAPI *NtCreateFileFn)(
+        HANDLE *file, ACCESS_MASK access, OBJECT_ATTRIBUTES *attributes, IO_STATUS_BLOCK *status,
+        LARGE_INTEGER *allocationSize, ULONG fileAttributes, ULONG shareAccess,
+        ULONG createDisposition, ULONG createOptions, void *ea, ULONG eaLength);
+    NtCreateFileFn create = (NtCreateFileFn)GetProcAddress(
+        GetModuleHandleW(L"ntdll.dll"), "NtCreateFile");
+    HANDLE device = openControlDevice(path);
+
+    if (!report.check("the control device opens", device != INVALID_HANDLE_VALUE && create != nullptr)) {
+        return;
+    }
+
+    const wchar_t *const names[] = { L"x", L"" };
+
+    for (const wchar_t *text : names) {
+        UNICODE_STRING name = {};
+        OBJECT_ATTRIBUTES attributes = {};
+        IO_STATUS_BLOCK iosb = {};
+        HANDLE child = nullptr;
+
+        name.Buffer = (PWSTR)text;
+        name.Length = (USHORT)(wcslen(text) * sizeof(wchar_t));
+        name.MaximumLength = name.Length;
+        attributes.Length = sizeof(attributes);
+        attributes.RootDirectory = device;
+        attributes.ObjectName = &name;
+        attributes.Attributes = OBJ_CASE_INSENSITIVE;
+
+        LONG status = create(&child, GENERIC_READ | GENERIC_WRITE | SYNCHRONIZE, &attributes, &iosb,
+            nullptr, 0, FILE_SHARE_READ | FILE_SHARE_WRITE, 1 /* FILE_OPEN */, 0, nullptr, 0);
+
+        report.check(std::string("an open of \"") + narrow(text) + "\" relative to a control handle is refused",
+            status < 0, statusText((uint32_t)status));
+
+        if (status >= 0 && child) {
+            CloseHandle(child);
+        }
+    }
+
+    LayoutRequest layout = validLayout(kCell);
+    LayoutReply reply = {};
+
+    report.spec("set buffer layout on that control handle afterwards",
+        controlRequest(device, kSetBufferLayout, &layout, sizeof(layout), &reply, sizeof(reply)),
+        kStatusSuccess);
+    CloseHandle(device);
+}
+
 } // namespace
 
 int cmdConformance(const Args& args)
@@ -1171,12 +1225,21 @@ int cmdConformance(const Args& args)
     logf("Control interface conformance (%d-bit process%s)", (int)sizeof(void *) * 8,
         legacy ? ", expecting the quirks of releases up to 0.13" : "");
 
-    if (report.check("the control device is present", !path.empty())) {
+    if (args.has(L"only-relative-open")) {
+        // Just the one case, for a driver the rest of this test is not for.
+        if (report.check("the control device is present", !path.empty())) {
+            relativeOpenCases(report, path);
+        }
+    } else if (report.check("the control device is present", !path.empty())) {
         accessCases(report, path);
         beforeLayoutCases(report, path);
         replyFailureCases(report, path);
         geometryCases(report, path, legacy);
         endpointAndStreamCases(report, path, args, legacy);
+
+        if (!legacy) {
+            relativeOpenCases(report, path);
+        }
     }
 
     bool passed = report.passed();
